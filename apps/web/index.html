@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ClawForge</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div>
+          <div class="eyebrow">ClawForge</div>
+          <h1>Multi-agent control for a single machine that can carry real load.</h1>
+          <p class="lede">
+            Start with one operator view, then scale to 100 agents without losing the plot.
+          </p>
+        </div>
+
+        <section class="sidebar-section">
+          <h2>Machine capacity</h2>
+          <div class="metric">
+            <strong id="active-agents">--</strong>
+            <span>active agents</span>
+          </div>
+          <div class="metric">
+            <strong id="max-agents">--</strong>
+            <span>agent ceiling</span>
+          </div>
+        </section>
+
+        <section class="sidebar-section">
+          <h2>Link modes</h2>
+          <ul class="plain-list" id="link-modes"></ul>
+        </section>
+      </aside>
+
+      <main class="main">
+        <section class="band">
+          <div>
+            <div class="section-label">Agents</div>
+            <h2>Current machine graph</h2>
+          </div>
+          <p id="error" class="error" hidden></p>
+          <div class="agent-grid" id="agent-grid"></div>
+        </section>
+
+        <section class="band split">
+          <div>
+            <div class="section-label">Provisioning</div>
+            <h2>Create a new agent</h2>
+            <p class="muted">
+              Define the role, the model backend, and whether this agent can communicate outside its own lane.
+            </p>
+          </div>
+
+          <form class="form-grid" id="agent-form">
+            <label>
+              Name
+              <input name="name" required minlength="2" maxlength="80" />
+            </label>
+
+            <label>
+              Purpose
+              <textarea name="purpose" required minlength="10" maxlength="240"></textarea>
+            </label>
+
+            <label>
+              Provider
+              <input name="provider" value="openai" required />
+            </label>
+
+            <label>
+              Model
+              <input name="model" value="gpt-5.4" required />
+            </label>
+
+            <label>
+              Isolation mode
+              <select name="isolationMode">
+                <option value="isolated">isolated</option>
+                <option value="selective" selected>selective</option>
+                <option value="mesh">mesh</option>
+              </select>
+            </label>
+
+            <label>
+              Max concurrent tasks
+              <input name="maxConcurrentTasks" type="number" min="1" max="32" value="4" />
+            </label>
+
+            <label class="toggle">
+              <input name="peerAccess" type="checkbox" checked />
+              Allow peer access
+            </label>
+
+            <button class="primary" type="submit">Create agent</button>
+          </form>
+        </section>
+
+        <section class="band">
+          <div class="section-label">Communication</div>
+          <h2>Current agent links</h2>
+          <div class="plain-list links" id="link-grid"></div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/src/app.js"></script>
+  </body>
+</html>
