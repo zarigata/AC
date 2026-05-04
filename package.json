@@ -1,0 +1,11 @@
+{
+  "name": "clawforge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --experimental-sqlite apps/api/src/server.js",
+    "start": "node --experimental-sqlite apps/api/src/server.js",
+    "test": "node --experimental-sqlite --test apps/api/src/*.test.js"
+  }
+}
