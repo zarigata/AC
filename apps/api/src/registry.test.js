@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { listProviders } from "../../../packages/shared/src/index.js";
+import { listAgentTemplates, listProviders } from "../../../packages/shared/src/index.js";
 import { AgentRegistry } from "./registry.js";
 
 const createRegistry = () => new AgentRegistry({ databasePath: ":memory:" });
@@ -68,6 +68,16 @@ test("ships a 50-provider catalog including ollama, ollama cloud, and z.ai", () 
   assert.equal(ids.has("ollama"), true);
   assert.equal(ids.has("ollama-cloud"), true);
   assert.equal(ids.has("z-ai"), true);
+});
+
+test("ships starter agent templates for non-technical operators", () => {
+  const templates = listAgentTemplates();
+  const providerIds = new Set(listProviders().map((provider) => provider.id));
+
+  assert.equal(templates.length >= 5, true);
+  assert.equal(templates.some((template) => template.id === "ops-coordinator"), true);
+  assert.equal(templates.every((template) => providerIds.has(template.provider)), true);
+  assert.equal(templates.some((template) => template.collaborationMode === "review"), true);
 });
 
 test("updates agent status and collaboration settings", () => {
