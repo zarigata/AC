@@ -3,106 +3,228 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ClawForge</title>
+    <title>RelayCore // Local Agent Control Plane</title>
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
-    <div class="shell">
-      <aside class="sidebar">
+    <div class="app-shell">
+      <header class="topbar reveal">
         <div>
-          <div class="eyebrow">ClawForge</div>
-          <h1>Multi-agent control for a single machine that can carry real load.</h1>
+          <p class="micro-label">RelayCore</p>
+          <a class="brand-lockup" href="/">RelayCore</a>
+        </div>
+        <div class="topbar-status">
+          <span class="status-pill">Local-first runtime</span>
+          <span class="status-pill">Provider-flexible</span>
+          <span class="status-pill">Token-aware</span>
+        </div>
+      </header>
+
+      <section class="hero reveal">
+        <div class="hero-copy">
+          <p class="eyebrow">Multi-agent control plane</p>
+          <h1>Run a compact agent fleet without losing operational clarity.</h1>
           <p class="lede">
-            Start with one operator view, then scale to 100 agents without losing the plot.
+            RelayCore is a local-first orchestration surface for building, routing, and supervising up to
+            100 agents with strict isolation rules, broad model support, and disciplined token usage.
           </p>
+          <div class="hero-actions">
+            <a class="primary-action" href="#agent-form">Launch an agent</a>
+            <p class="support-copy">Priority stack: Ollama, Ollama Cloud, Z.AI, Anthropic, OpenAI.</p>
+          </div>
         </div>
 
-        <section class="sidebar-section">
-          <h2>Machine capacity</h2>
-          <div class="metric">
+        <div class="hero-rail">
+          <section class="metric-panel">
+            <span class="metric-label">Agents online</span>
             <strong id="active-agents">--</strong>
-            <span>active agents</span>
-          </div>
-          <div class="metric">
+            <p>Current machine occupancy</p>
+          </section>
+          <section class="metric-panel">
+            <span class="metric-label">Capacity ceiling</span>
             <strong id="max-agents">--</strong>
-            <span>agent ceiling</span>
-          </div>
+            <p>Hard limit per machine</p>
+          </section>
+        </div>
+      </section>
+
+      <section class="metrics-band reveal">
+        <article class="band-metric">
+          <span>Runtime load</span>
+          <strong id="machine-active-agents">--</strong>
+          <p>active agents on the local node</p>
+        </article>
+        <article class="band-metric">
+          <span>Fleet budget</span>
+          <strong id="machine-max-agents">--</strong>
+          <p>maximum registered agents per machine</p>
+        </article>
+        <article class="band-metric">
+          <span>Provider matrix</span>
+          <strong id="provider-summary">--</strong>
+          <p>catalog breadth with live-target priority lanes</p>
+        </article>
+      </section>
+
+      <main class="workspace">
+        <section class="primary-column">
+          <section class="surface reveal">
+            <div class="surface-heading">
+              <div>
+                <p class="section-label">Fleet posture</p>
+                <h2>Live operating summary</h2>
+              </div>
+              <p class="surface-note">Quick read on isolation mix, coordination access, and provider spread.</p>
+            </div>
+            <div class="insight-grid" id="insight-grid"></div>
+          </section>
+
+          <section class="surface reveal">
+            <div class="surface-heading">
+              <div>
+                <p class="section-label">Live fleet</p>
+                <h2>Active agent registry</h2>
+              </div>
+              <p class="surface-note">Role, backend, isolation policy, and routing posture.</p>
+            </div>
+            <div class="toolbar">
+              <label class="toolbar-field">
+                Search
+                <input id="agent-search" placeholder="Find by name, mission, model, or provider" />
+              </label>
+              <label class="toolbar-field">
+                Isolation
+                <select id="agent-isolation-filter">
+                  <option value="all">all modes</option>
+                  <option value="isolated">isolated</option>
+                  <option value="selective">selective</option>
+                  <option value="mesh">mesh</option>
+                </select>
+              </label>
+            </div>
+            <p id="error" class="error" hidden></p>
+            <div class="agent-grid" id="agent-grid"></div>
+          </section>
+
+          <section class="surface reveal">
+            <div class="surface-heading">
+              <div>
+                <p class="section-label">Communication</p>
+                <h2>Link topology</h2>
+              </div>
+              <p class="surface-note">Explicit coordination paths between agents.</p>
+            </div>
+            <form class="link-form" id="link-form">
+              <label>
+                Source agent
+                <select id="link-source" name="sourceAgentId" required></select>
+              </label>
+              <label>
+                Mode
+                <select id="link-mode" name="mode" required></select>
+              </label>
+              <label>
+                Target agent
+                <select id="link-target" name="targetAgentId" required></select>
+              </label>
+              <button class="primary" type="submit">Create link</button>
+            </form>
+            <div class="link-grid" id="link-grid"></div>
+          </section>
         </section>
 
-        <section class="sidebar-section">
-          <h2>Link modes</h2>
-          <ul class="plain-list" id="link-modes"></ul>
-        </section>
-      </aside>
+        <aside class="secondary-column">
+          <section class="surface reveal">
+            <div class="surface-heading">
+              <div>
+                <p class="section-label">Provisioning</p>
+                <h2>Deploy a new worker</h2>
+              </div>
+              <p class="surface-note">Pick the role, model target, and collaboration envelope.</p>
+            </div>
 
-      <main class="main">
-        <section class="band">
-          <div>
-            <div class="section-label">Agents</div>
-            <h2>Current machine graph</h2>
-          </div>
-          <p id="error" class="error" hidden></p>
-          <div class="agent-grid" id="agent-grid"></div>
-        </section>
+            <form class="form-grid" id="agent-form">
+              <label>
+                Agent name
+                <input name="name" required minlength="2" maxlength="80" />
+              </label>
 
-        <section class="band split">
-          <div>
-            <div class="section-label">Provisioning</div>
-            <h2>Create a new agent</h2>
-            <p class="muted">
-              Define the role, the model backend, and whether this agent can communicate outside its own lane.
-            </p>
-          </div>
+              <label>
+                Mission
+                <textarea name="purpose" required minlength="10" maxlength="240"></textarea>
+              </label>
 
-          <form class="form-grid" id="agent-form">
-            <label>
-              Name
-              <input name="name" required minlength="2" maxlength="80" />
-            </label>
+              <label>
+                Provider
+                <select name="provider" id="provider-input"></select>
+              </label>
 
-            <label>
-              Purpose
-              <textarea name="purpose" required minlength="10" maxlength="240"></textarea>
-            </label>
+              <label>
+                Model
+                <input name="model" id="model-input" list="model-suggestions" value="qwen3" required />
+                <datalist id="model-suggestions"></datalist>
+              </label>
 
-            <label>
-              Provider
-              <input name="provider" value="openai" required />
-            </label>
+              <label>
+                Isolation policy
+                <select name="isolationMode">
+                  <option value="isolated">isolated</option>
+                  <option value="selective" selected>selective</option>
+                  <option value="mesh">mesh</option>
+                </select>
+              </label>
 
-            <label>
-              Model
-              <input name="model" value="gpt-5.4" required />
-            </label>
+              <label>
+                Concurrent tasks
+                <input name="maxConcurrentTasks" type="number" min="1" max="32" value="4" />
+              </label>
 
-            <label>
-              Isolation mode
-              <select name="isolationMode">
-                <option value="isolated">isolated</option>
-                <option value="selective" selected>selective</option>
-                <option value="mesh">mesh</option>
-              </select>
-            </label>
+              <label class="toggle">
+                <input name="peerAccess" type="checkbox" checked />
+                Allow peer access
+              </label>
 
-            <label>
-              Max concurrent tasks
-              <input name="maxConcurrentTasks" type="number" min="1" max="32" value="4" />
-            </label>
+              <button class="primary" type="submit">Create agent</button>
+            </form>
+          </section>
 
-            <label class="toggle">
-              <input name="peerAccess" type="checkbox" checked />
-              Allow peer access
-            </label>
+          <section class="surface reveal">
+            <div class="surface-heading">
+              <div>
+                <p class="section-label">Execution policy</p>
+                <h2>Operating rules</h2>
+              </div>
+            </div>
+            <ul class="plain-list policy-list">
+              <li>Keep the runtime lean enough to preserve fast startup and low idle cost.</li>
+              <li>Use smaller models for routing, filtering, and health work by default.</li>
+              <li>Expose agent-to-agent permissions instead of assuming broad mesh access.</li>
+              <li>Expand tools and skills without bloating the everyday operator surface.</li>
+            </ul>
+          </section>
 
-            <button class="primary" type="submit">Create agent</button>
-          </form>
-        </section>
+          <section class="surface reveal">
+            <div class="surface-heading">
+              <div>
+                <p class="section-label">Platform coverage</p>
+                <h2>Provider and tooling matrix</h2>
+              </div>
+              <p class="surface-note">Twelve visible entries from the wider roadmap.</p>
+            </div>
+            <div class="provider-grid" id="provider-grid"></div>
+            <div class="provider-stats" id="provider-stats"></div>
+          </section>
 
-        <section class="band">
-          <div class="section-label">Communication</div>
-          <h2>Current agent links</h2>
-          <div class="plain-list links" id="link-grid"></div>
-        </section>
+          <section class="surface reveal">
+            <div class="surface-heading">
+              <div>
+                <p class="section-label">Link modes</p>
+                <h2>Allowed coordination patterns</h2>
+              </div>
+            </div>
+            <ul class="plain-list mode-list" id="link-modes"></ul>
+          </section>
+        </aside>
       </main>
     </div>
     <script type="module" src="/src/app.js"></script>
