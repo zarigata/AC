@@ -63,14 +63,6 @@ p {
   animation: rise 720ms ease both;
 }
 
-.reveal:nth-child(2) {
-  animation-delay: 80ms;
-}
-
-.reveal:nth-child(3) {
-  animation-delay: 140ms;
-}
-
 @keyframes rise {
   from {
     opacity: 0;
@@ -119,7 +111,8 @@ p {
 .topbar-status,
 .hero-actions,
 .agent-meta,
-.provider-stats {
+.provider-stats,
+.lan-url-list {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -129,7 +122,9 @@ p {
 .agent-meta span,
 .provider-stat,
 .link-row span,
-.link-row strong {
+.link-row strong,
+.onboarding-card,
+.checklist-item {
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.03);
 }
@@ -168,7 +163,9 @@ h1 {
 .metric-panel p,
 .form-grid label,
 .policy-list li,
-.mode-list li span {
+.mode-list li span,
+.checklist-copy p,
+.onboarding-card p {
   color: var(--muted);
   line-height: 1.55;
 }
@@ -212,7 +209,9 @@ h1 {
 .provider-grid,
 .link-grid,
 .mode-list,
-.insight-grid {
+.insight-grid,
+.onboarding-grid,
+.checklist {
   display: grid;
   gap: 16px;
 }
@@ -284,6 +283,62 @@ h2 {
   text-align: right;
 }
 
+.onboarding-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 18px;
+}
+
+.onboarding-card {
+  padding: 16px;
+}
+
+.access-link,
+.access-fallback {
+  display: inline-flex;
+  margin: 10px 0 8px;
+  min-height: 40px;
+  align-items: center;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.04);
+  overflow-wrap: anywhere;
+}
+
+.access-link:hover {
+  border-color: var(--accent-strong);
+}
+
+.checklist {
+  margin-top: 16px;
+}
+
+.checklist-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  padding: 14px;
+}
+
+.checklist-state {
+  min-width: 58px;
+  padding: 8px 10px;
+  text-align: center;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border: 1px solid var(--line-strong);
+}
+
+.checklist-state.done {
+  color: #081109;
+  background: var(--accent);
+}
+
+.checklist-state.pending {
+  color: var(--accent-warm);
+}
+
 .toolbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 180px;
@@ -299,12 +354,7 @@ h2 {
   padding: 18px 0 6px;
 }
 
-.link-form label {
-  display: grid;
-  gap: 8px;
-  color: var(--muted);
-}
-
+.link-form label,
 .toolbar-field {
   display: grid;
   gap: 8px;
@@ -519,7 +569,8 @@ select:focus {
   .hero,
   .workspace,
   .metrics-band,
-  .insight-grid {
+  .insight-grid,
+  .onboarding-grid {
     grid-template-columns: 1fr;
   }
 
@@ -557,11 +608,9 @@ select:focus {
     grid-template-columns: 1fr;
   }
 
-  .toolbar {
-    grid-template-columns: 1fr;
-  }
-
-  .link-form {
+  .toolbar,
+  .link-form,
+  .checklist-item {
     grid-template-columns: 1fr;
   }
 
