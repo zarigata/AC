@@ -56,6 +56,69 @@ export const providerCatalog = [
   { id: "hyperbolic", name: "Hyperbolic", category: "cloud", status: "planned" }
 ];
 
+export const agentTemplateCatalog = [
+  {
+    id: "ops-coordinator",
+    name: "Ops Coordinator",
+    summary: "Routes work, keeps humans in the loop, and escalates when the chain gets stuck.",
+    purpose: "Coordinate small-team work, route tasks to specialists, summarize progress, and escalate blockers to a human operator.",
+    provider: "openai",
+    model: "gpt-5.4-mini",
+    isolationMode: "selective",
+    maxConcurrentTasks: 6,
+    peerAccess: true,
+    collaborationMode: "delegate"
+  },
+  {
+    id: "research-scout",
+    name: "Research Scout",
+    summary: "Collects facts, compares options, and hands off concise briefs to another agent.",
+    purpose: "Gather source-backed findings, compare options, and deliver short briefs for a coordinator or reviewer.",
+    provider: "ollama",
+    model: "qwen3",
+    isolationMode: "isolated",
+    maxConcurrentTasks: 3,
+    peerAccess: false,
+    collaborationMode: "delegate"
+  },
+  {
+    id: "customer-reply-drafter",
+    name: "Customer Reply Drafter",
+    summary: "Prepares customer-facing responses for review before anything is sent.",
+    purpose: "Draft clear, friendly customer replies from tickets or notes and hand them to a reviewer before release.",
+    provider: "anthropic",
+    model: "claude-haiku-4.5",
+    isolationMode: "selective",
+    maxConcurrentTasks: 4,
+    peerAccess: true,
+    collaborationMode: "review"
+  },
+  {
+    id: "inbox-triage",
+    name: "Inbox Triage",
+    summary: "Sorts incoming work, tags urgency, and forwards the next-best action.",
+    purpose: "Classify inbound requests, mark urgency, and hand off the next action to the right teammate or operator.",
+    provider: "ollama",
+    model: "llama3.1",
+    isolationMode: "selective",
+    maxConcurrentTasks: 8,
+    peerAccess: true,
+    collaborationMode: "handoff"
+  },
+  {
+    id: "run-reviewer",
+    name: "Run Reviewer",
+    summary: "Checks outputs from other agents and surfaces risks before humans act.",
+    purpose: "Review drafts, plans, or summaries from other agents, point out risks, and recommend whether a human should approve the next step.",
+    provider: "z-ai",
+    model: "glm-4-air",
+    isolationMode: "isolated",
+    maxConcurrentTasks: 2,
+    peerAccess: false,
+    collaborationMode: "review"
+  }
+];
+
 const ensureString = (value, field, min, max) => {
   if (typeof value !== "string") {
     throw new Error(`${field} must be a string.`);
@@ -93,16 +156,12 @@ const ensureEnum = (value, field, allowed) => {
   return value;
 };
 
-const ensureProvider = (input) => {
-  const normalized = {
-    id: ensureString(input.id, "id", 2, 80),
-    name: ensureString(input.name, "name", 2, 120),
-    category: ensureEnum(input.category, "category", ["cloud", "local", "self-hosted", "router"]),
-    status: ensureEnum(input.status, "status", providerStatusValues)
-  };
-
-  return normalized;
-};
+const ensureProvider = (input) => ({
+  id: ensureString(input.id, "id", 2, 80),
+  name: ensureString(input.name, "name", 2, 120),
+  category: ensureEnum(input.category, "category", ["cloud", "local", "self-hosted", "router"]),
+  status: ensureEnum(input.status, "status", providerStatusValues)
+});
 
 const ensureUuid = (value, field) => {
   if (
@@ -114,6 +173,24 @@ const ensureUuid = (value, field) => {
 
   return value;
 };
+
+const ensureTemplate = (input) => ({
+  id: ensureString(input.id, "id", 2, 80),
+  name: ensureString(input.name, "name", 2, 80),
+  summary: ensureString(input.summary, "summary", 10, 180),
+  purpose: ensureString(input.purpose, "purpose", 10, 240),
+  provider: ensureString(input.provider, "provider", 2, 80),
+  model: ensureString(input.model, "model", 2, 120),
+  isolationMode: ensureEnum(input.isolationMode, "isolationMode", isolationModeValues),
+  maxConcurrentTasks: ensureInteger(input.maxConcurrentTasks, "maxConcurrentTasks", 1, 32),
+  peerAccess: ensureBoolean(input.peerAccess, "peerAccess"),
+  collaborationMode: ensureEnum(input.collaborationMode, "collaborationMode", [
+    "delegate",
+    "review",
+    "handoff",
+    "summarize"
+  ])
+});
 
 export const parseAgent = (input) => ({
   id: ensureUuid(input.id, "id"),
@@ -172,3 +249,4 @@ export const parseCreateLinkInput = (input) => ({
 });
 
 export const listProviders = () => providerCatalog.map((provider) => ensureProvider(provider));
+export const listAgentTemplates = () => agentTemplateCatalog.map((template) => ensureTemplate(template));
