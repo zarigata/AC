@@ -3,116 +3,205 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ClawForge</title>
+    <title>ClawForge // Webcore Control Room</title>
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
+    <div class="wallpaper"></div>
+    <div class="scanlines"></div>
     <div class="shell">
-      <aside class="sidebar">
-        <div>
-          <div class="eyebrow">ClawForge</div>
-          <h1>Multi-agent control for a single machine that can carry real load.</h1>
-          <p class="lede">
-            Start with one operator view, then scale to 100 agents without losing the plot.
-          </p>
+      <header class="os-bar">
+        <div>ClawForge Webcore Control Room</div>
+        <div class="os-actions">
+          <span>_</span>
+          <span>[]</span>
+          <span>X</span>
         </div>
+      </header>
 
-        <section class="sidebar-section">
-          <h2>Machine capacity</h2>
-          <div class="metric">
-            <strong id="active-agents">--</strong>
-            <span>active agents</span>
-          </div>
-          <div class="metric">
-            <strong id="max-agents">--</strong>
-            <span>agent ceiling</span>
-          </div>
-        </section>
-
-        <section class="sidebar-section">
-          <h2>Link modes</h2>
-          <ul class="plain-list" id="link-modes"></ul>
-        </section>
-      </aside>
-
-      <main class="main">
-        <section class="band">
+      <section class="hero-window window">
+        <div class="window-bar">
+          <span>clawforge_boot.exe</span>
+          <span>dialup://connected</span>
+        </div>
+        <div class="hero-body">
           <div>
-            <div class="section-label">Agents</div>
-            <h2>Current machine graph</h2>
-          </div>
-          <p id="error" class="error" hidden></p>
-          <div class="agent-grid" id="agent-grid"></div>
-        </section>
-
-        <section class="band split">
-          <div>
-            <div class="section-label">Provisioning</div>
-            <h2>Create a new agent</h2>
-            <p class="muted">
-              Define the role, the model backend, and whether this agent can communicate outside its own lane.
+            <div class="eyebrow">Webcore Operator Surface</div>
+            <h1>Small-factor multi-agent control with old-web energy.</h1>
+            <p class="lede">
+              Built to stay compact and fast like PicoClaw, while scaling to 100 agents, 50 providers,
+              shared skills, and stricter token discipline.
             </p>
+            <div class="status-strip">
+              <span class="badge">Ollama first</span>
+              <span class="badge">Token conservative</span>
+              <span class="badge">OpenClaw use-case driven</span>
+            </div>
           </div>
+          <div class="hero-side">
+            <div class="mini-panel">
+              <strong id="active-agents">--</strong>
+              <span>active agents</span>
+            </div>
+            <div class="mini-panel">
+              <strong id="max-agents">--</strong>
+              <span>agent ceiling</span>
+            </div>
+          </div>
+        </div>
+        <div class="marquee"><span>geocities // windows xp // pop-up control room // low-poly future // better outcomes per token //</span></div>
+      </section>
 
-          <form class="form-grid" id="agent-form">
-            <label>
-              Name
-              <input name="name" required minlength="2" maxlength="80" />
-            </label>
+      <main class="main-grid">
+        <aside class="left-column">
+          <section class="window">
+            <div class="window-bar">
+              <span>machine_stats.ini</span>
+              <span>F1</span>
+            </div>
+            <div class="window-body">
+              <h2>Machine capacity</h2>
+              <div class="metric">
+                <strong id="machine-active-agents">--</strong>
+                <span>active agents</span>
+              </div>
+              <div class="metric">
+                <strong id="machine-max-agents">--</strong>
+                <span>max agents per machine</span>
+              </div>
+            </div>
+          </section>
 
-            <label>
-              Purpose
-              <textarea name="purpose" required minlength="10" maxlength="240"></textarea>
-            </label>
+          <section class="window">
+            <div class="window-bar">
+              <span>link_modes.dll</span>
+              <span>F2</span>
+            </div>
+            <div class="window-body">
+              <h2>Link modes</h2>
+              <ul class="plain-list" id="link-modes"></ul>
+            </div>
+          </section>
 
-            <label>
-              Provider
-              <input name="provider" value="openai" required />
-            </label>
+          <section class="window">
+            <div class="window-bar">
+              <span>project_rules.txt</span>
+              <span>F3</span>
+            </div>
+            <div class="window-body">
+              <h2>Build rules</h2>
+              <ul class="plain-list">
+                <li>Match PicoClaw core surface</li>
+                <li>Protect footprint and startup speed</li>
+                <li>Prefer lean prompts and smaller models</li>
+                <li>Learn from real OpenClaw use cases</li>
+              </ul>
+            </div>
+          </section>
+        </aside>
 
-            <label>
-              Model
-              <input name="model" value="gpt-5.4" required />
-            </label>
+        <section class="center-column">
+          <section class="window">
+            <div class="window-bar">
+              <span>agent_graph.html</span>
+              <span>LIVE</span>
+            </div>
+            <div class="window-body">
+              <div>
+                <div class="section-label">Agents</div>
+                <h2>Current machine graph</h2>
+              </div>
+              <p id="error" class="error" hidden></p>
+              <div class="agent-grid" id="agent-grid"></div>
+            </div>
+          </section>
 
-            <label>
-              Isolation mode
-              <select name="isolationMode">
-                <option value="isolated">isolated</option>
-                <option value="selective" selected>selective</option>
-                <option value="mesh">mesh</option>
-              </select>
-            </label>
-
-            <label>
-              Max concurrent tasks
-              <input name="maxConcurrentTasks" type="number" min="1" max="32" value="4" />
-            </label>
-
-            <label class="toggle">
-              <input name="peerAccess" type="checkbox" checked />
-              Allow peer access
-            </label>
-
-            <button class="primary" type="submit">Create agent</button>
-          </form>
+          <section class="window">
+            <div class="window-bar">
+              <span>connections.map</span>
+              <span>LIVE</span>
+            </div>
+            <div class="window-body">
+              <div class="section-label">Communication</div>
+              <h2>Current agent links</h2>
+              <div class="plain-list links" id="link-grid"></div>
+            </div>
+          </section>
         </section>
 
-        <section class="band">
-          <div class="section-label">Communication</div>
-          <h2>Current agent links</h2>
-          <div class="plain-list links" id="link-grid"></div>
-        </section>
+        <aside class="right-column">
+          <section class="window">
+            <div class="window-bar">
+              <span>agent_wizard.exe</span>
+              <span>NEW</span>
+            </div>
+            <div class="window-body">
+              <div class="section-label">Provisioning</div>
+              <h2>Create a new agent</h2>
+              <p class="muted">
+                Define role, model backend, and how social this agent is allowed to be.
+              </p>
 
-        <section class="band">
-          <div class="section-label">Providers</div>
-          <h2 id="provider-summary">Provider catalog</h2>
-          <p class="muted">
-            The next platform milestone targets 50 model backends, including local, cloud, router,
-            and self-hosted options.
-          </p>
-          <div class="provider-grid" id="provider-grid"></div>
-        </section>
+              <form class="form-grid" id="agent-form">
+                <label>
+                  Name
+                  <input name="name" required minlength="2" maxlength="80" />
+                </label>
+
+                <label>
+                  Purpose
+                  <textarea name="purpose" required minlength="10" maxlength="240"></textarea>
+                </label>
+
+                <label>
+                  Provider
+                  <input name="provider" value="ollama" required />
+                </label>
+
+                <label>
+                  Model
+                  <input name="model" value="qwen3" required />
+                </label>
+
+                <label>
+                  Isolation mode
+                  <select name="isolationMode">
+                    <option value="isolated">isolated</option>
+                    <option value="selective" selected>selective</option>
+                    <option value="mesh">mesh</option>
+                  </select>
+                </label>
+
+                <label>
+                  Max concurrent tasks
+                  <input name="maxConcurrentTasks" type="number" min="1" max="32" value="4" />
+                </label>
+
+                <label class="toggle">
+                  <input name="peerAccess" type="checkbox" checked />
+                  Allow peer access
+                </label>
+
+                <button class="primary" type="submit">Create agent</button>
+              </form>
+            </div>
+          </section>
+
+          <section class="window">
+            <div class="window-bar">
+              <span>provider_index.net</span>
+              <span>50X</span>
+            </div>
+            <div class="window-body">
+              <div class="section-label">Providers</div>
+              <h2 id="provider-summary">Provider catalog</h2>
+              <p class="muted">
+                The near-term order is Ollama, Ollama Cloud, Z.AI, Anthropic, then OpenAI.
+              </p>
+              <div class="provider-grid" id="provider-grid"></div>
+            </div>
+          </section>
+        </aside>
       </main>
     </div>
     <script type="module" src="/src/app.js"></script>
