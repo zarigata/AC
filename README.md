@@ -2,14 +2,14 @@
 
 ClawForge is the start of a local-first multi-agent platform built to compete with PicoClaw and OpenClaw with a simpler control surface, stronger multi-agent orchestration, broader model support, and a future internal skill store.
 
-## What exists in this first slice
+## What exists now
 
-- TypeScript monorepo with shared contracts
-- Fastify API with a SQLite-backed agent registry
-- React control UI focused on multi-agent operations
+- Dependency-light Node codebase with a SQLite-backed agent registry
+- Browser control UI served directly by the API
 - Agent-to-agent communication policies
 - Seeded local data model for up to 100 agents per machine
-- Tests around the registry behavior
+- A provider catalog with 50 target backends, including Ollama, Ollama Cloud, and Z.AI
+- Tests around registry rules and provider coverage
 
 ## Product direction
 
@@ -34,3 +34,4 @@ The API and web UI are both served from `http://localhost:4000`.
 - `apps/web`: control UI assets served by the API
 - `packages/shared`: shared contracts and validation helpers
 - `docs/architecture.md`: current technical direction
+- `docs/provider-plan.md`: 50-provider rollout plan
