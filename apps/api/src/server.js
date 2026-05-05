@@ -3,7 +3,11 @@ import { readFile } from "node:fs/promises";
 import { extname, join, normalize, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { parseCreateAgentInput, parseCreateLinkInput } from "../../../packages/shared/src/index.js";
+import {
+  listProviders,
+  parseCreateAgentInput,
+  parseCreateLinkInput
+} from "../../../packages/shared/src/index.js";
 
 import { AgentRegistry } from "./registry.js";
 
@@ -55,6 +59,20 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/topology") {
       return sendJson(response, 200, registry.getTopology());
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/providers") {
+      const providers = listProviders();
+      return sendJson(response, 200, {
+        providers,
+        summary: {
+          total: providers.length,
+          local: providers.filter((provider) => provider.category === "local").length,
+          cloud: providers.filter((provider) => provider.category === "cloud").length,
+          selfHosted: providers.filter((provider) => provider.category === "self-hosted").length,
+          routers: providers.filter((provider) => provider.category === "router").length
+        }
+      });
     }
 
     if (request.method === "POST" && url.pathname === "/api/agents") {
