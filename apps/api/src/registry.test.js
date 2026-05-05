@@ -5,7 +5,8 @@ import {
   firstWaveProviderIds,
   getProviderReadinessSummary,
   listProviders,
-  listProviderConnections
+  listProviderConnections,
+  parseCreateAgentInput
 } from "../../../packages/shared/src/index.js";
 import { AgentRegistry } from "./registry.js";
 
@@ -108,6 +109,7 @@ test("marks first-wave provider connection requirements clearly", () => {
   assert.equal(ollama.transport, "local-http");
   assert.equal(ollama.configured, false);
   assert.deepEqual(ollama.requiredEnv, ["OLLAMA_BASE_URL"]);
+  assert.equal(ollama.suggestedModel, "qwen3");
 
   assert.equal(ollamaCloud.transport, "cloud-http");
   assert.deepEqual(ollamaCloud.requiredEnv, ["OLLAMA_CLOUD_API_KEY"]);
@@ -116,4 +118,21 @@ test("marks first-wave provider connection requirements clearly", () => {
   assert.equal(anthropic.id, "anthropic");
   assert.equal(openai.id, "openai");
   assert.equal(openai.baseUrl, "https://gateway.example/v1");
+  assert.equal(openai.suggestedModel, "gpt-5.4-mini");
+});
+
+test("rejects unknown providers during agent creation", () => {
+  assert.throws(
+    () =>
+      parseCreateAgentInput({
+        name: "Mystery",
+        purpose: "Attempt to use a provider that is not in the catalog.",
+        provider: "totally-made-up",
+        model: "imaginary-1",
+        isolationMode: "isolated",
+        maxConcurrentTasks: 1,
+        peerAccess: false
+      }),
+    /Unknown provider id/
+  );
 });
