@@ -1,0 +1,97 @@
+<svg width="900" height="1400" viewBox="0 0 900 1400" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="900" y2="1400" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0A1631"/>
+      <stop offset="0.45" stop-color="#183A87"/>
+      <stop offset="1" stop-color="#08152D"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#C3F0FF"/>
+      <stop offset="0.52" stop-color="#6EB8FF"/>
+      <stop offset="1" stop-color="#2A57C8"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#0E2452" stop-opacity="0.92"/>
+      <stop offset="1" stop-color="#071834" stop-opacity="0.92"/>
+    </linearGradient>
+    <pattern id="scan" patternUnits="userSpaceOnUse" width="6" height="6">
+      <rect width="6" height="1" fill="white" fill-opacity="0.05"/>
+    </pattern>
+  </defs>
+
+  <rect width="900" height="1400" fill="url(#bg)"/>
+  <rect width="900" height="1400" fill="url(#scan)" opacity="0.34"/>
+
+  <g opacity="0.85">
+    <circle cx="118" cy="96" r="3" fill="#9DFFF0"/>
+    <circle cx="782" cy="128" r="4" fill="#FFAFE9"/>
+    <path d="M712 74l6 16 17 1-14 11 5 16-14-9-14 9 5-16-14-11 17-1 6-16Z" fill="#9DFFF0" fill-opacity="0.28"/>
+  </g>
+
+  <g transform="translate(64 58)">
+    <rect x="0" y="0" width="772" height="56" fill="url(#bar)"/>
+    <text x="18" y="36" fill="#061328" font-family="Verdana, Arial, sans-serif" font-size="24" font-weight="700">webcore_operator_portal.net</text>
+    <text x="646" y="36" fill="#061328" font-family="Verdana, Arial, sans-serif" font-size="22" font-weight="700">_ □ X</text>
+  </g>
+
+  <g transform="translate(72 146)">
+    <rect x="0" y="0" width="526" height="248" fill="url(#panel)" stroke="#83E5FF" stroke-opacity="0.46"/>
+    <rect x="0" y="0" width="526" height="42" fill="url(#bar)"/>
+    <text x="16" y="28" fill="#061328" font-family="Verdana, Arial, sans-serif" font-size="18" font-weight="700">browser_window_01</text>
+    <text x="20" y="96" fill="#72EAFF" font-family="Arial Black, Arial, sans-serif" font-size="44">OLD WEB</text>
+    <text x="20" y="138" fill="#D7F4FF" font-family="Verdana, Arial, sans-serif" font-size="20">popups // pixel stars // portal chaos</text>
+    <rect x="20" y="164" width="122" height="26" fill="#9AFFC8" fill-opacity="0.22" stroke="#B7FFDF" stroke-opacity="0.4"/>
+    <rect x="154" y="164" width="136" height="26" fill="#73E7FF" fill-opacity="0.18" stroke="#A8F2FF" stroke-opacity="0.4"/>
+    <rect x="304" y="164" width="160" height="26" fill="#FF8FDA" fill-opacity="0.18" stroke="#FFC6EE" stroke-opacity="0.4"/>
+    <circle cx="430" cy="98" r="38" fill="#6DE6FF" fill-opacity="0.3"/>
+    <path d="M348 178l46-74 56 30-44 74-58-30Z" fill="#A0FFD0" fill-opacity="0.22"/>
+  </g>
+
+  <g transform="translate(396 308)">
+    <rect x="0" y="0" width="420" height="236" fill="url(#panel)" stroke="#FFA5E4" stroke-opacity="0.5"/>
+    <rect x="0" y="0" width="420" height="42" fill="url(#bar)"/>
+    <text x="16" y="28" fill="#061328" font-family="Verdana, Arial, sans-serif" font-size="18" font-weight="700">popup_warning_02</text>
+    <text x="22" y="90" fill="#FFE2F6" font-family="Verdana, Arial, sans-serif" font-size="22">this internet is intentionally weird</text>
+    <text x="22" y="130" fill="#D7F4FF" font-family="Verdana, Arial, sans-serif" font-size="18">low poly shapes / forgotten portals / archived machine dreams</text>
+    <rect x="22" y="160" width="132" height="32" fill="#FF91DD" fill-opacity="0.22" stroke="#FFC9EE" stroke-opacity="0.45"/>
+    <rect x="170" y="160" width="108" height="32" fill="#73E7FF" fill-opacity="0.18" stroke="#A8F2FF" stroke-opacity="0.45"/>
+  </g>
+
+  <g transform="translate(90 474)">
+    <rect x="0" y="0" width="264" height="176" fill="url(#panel)" stroke="#82E5FF" stroke-opacity="0.46"/>
+    <rect x="0" y="0" width="264" height="40" fill="url(#bar)"/>
+    <text x="14" y="26" fill="#061328" font-family="Verdana, Arial, sans-serif" font-size="17" font-weight="700">pixel_badges</text>
+    <text x="22" y="78" fill="#D7F4FF" font-family="Verdana, Arial, sans-serif" font-size="18">100 agents</text>
+    <text x="22" y="110" fill="#D7F4FF" font-family="Verdana, Arial, sans-serif" font-size="18">50 providers</text>
+    <text x="22" y="142" fill="#D7F4FF" font-family="Verdana, Arial, sans-serif" font-size="18">small-factor runtime</text>
+  </g>
+
+  <g transform="translate(118 696)">
+    <rect x="0" y="0" width="306" height="212" fill="url(#panel)" stroke="#82E5FF" stroke-opacity="0.46"/>
+    <rect x="0" y="0" width="306" height="40" fill="url(#bar)"/>
+    <text x="14" y="26" fill="#061328" font-family="Verdana, Arial, sans-serif" font-size="17" font-weight="700">provider_order</text>
+    <text x="24" y="80" fill="#9EFFF0" font-family="Verdana, Arial, sans-serif" font-size="21">1. Ollama</text>
+    <text x="24" y="114" fill="#9EFFF0" font-family="Verdana, Arial, sans-serif" font-size="21">2. Ollama Cloud</text>
+    <text x="24" y="148" fill="#9EFFF0" font-family="Verdana, Arial, sans-serif" font-size="21">3. Z.AI</text>
+    <text x="24" y="182" fill="#9EFFF0" font-family="Verdana, Arial, sans-serif" font-size="21">4. Anthropic</text>
+  </g>
+
+  <g transform="translate(478 624)">
+    <rect x="0" y="0" width="330" height="242" fill="url(#panel)" stroke="#FFA5E4" stroke-opacity="0.46"/>
+    <rect x="0" y="0" width="330" height="40" fill="url(#bar)"/>
+    <text x="14" y="26" fill="#061328" font-family="Verdana, Arial, sans-serif" font-size="17" font-weight="700">llm_budget.msg</text>
+    <text x="24" y="82" fill="#D7F4FF" font-family="Verdana, Arial, sans-serif" font-size="18">be conservative with tokens</text>
+    <text x="24" y="116" fill="#D7F4FF" font-family="Verdana, Arial, sans-serif" font-size="18">smaller models for lighter work</text>
+    <text x="24" y="150" fill="#D7F4FF" font-family="Verdana, Arial, sans-serif" font-size="18">reserve heavier models for real payoff</text>
+    <text x="24" y="184" fill="#FFB7E9" font-family="Verdana, Arial, sans-serif" font-size="18">better outcomes per token</text>
+  </g>
+
+  <g transform="translate(154 970)">
+    <rect x="0" y="0" width="580" height="256" fill="url(#panel)" stroke="#A0FFD0" stroke-opacity="0.42"/>
+    <rect x="0" y="0" width="580" height="40" fill="url(#bar)"/>
+    <text x="14" y="26" fill="#061328" font-family="Verdana, Arial, sans-serif" font-size="17" font-weight="700">usecases_archive</text>
+    <text x="24" y="84" fill="#D7F4FF" font-family="Verdana, Arial, sans-serif" font-size="22">real OpenClaw use cases should steer roadmap decisions</text>
+    <text x="24" y="122" fill="#D7F4FF" font-family="Verdana, Arial, sans-serif" font-size="20">practical value over novelty / spectacle / empty benchmark chasing</text>
+    <text x="24" y="162" fill="#A0FFD0" font-family="Verdana, Arial, sans-serif" font-size="19">awesome-openclaw-usecases = recurring source of workflow ideas</text>
+  </g>
+</svg>
