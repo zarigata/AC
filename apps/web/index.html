@@ -14,7 +14,7 @@
           <a class="brand-lockup" href="/">RelayCore</a>
         </div>
         <div class="topbar-status">
-          <span class="status-pill">Local-first runtime</span>
+          <span class="status-pill">LAN-first runtime</span>
           <span class="status-pill">Provider-flexible</span>
           <span class="status-pill">Token-aware</span>
         </div>
@@ -68,6 +68,29 @@
 
       <main class="workspace">
         <section class="primary-column">
+          <section class="surface reveal">
+            <div class="surface-heading">
+              <div>
+                <p class="section-label">First Run</p>
+                <h2>LAN onboarding</h2>
+              </div>
+              <p class="surface-note">The easiest path to getting RelayCore visible and usable on your local network.</p>
+            </div>
+            <div class="onboarding-grid">
+              <article class="onboarding-card">
+                <span class="metric-label">This machine</span>
+                <a class="access-link" id="local-url" href="#">--</a>
+                <p>Use this address on the same device where RelayCore is running.</p>
+              </article>
+              <article class="onboarding-card">
+                <span class="metric-label">Local network</span>
+                <div class="lan-url-list" id="lan-url-list"></div>
+                <p id="lan-url-note">Open one of these from another phone, laptop, or tablet on the same LAN.</p>
+              </article>
+            </div>
+            <div class="checklist" id="onboarding-checklist"></div>
+          </section>
+
           <section class="surface reveal">
             <div class="surface-heading">
               <div>
