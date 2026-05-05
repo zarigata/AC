@@ -166,6 +166,39 @@ export class AgentRegistry {
     };
   }
 
+  updateAgent(id, updates) {
+    const current = this.db
+      .prepare("SELECT * FROM agents WHERE id = ?")
+      .get(id);
+
+    if (!current) {
+      throw new Error("Agent not found.");
+    }
+
+    const next = {
+      status: updates.status ?? current.status,
+      isolationMode: updates.isolationMode ?? current.isolationMode,
+      peerAccess: updates.peerAccess ?? Boolean(current.peerAccess),
+      updatedAt: now()
+    };
+
+    this.db
+      .prepare(
+        `
+          UPDATE agents
+          SET status = ?, isolationMode = ?, peerAccess = ?, updatedAt = ?
+          WHERE id = ?
+        `
+      )
+      .run(next.status, next.isolationMode, Number(next.peerAccess), next.updatedAt, id);
+
+    return parseAgent({
+      ...current,
+      ...next,
+      peerAccess: Boolean(next.peerAccess)
+    });
+  }
+
   getTopology() {
     const agents = this.listAgents();
     const links = this.listLinks();
