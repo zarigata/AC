@@ -4,6 +4,12 @@
 
 Build a provider layer that can eventually support 50 LLM backends without turning setup into a mess.
 
+## Hard product constraints
+
+- Provider work must not undermine the small-factor and speed goals inspired by PicoClaw.
+- Adapter design should avoid unnecessary token usage and default to conservative routing.
+- The roadmap should continue drawing inspiration from real OpenClaw workflows and use cases, especially from the `awesome-openclaw-usecases` collection.
+
 ## First implementation phases
 
 1. Land a provider catalog and public API shape.
@@ -36,6 +42,8 @@ Build a provider layer that can eventually support 50 LLM backends without turni
    - endpoint normalization
    - timeout defaults
    - retry and error mapping
+   - token-usage budgeting hooks
+   - lightweight model preference rules
 5. Add adapter tests in the same order:
    - contract tests per provider
    - credential validation tests
@@ -118,3 +126,4 @@ Build a provider layer that can eventually support 50 LLM backends without turni
   - Ollama local and Ollama Cloud
   - Z.AI
 - The first three adapters should ship before attention moves to Anthropic and OpenAI.
+- Token efficiency should be treated as a first-class design constraint, not a later optimization.
