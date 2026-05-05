@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { listProviders } from "../../../packages/shared/src/index.js";
+import {
+  firstWaveProviderIds,
+  getProviderReadinessSummary,
+  listProviders,
+  listProviderConnections
+} from "../../../packages/shared/src/index.js";
 import { AgentRegistry } from "./registry.js";
 
 const createRegistry = () => new AgentRegistry({ databasePath: ":memory:" });
@@ -68,4 +73,47 @@ test("ships a 50-provider catalog including ollama, ollama cloud, and z.ai", () 
   assert.equal(ids.has("ollama"), true);
   assert.equal(ids.has("ollama-cloud"), true);
   assert.equal(ids.has("z-ai"), true);
+});
+
+test("builds first-wave provider readiness in the required order", () => {
+  const connections = listProviderConnections({
+    ANTHROPIC_API_KEY: "anthropic-key",
+    OLLAMA_BASE_URL: "http://localhost:11434",
+    OPENAI_API_KEY: "openai-key"
+  });
+
+  assert.deepEqual(
+    connections.slice(0, firstWaveProviderIds.length).map((provider) => provider.id),
+    firstWaveProviderIds
+  );
+
+  const readiness = getProviderReadinessSummary({
+    ANTHROPIC_API_KEY: "anthropic-key",
+    OLLAMA_BASE_URL: "http://localhost:11434",
+    OPENAI_API_KEY: "openai-key"
+  });
+
+  assert.equal(readiness.firstWave.total, 5);
+  assert.equal(readiness.firstWave.configured, 3);
+  assert.equal(readiness.firstWave.pendingCount, 2);
+  assert.equal(readiness.firstWave.ready.length, 3);
+  assert.equal(readiness.firstWave.pending.length, 2);
+});
+
+test("marks first-wave provider connection requirements clearly", () => {
+  const [ollama, ollamaCloud, zAi, anthropic, openai] = listProviderConnections({
+    CLAWFORGE_OPENAI_BASE_URL: "https://gateway.example/v1"
+  });
+
+  assert.equal(ollama.transport, "local-http");
+  assert.equal(ollama.configured, false);
+  assert.deepEqual(ollama.requiredEnv, ["OLLAMA_BASE_URL"]);
+
+  assert.equal(ollamaCloud.transport, "cloud-http");
+  assert.deepEqual(ollamaCloud.requiredEnv, ["OLLAMA_CLOUD_API_KEY"]);
+
+  assert.equal(zAi.id, "z-ai");
+  assert.equal(anthropic.id, "anthropic");
+  assert.equal(openai.id, "openai");
+  assert.equal(openai.baseUrl, "https://gateway.example/v1");
 });
