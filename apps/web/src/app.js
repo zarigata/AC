@@ -3,6 +3,7 @@ const AGENT_STATUS_OPTIONS = ["idle", "running", "paused", "error"];
 const state = {
   topology: null,
   providers: null,
+  onboarding: null,
   pendingStatusUpdates: new Set(),
   pendingLinkCreation: false
 };
@@ -19,6 +20,10 @@ const ui = {
   providerGrid: document.querySelector("#provider-grid"),
   providerStats: document.querySelector("#provider-stats"),
   insightGrid: document.querySelector("#insight-grid"),
+  onboardingChecklist: document.querySelector("#onboarding-checklist"),
+  localUrl: document.querySelector("#local-url"),
+  lanUrlList: document.querySelector("#lan-url-list"),
+  lanUrlNote: document.querySelector("#lan-url-note"),
   agentSearch: document.querySelector("#agent-search"),
   agentIsolationFilter: document.querySelector("#agent-isolation-filter"),
   providerInput: document.querySelector("#provider-input"),
@@ -30,6 +35,14 @@ const ui = {
   linkMode: document.querySelector("#link-mode"),
   form: document.querySelector("#agent-form"),
   error: document.querySelector("#error")
+};
+
+const providerModelDefaults = {
+  ollama: ["qwen3", "llama3.1", "deepseek-r1"],
+  "ollama-cloud": ["qwen3", "llama3.1-70b", "deepseek-r1"],
+  "z-ai": ["glm-4.6", "glm-4-air", "glm-4-flash"],
+  anthropic: ["claude-sonnet-4.5", "claude-opus-4.1", "claude-haiku-4.5"],
+  openai: ["gpt-5.4", "gpt-5.4-mini", "gpt-4.1"]
 };
 
 const showError = (message) => {
@@ -57,17 +70,6 @@ const createKeyValue = (label, value) => {
   return item;
 };
 
-const providerModelDefaults = {
-  ollama: ["qwen3", "llama3.1", "deepseek-r1"],
-  "ollama-cloud": ["qwen3", "llama3.1-70b", "deepseek-r1"],
-  "z-ai": ["glm-4.6", "glm-4-air", "glm-4-flash"],
-  anthropic: ["claude-sonnet-4.5", "claude-opus-4.1", "claude-haiku-4.5"],
-  openai: ["gpt-5.4", "gpt-5.4-mini", "gpt-4.1"]
-};
-
-const getSuggestedModels = (providerId) =>
-  providerModelDefaults[providerId] ?? ["custom-model", "latest-stable", "cost-optimized"];
-
 const createInsightCard = (label, value, note) => {
   const card = document.createElement("article");
   card.className = "insight-card";
@@ -85,6 +87,31 @@ const createInsightCard = (label, value, note) => {
   card.append(title, amount, detail);
   return card;
 };
+
+const createChecklistItem = (item) => {
+  const row = document.createElement("article");
+  row.className = "checklist-item";
+
+  const badge = document.createElement("span");
+  badge.className = `checklist-state ${item.done ? "done" : "pending"}`;
+  badge.textContent = item.done ? "Done" : "Next";
+
+  const text = document.createElement("div");
+  text.className = "checklist-copy";
+
+  const title = document.createElement("strong");
+  title.textContent = item.title;
+
+  const detail = document.createElement("p");
+  detail.textContent = item.detail;
+
+  text.append(title, detail);
+  row.append(badge, text);
+  return row;
+};
+
+const getSuggestedModels = (providerId) =>
+  providerModelDefaults[providerId] ?? ["custom-model", "latest-stable", "cost-optimized"];
 
 const agentLabel = (agent) => `${agent.name} (${agent.id.slice(0, 8)})`;
 
@@ -136,10 +163,6 @@ const syncProviderOptions = () => {
 };
 
 const syncLinkFormOptions = (topology) => {
-  if (!ui.linkForm || !ui.linkSource || !ui.linkTarget || !ui.linkMode) {
-    return;
-  }
-
   const agents = topology.agents;
   const modes = topology.capacity.supportedLinkModes;
   const previousSource = ui.linkSource.value;
@@ -226,7 +249,7 @@ const updateAgentStatus = async (agentId, status) => {
       throw new Error(await responseErrorMessage(response, "Could not update status."));
     }
 
-    await loadTopology();
+    await Promise.all([loadTopology(), loadOnboarding()]);
   } catch (error) {
     showError(error instanceof Error ? error.message : "Could not update status.");
   } finally {
@@ -252,13 +275,50 @@ const createLink = async (payload) => {
       throw new Error(await responseErrorMessage(response, "Could not create link."));
     }
 
-    await loadTopology();
+    await Promise.all([loadTopology(), loadOnboarding()]);
   } catch (error) {
     showError(error instanceof Error ? error.message : "Could not create link.");
   } finally {
     state.pendingLinkCreation = false;
     render();
   }
+};
+
+const renderOnboarding = () => {
+  if (!state.onboarding) {
+    return;
+  }
+
+  ui.localUrl.href = state.onboarding.access.localUrl;
+  ui.localUrl.textContent = state.onboarding.access.localUrl;
+
+  const lanUrls = state.onboarding.access.lanUrls;
+  ui.lanUrlList.replaceChildren(
+    ...(lanUrls.length > 0
+      ? lanUrls.map((url) => {
+          const link = document.createElement("a");
+          link.className = "access-link";
+          link.href = url;
+          link.textContent = url;
+          return link;
+        })
+      : [
+          (() => {
+            const fallback = document.createElement("span");
+            fallback.className = "access-fallback";
+            fallback.textContent = "No LAN URL detected yet";
+            return fallback;
+          })()
+        ])
+  );
+
+  ui.lanUrlNote.textContent = state.onboarding.access.lanReachable
+    ? "Open one of these addresses from another device on the same network."
+    : "RelayCore is running, but no LAN address was detected yet. Check host binding or the machine network.";
+
+  ui.onboardingChecklist.replaceChildren(
+    ...state.onboarding.checklist.map((item) => createChecklistItem(item))
+  );
 };
 
 const render = () => {
@@ -271,6 +331,8 @@ const render = () => {
   ui.maxAgents.textContent = String(topology.capacity.maxAgentsPerMachine);
   ui.machineActiveAgents.textContent = String(topology.capacity.activeAgents);
   ui.machineMaxAgents.textContent = String(topology.capacity.maxAgentsPerMachine);
+
+  renderOnboarding();
 
   const searchTerm = ui.agentSearch.value.trim().toLowerCase();
   const isolationFilter = ui.agentIsolationFilter.value;
@@ -365,22 +427,20 @@ const render = () => {
     })
   );
 
-  if (ui.insightGrid) {
-    const isolatedCount = topology.agents.filter((agent) => agent.isolationMode === "isolated").length;
-    const selectiveCount = topology.agents.filter((agent) => agent.isolationMode === "selective").length;
-    const meshCount = topology.agents.filter((agent) => agent.isolationMode === "mesh").length;
-    const peerEnabledCount = topology.agents.filter((agent) => agent.peerAccess).length;
-    const providerCount = new Set(topology.agents.map((agent) => agent.provider)).size;
+  const isolatedCount = topology.agents.filter((agent) => agent.isolationMode === "isolated").length;
+  const selectiveCount = topology.agents.filter((agent) => agent.isolationMode === "selective").length;
+  const meshCount = topology.agents.filter((agent) => agent.isolationMode === "mesh").length;
+  const peerEnabledCount = topology.agents.filter((agent) => agent.peerAccess).length;
+  const providerCount = new Set(topology.agents.map((agent) => agent.provider)).size;
 
-    ui.insightGrid.replaceChildren(
-      createInsightCard("Visible agents", visibleAgents.length, "current registry rows after filters"),
-      createInsightCard("Isolated", isolatedCount, "workers with no peer access by default"),
-      createInsightCard("Selective", selectiveCount, "permissioned coordination lanes"),
-      createInsightCard("Mesh", meshCount, "high-collaboration workers"),
-      createInsightCard("Peer enabled", peerEnabledCount, "agents allowed to reach peers"),
-      createInsightCard("Providers in use", providerCount, "distinct backends currently assigned")
-    );
-  }
+  ui.insightGrid.replaceChildren(
+    createInsightCard("Visible agents", visibleAgents.length, "current registry rows after filters"),
+    createInsightCard("Isolated", isolatedCount, "workers with no peer access by default"),
+    createInsightCard("Selective", selectiveCount, "permissioned coordination lanes"),
+    createInsightCard("Mesh", meshCount, "high-collaboration workers"),
+    createInsightCard("Peer enabled", peerEnabledCount, "agents allowed to reach peers"),
+    createInsightCard("Providers in use", providerCount, "distinct backends currently assigned")
+  );
 
   ui.linkGrid.replaceChildren(
     ...topology.links.map((link) => {
@@ -406,7 +466,7 @@ const render = () => {
 
   syncLinkFormOptions(topology);
 
-  if (state.providers && ui.providerSummary && ui.providerGrid && ui.providerStats) {
+  if (state.providers) {
     ui.providerSummary.textContent = String(state.providers.summary.total);
     ui.providerGrid.replaceChildren(
       ...state.providers.providers.slice(0, 12).map((provider) => {
@@ -452,6 +512,16 @@ const loadProviders = async () => {
 
   state.providers = await response.json();
   syncProviderOptions();
+  render();
+};
+
+const loadOnboarding = async () => {
+  const response = await fetch("/api/onboarding");
+  if (!response.ok) {
+    throw new Error("Could not load onboarding.");
+  }
+
+  state.onboarding = await response.json();
   render();
 };
 
@@ -519,8 +589,7 @@ ui.form.addEventListener("submit", async (event) => {
   });
 
   if (!response.ok) {
-    const data = await response.json();
-    showError(data.error ?? "Could not create the agent.");
+    showError(await responseErrorMessage(response, "Could not create the agent."));
     return;
   }
 
@@ -530,9 +599,9 @@ ui.form.addEventListener("submit", async (event) => {
   ui.form.maxConcurrentTasks.value = "4";
   ui.form.peerAccess.checked = true;
   syncModelSuggestions();
-  await loadTopology();
+  await Promise.all([loadTopology(), loadOnboarding()]);
 });
 
-Promise.all([loadTopology(), loadProviders()]).catch((error) => {
+Promise.all([loadTopology(), loadProviders(), loadOnboarding()]).catch((error) => {
   showError(error instanceof Error ? error.message : "Unknown error");
 });
