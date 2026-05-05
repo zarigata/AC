@@ -7,9 +7,9 @@ export const providerReadinessValues = ["ready", "needs-config"];
 export const firstWaveProviderIds = ["ollama", "ollama-cloud", "z-ai", "anthropic", "openai"];
 
 export const providerCatalog = [
-  { id: "openai", name: "OpenAI", category: "cloud", status: "live-target" },
+  { id: "openai", name: "OpenAI", category: "cloud", status: "live-target", suggestedModel: "gpt-5.4-mini" },
   { id: "azure-openai", name: "Azure OpenAI", category: "cloud", status: "planned" },
-  { id: "anthropic", name: "Anthropic", category: "cloud", status: "live-target" },
+  { id: "anthropic", name: "Anthropic", category: "cloud", status: "live-target", suggestedModel: "claude-sonnet-4.5" },
   { id: "google-gemini", name: "Google Gemini", category: "cloud", status: "planned" },
   { id: "vertex-ai", name: "Vertex AI", category: "cloud", status: "planned" },
   { id: "aws-bedrock", name: "AWS Bedrock", category: "cloud", status: "planned" },
@@ -36,8 +36,8 @@ export const providerCatalog = [
   { id: "deepinfra", name: "DeepInfra", category: "cloud", status: "planned" },
   { id: "writer", name: "Writer", category: "cloud", status: "planned" },
   { id: "ai21", name: "AI21", category: "cloud", status: "planned" },
-  { id: "ollama", name: "Ollama", category: "local", status: "live-target" },
-  { id: "ollama-cloud", name: "Ollama Cloud", category: "cloud", status: "live-target" },
+  { id: "ollama", name: "Ollama", category: "local", status: "live-target", suggestedModel: "qwen3" },
+  { id: "ollama-cloud", name: "Ollama Cloud", category: "cloud", status: "live-target", suggestedModel: "qwen3" },
   { id: "lm-studio", name: "LM Studio", category: "local", status: "planned" },
   { id: "vllm", name: "vLLM", category: "self-hosted", status: "planned" },
   { id: "llama-cpp", name: "llama.cpp Server", category: "local", status: "planned" },
@@ -46,7 +46,7 @@ export const providerCatalog = [
   { id: "koboldcpp", name: "KoboldCpp", category: "local", status: "experimental" },
   { id: "xinference", name: "Xinference", category: "self-hosted", status: "planned" },
   { id: "jan", name: "Jan", category: "local", status: "experimental" },
-  { id: "z-ai", name: "Z.AI", category: "cloud", status: "live-target" },
+  { id: "z-ai", name: "Z.AI", category: "cloud", status: "live-target", suggestedModel: "glm-4.6" },
   { id: "moonshot", name: "Moonshot AI", category: "cloud", status: "planned" },
   { id: "baidu-qianfan", name: "Baidu Qianfan", category: "cloud", status: "planned" },
   { id: "alibaba-dashscope", name: "Alibaba DashScope", category: "cloud", status: "planned" },
@@ -134,16 +134,16 @@ const ensureEnum = (value, field, allowed) => {
   return value;
 };
 
-const ensureProvider = (input) => {
-  const normalized = {
-    id: ensureString(input.id, "id", 2, 80),
-    name: ensureString(input.name, "name", 2, 120),
-    category: ensureEnum(input.category, "category", providerCategoryValues),
-    status: ensureEnum(input.status, "status", providerStatusValues)
-  };
-
-  return normalized;
-};
+const ensureProvider = (input) => ({
+  id: ensureString(input.id, "id", 2, 80),
+  name: ensureString(input.name, "name", 2, 120),
+  category: ensureEnum(input.category, "category", providerCategoryValues),
+  status: ensureEnum(input.status, "status", providerStatusValues),
+  suggestedModel:
+    typeof input.suggestedModel === "string"
+      ? ensureString(input.suggestedModel, "suggestedModel", 2, 120)
+      : null
+});
 
 const ensureUuid = (value, field) => {
   if (
@@ -192,15 +192,19 @@ export const parseAgent = (input) => ({
   updatedAt: ensureString(input.updatedAt, "updatedAt", 10, 40)
 });
 
-export const parseCreateAgentInput = (input) => ({
-  name: ensureString(input.name, "name", 2, 80),
-  purpose: ensureString(input.purpose, "purpose", 10, 240),
-  provider: ensureString(input.provider, "provider", 2, 80),
-  model: ensureString(input.model, "model", 2, 120),
-  isolationMode: ensureEnum(input.isolationMode, "isolationMode", isolationModeValues),
-  maxConcurrentTasks: ensureInteger(input.maxConcurrentTasks, "maxConcurrentTasks", 1, 32),
-  peerAccess: ensureBoolean(input.peerAccess, "peerAccess")
-});
+export const parseCreateAgentInput = (input) => {
+  const provider = getProviderById(ensureString(input.provider, "provider", 2, 80));
+
+  return {
+    name: ensureString(input.name, "name", 2, 80),
+    purpose: ensureString(input.purpose, "purpose", 10, 240),
+    provider: provider.id,
+    model: ensureString(input.model, "model", 2, 120),
+    isolationMode: ensureEnum(input.isolationMode, "isolationMode", isolationModeValues),
+    maxConcurrentTasks: ensureInteger(input.maxConcurrentTasks, "maxConcurrentTasks", 1, 32),
+    peerAccess: ensureBoolean(input.peerAccess, "peerAccess")
+  };
+};
 
 export const parseCreateLinkInput = (input) => ({
   sourceAgentId: ensureUuid(input.sourceAgentId, "sourceAgentId"),
