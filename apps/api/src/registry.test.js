@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { listProviders } from "../../../packages/shared/src/index.js";
 import { AgentRegistry } from "./registry.js";
 
 const createRegistry = () => new AgentRegistry({ databasePath: ":memory:" });
@@ -57,4 +58,14 @@ test("rejects self-links", () => {
       }),
     /cannot create a link to itself/
   );
+});
+
+test("ships a 50-provider catalog including ollama, ollama cloud, and z.ai", () => {
+  const providers = listProviders();
+  const ids = new Set(providers.map((provider) => provider.id));
+
+  assert.equal(providers.length, 50);
+  assert.equal(ids.has("ollama"), true);
+  assert.equal(ids.has("ollama-cloud"), true);
+  assert.equal(ids.has("z-ai"), true);
 });
