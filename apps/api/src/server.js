@@ -3,13 +3,21 @@ import { readFile } from "node:fs/promises";
 import { extname, join, normalize, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { parseCreateAgentInput, parseCreateLinkInput } from "../../../packages/shared/src/index.js";
+import {
+  listProviders,
+  parseCreateAgentInput,
+  parseCreateLinkInput,
+  parseUpdateAgentInput
+} from "../../../packages/shared/src/index.js";
 
 import { AgentRegistry } from "./registry.js";
 
 const port = Number(process.env.PORT ?? 4000);
 const host = process.env.HOST ?? "0.0.0.0";
-const databasePath = process.env.CLAWFORGE_DB_PATH ?? new URL("../data/clawforge.sqlite", import.meta.url).pathname;
+const databasePath =
+  process.env.RELAYCORE_DB_PATH ??
+  process.env.CLAWFORGE_DB_PATH ??
+  new URL("../data/relaycore.sqlite", import.meta.url).pathname;
 const webRoot = fileURLToPath(new URL("../../web/", import.meta.url));
 
 const registry = new AgentRegistry({ databasePath });
@@ -46,7 +54,7 @@ const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 
     if (request.method === "GET" && url.pathname === "/health") {
-      return sendJson(response, 200, { ok: true, service: "clawforge-api" });
+      return sendJson(response, 200, { ok: true, service: "relaycore-api" });
     }
 
     if (request.method === "GET" && url.pathname === "/api/agents") {
@@ -55,6 +63,20 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/topology") {
       return sendJson(response, 200, registry.getTopology());
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/providers") {
+      const providers = listProviders();
+      return sendJson(response, 200, {
+        providers,
+        summary: {
+          total: providers.length,
+          local: providers.filter((provider) => provider.category === "local").length,
+          cloud: providers.filter((provider) => provider.category === "cloud").length,
+          selfHosted: providers.filter((provider) => provider.category === "self-hosted").length,
+          routers: providers.filter((provider) => provider.category === "router").length
+        }
+      });
     }
 
     if (request.method === "POST" && url.pathname === "/api/agents") {
@@ -67,6 +89,13 @@ const server = createServer(async (request, response) => {
       const payload = parseCreateLinkInput(await readRequestBody(request));
       const link = registry.createLink(payload);
       return sendJson(response, 201, { link });
+    }
+
+    if (request.method === "PATCH" && url.pathname.startsWith("/api/agents/")) {
+      const agentId = url.pathname.slice("/api/agents/".length);
+      const payload = parseUpdateAgentInput(await readRequestBody(request));
+      const agent = registry.updateAgent(agentId, payload);
+      return sendJson(response, 200, { agent });
     }
 
     if (request.method === "GET") {
@@ -89,5 +118,5 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`ClawForge listening on http://${host}:${port}`);
+  console.log(`RelayCore listening on http://${host}:${port}`);
 });
