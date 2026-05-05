@@ -2,6 +2,9 @@ export const agentStatusValues = ["idle", "running", "paused", "error"];
 export const isolationModeValues = ["isolated", "selective", "mesh"];
 export const agentLinkModeValues = ["observe", "message", "delegate"];
 export const providerStatusValues = ["live-target", "planned", "experimental"];
+export const providerCategoryValues = ["cloud", "local", "self-hosted", "router"];
+export const providerReadinessValues = ["ready", "needs-config"];
+export const firstWaveProviderIds = ["ollama", "ollama-cloud", "z-ai", "anthropic", "openai"];
 
 export const providerCatalog = [
   { id: "openai", name: "OpenAI", category: "cloud", status: "live-target" },
@@ -56,6 +59,44 @@ export const providerCatalog = [
   { id: "hyperbolic", name: "Hyperbolic", category: "cloud", status: "planned" }
 ];
 
+const firstWaveConnectionSpecs = {
+  ollama: {
+    transport: "local-http",
+    requiredEnv: ["OLLAMA_BASE_URL"],
+    baseUrlEnv: "CLAWFORGE_OLLAMA_BASE_URL",
+    defaultBaseUrl: "http://127.0.0.1:11434",
+    healthStrategy: "http-get:/api/tags"
+  },
+  "ollama-cloud": {
+    transport: "cloud-http",
+    requiredEnv: ["OLLAMA_CLOUD_API_KEY"],
+    baseUrlEnv: "CLAWFORGE_OLLAMA_CLOUD_BASE_URL",
+    defaultBaseUrl: "https://ollama.com",
+    healthStrategy: "auth-http-get:/api/tags"
+  },
+  "z-ai": {
+    transport: "cloud-http",
+    requiredEnv: ["ZAI_API_KEY"],
+    baseUrlEnv: "CLAWFORGE_Z_AI_BASE_URL",
+    defaultBaseUrl: "https://api.z.ai",
+    healthStrategy: "auth-http-get:/v1/models"
+  },
+  anthropic: {
+    transport: "cloud-http",
+    requiredEnv: ["ANTHROPIC_API_KEY"],
+    baseUrlEnv: "CLAWFORGE_ANTHROPIC_BASE_URL",
+    defaultBaseUrl: "https://api.anthropic.com",
+    healthStrategy: "auth-http-get:/v1/models"
+  },
+  openai: {
+    transport: "cloud-http",
+    requiredEnv: ["OPENAI_API_KEY"],
+    baseUrlEnv: "CLAWFORGE_OPENAI_BASE_URL",
+    defaultBaseUrl: "https://api.openai.com/v1",
+    healthStrategy: "auth-http-get:/models"
+  }
+};
+
 const ensureString = (value, field, min, max) => {
   if (typeof value !== "string") {
     throw new Error(`${field} must be a string.`);
@@ -97,7 +138,7 @@ const ensureProvider = (input) => {
   const normalized = {
     id: ensureString(input.id, "id", 2, 80),
     name: ensureString(input.name, "name", 2, 120),
-    category: ensureEnum(input.category, "category", ["cloud", "local", "self-hosted", "router"]),
+    category: ensureEnum(input.category, "category", providerCategoryValues),
     status: ensureEnum(input.status, "status", providerStatusValues)
   };
 
@@ -113,6 +154,28 @@ const ensureUuid = (value, field) => {
   }
 
   return value;
+};
+
+const normalizeOptionalUrl = (value, fallback) => {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim().replace(/\/+$/, "");
+  }
+
+  return fallback;
+};
+
+const getProviderById = (id) => {
+  const provider = providerCatalog.find((entry) => entry.id === id);
+  if (!provider) {
+    throw new Error(`Unknown provider id: ${id}`);
+  }
+
+  return ensureProvider(provider);
+};
+
+const firstWavePriorityFor = (providerId) => {
+  const index = firstWaveProviderIds.indexOf(providerId);
+  return index === -1 ? null : index + 1;
 };
 
 export const parseAgent = (input) => ({
@@ -146,3 +209,54 @@ export const parseCreateLinkInput = (input) => ({
 });
 
 export const listProviders = () => providerCatalog.map((provider) => ensureProvider(provider));
+
+export const listProviderConnections = (env = process.env) => {
+  const prioritized = firstWaveProviderIds.map((providerId) => {
+    const provider = getProviderById(providerId);
+    const spec = firstWaveConnectionSpecs[providerId];
+    const configured = spec.requiredEnv.every((name) => typeof env[name] === "string" && env[name].trim().length > 0);
+
+    return {
+      ...provider,
+      priority: firstWavePriorityFor(providerId),
+      transport: spec.transport,
+      requiredEnv: [...spec.requiredEnv],
+      configured,
+      readiness: configured ? "ready" : "needs-config",
+      baseUrl: normalizeOptionalUrl(env[spec.baseUrlEnv], spec.defaultBaseUrl),
+      healthStrategy: spec.healthStrategy
+    };
+  });
+
+  const remaining = listProviders()
+    .filter((provider) => !firstWaveProviderIds.includes(provider.id))
+    .map((provider) => ({
+      ...provider,
+      priority: null,
+      transport: provider.category === "local" ? "local-http" : "cloud-http",
+      requiredEnv: [],
+      configured: false,
+      readiness: "needs-config",
+      baseUrl: null,
+      healthStrategy: "planned"
+    }));
+
+  return [...prioritized, ...remaining];
+};
+
+export const getProviderReadinessSummary = (env = process.env) => {
+  const providers = listProviderConnections(env).filter((provider) => provider.priority !== null);
+  const ready = providers.filter((provider) => provider.configured);
+  const pending = providers.filter((provider) => !provider.configured);
+
+  return {
+    firstWave: {
+      total: providers.length,
+      configured: ready.length,
+      pendingCount: pending.length,
+      ready: ready.map((provider) => provider.id),
+      pending: pending.map((provider) => provider.id)
+    },
+    providers
+  };
+};
