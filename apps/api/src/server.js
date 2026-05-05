@@ -4,6 +4,7 @@ import { extname, join, normalize, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  listAgentTemplates,
   listProviders,
   parseCreateAgentInput,
   parseCreateLinkInput,
@@ -80,6 +81,18 @@ const server = createServer(async (request, response) => {
       });
     }
 
+    if (request.method === "GET" && url.pathname === "/api/templates") {
+      const templates = listAgentTemplates();
+      return sendJson(response, 200, {
+        templates,
+        summary: {
+          total: templates.length,
+          collaborative: templates.filter((template) => template.peerAccess).length,
+          isolated: templates.filter((template) => template.isolationMode === "isolated").length
+        }
+      });
+    }
+
     if (request.method === "GET" && url.pathname === "/api/onboarding") {
       return sendJson(
         response,
@@ -88,7 +101,8 @@ const server = createServer(async (request, response) => {
           host,
           port,
           topology: registry.getTopology(),
-          providers: listProviders()
+          providers: listProviders(),
+          templates: listAgentTemplates()
         })
       );
     }
