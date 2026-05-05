@@ -6,6 +6,8 @@ const state = {
 const ui = {
   activeAgents: document.querySelector("#active-agents"),
   maxAgents: document.querySelector("#max-agents"),
+  machineActiveAgents: document.querySelector("#machine-active-agents"),
+  machineMaxAgents: document.querySelector("#machine-max-agents"),
   linkModes: document.querySelector("#link-modes"),
   agentGrid: document.querySelector("#agent-grid"),
   linkGrid: document.querySelector("#link-grid"),
@@ -32,6 +34,8 @@ const render = () => {
 
   ui.activeAgents.textContent = String(topology.capacity.activeAgents);
   ui.maxAgents.textContent = String(topology.capacity.maxAgentsPerMachine);
+  ui.machineActiveAgents.textContent = String(topology.capacity.activeAgents);
+  ui.machineMaxAgents.textContent = String(topology.capacity.maxAgentsPerMachine);
 
   ui.linkModes.replaceChildren(
     ...topology.capacity.supportedLinkModes.map((mode) => {
@@ -153,8 +157,8 @@ ui.form.addEventListener("submit", async (event) => {
   }
 
   ui.form.reset();
-  ui.form.provider.value = "openai";
-  ui.form.model.value = "gpt-5.4";
+  ui.form.provider.value = "ollama";
+  ui.form.model.value = "qwen3";
   ui.form.isolationMode.value = "selective";
   ui.form.maxConcurrentTasks.value = "4";
   ui.form.peerAccess.checked = true;
