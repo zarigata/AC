@@ -155,13 +155,15 @@
 
                 <label>
                   Provider
-                  <input name="provider" value="ollama" required />
+                  <select name="provider" id="agent-provider"></select>
                 </label>
 
                 <label>
                   Model
-                  <input name="model" value="qwen3" required />
+                  <input name="model" id="agent-model" value="qwen3" required />
                 </label>
+
+                <p class="field-note" id="provider-hint">Recommended model will appear when you pick a provider.</p>
 
                 <label>
                   Isolation mode
@@ -183,6 +185,39 @@
                 </label>
 
                 <button class="primary" type="submit">Create agent</button>
+              </form>
+            </div>
+          </section>
+
+          <section class="window">
+            <div class="window-bar">
+              <span>link_builder.exe</span>
+              <span>LIVE</span>
+            </div>
+            <div class="window-body">
+              <div class="section-label">Topology</div>
+              <h2>Create an agent link</h2>
+              <p class="muted">
+                Turn isolated agents into a deliberate network without making people memorize UUIDs.
+              </p>
+
+              <form class="form-grid" id="link-form">
+                <label>
+                  Source agent
+                  <select name="sourceAgentId" id="link-source"></select>
+                </label>
+
+                <label>
+                  Link mode
+                  <select name="mode" id="link-mode"></select>
+                </label>
+
+                <label>
+                  Target agent
+                  <select name="targetAgentId" id="link-target"></select>
+                </label>
+
+                <button class="primary" type="submit">Create link</button>
               </form>
             </div>
           </section>
