@@ -240,6 +240,10 @@ h2 {
   border-bottom: 1px solid var(--line);
 }
 
+.metric.compact {
+  padding-top: 0;
+}
+
 .metric strong {
   font-size: 2rem;
   font-weight: 600;
@@ -255,7 +259,8 @@ h2 {
 
 .agent-grid,
 .form-grid,
-.provider-grid {
+.provider-grid,
+.provider-readiness {
   display: grid;
   gap: 14px;
 }
@@ -356,13 +361,18 @@ textarea {
   border-top: 1px solid var(--line);
 }
 
+.readiness-row {
+  padding: 0;
+}
+
 @media (max-width: 980px) {
   .hero-body,
   .main-grid {
     grid-template-columns: 1fr;
   }
 
-  .agent-row {
+  .agent-row,
+  .provider-row {
     grid-template-columns: 1fr;
   }
 
