@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { listProviders } from "../../../packages/shared/src/index.js";
 import { AgentRegistry } from "./registry.js";
 
 const createRegistry = () => new AgentRegistry({ databasePath: ":memory:" });
@@ -57,4 +58,37 @@ test("rejects self-links", () => {
       }),
     /cannot create a link to itself/
   );
+});
+
+test("ships a 50-provider catalog including ollama, ollama cloud, and z.ai", () => {
+  const providers = listProviders();
+  const ids = new Set(providers.map((provider) => provider.id));
+
+  assert.equal(providers.length, 50);
+  assert.equal(ids.has("ollama"), true);
+  assert.equal(ids.has("ollama-cloud"), true);
+  assert.equal(ids.has("z-ai"), true);
+});
+
+test("updates agent status and collaboration settings", () => {
+  const registry = createRegistry();
+  const agent = registry.createAgent({
+    name: "Operator",
+    purpose: "Monitor long-running work and adjust runtime posture.",
+    provider: "ollama",
+    model: "qwen3",
+    isolationMode: "isolated",
+    maxConcurrentTasks: 2,
+    peerAccess: false
+  });
+
+  const updated = registry.updateAgent(agent.id, {
+    status: "running",
+    isolationMode: "mesh",
+    peerAccess: true
+  });
+
+  assert.equal(updated.status, "running");
+  assert.equal(updated.isolationMode, "mesh");
+  assert.equal(updated.peerAccess, true);
 });
