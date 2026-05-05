@@ -127,7 +127,8 @@ h2 {
 }
 
 .agent-grid,
-.form-grid {
+.form-grid,
+.provider-grid {
   display: grid;
   gap: 14px;
 }
@@ -216,6 +217,15 @@ textarea {
 .link-row {
   grid-template-columns: repeat(3, auto);
   justify-content: start;
+}
+
+.provider-row {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
 }
 
 @media (max-width: 980px) {
