@@ -197,9 +197,14 @@ h2 {
 
 .lede,
 .muted,
-.agent-row p {
+.agent-row p,
+.field-note {
   color: var(--muted);
   line-height: 1.5;
+}
+
+.field-note {
+  font-size: 0.88rem;
 }
 
 .status-strip {
@@ -275,6 +280,11 @@ h2 {
   border-top: 1px solid var(--line);
 }
 
+.named-link-row {
+  grid-template-columns: repeat(3, minmax(0, auto));
+  justify-content: start;
+}
+
 .agent-meta {
   display: flex;
   flex-wrap: wrap;
@@ -289,6 +299,17 @@ h2 {
   border: 1px solid var(--line);
   color: var(--accent-3);
   white-space: nowrap;
+}
+
+.name-chip {
+  max-width: 100%;
+  white-space: normal;
+}
+
+.empty-state {
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
 }
 
 .form-grid label {
@@ -338,6 +359,14 @@ textarea {
   filter: brightness(1.06);
 }
 
+.primary:disabled,
+select:disabled,
+input:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .error {
   color: #ff98bf;
 }
@@ -345,11 +374,6 @@ textarea {
 .links {
   display: grid;
   gap: 10px;
-}
-
-.link-row {
-  grid-template-columns: repeat(3, auto);
-  justify-content: start;
 }
 
 .provider-row {
