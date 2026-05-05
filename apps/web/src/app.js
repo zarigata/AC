@@ -1,5 +1,6 @@
 const state = {
-  topology: null
+  topology: null,
+  providers: null
 };
 
 const ui = {
@@ -78,6 +79,28 @@ const render = () => {
       return row;
     })
   );
+
+  const providerSummary = document.querySelector("#provider-summary");
+  const providerGrid = document.querySelector("#provider-grid");
+  if (state.providers && providerSummary && providerGrid) {
+    providerSummary.textContent = `${state.providers.summary.total} providers planned`;
+    providerGrid.replaceChildren(
+      ...state.providers.providers.slice(0, 12).map((provider) => {
+        const row = document.createElement("div");
+        row.className = "provider-row";
+
+        const name = document.createElement("strong");
+        name.textContent = provider.name;
+
+        const meta = document.createElement("div");
+        meta.className = "agent-meta";
+        meta.append(createChip(provider.category), createChip(provider.status));
+
+        row.append(name, meta);
+        return row;
+      })
+    );
+  }
 };
 
 const loadTopology = async () => {
@@ -87,6 +110,16 @@ const loadTopology = async () => {
   }
 
   state.topology = await response.json();
+  render();
+};
+
+const loadProviders = async () => {
+  const response = await fetch("/api/providers");
+  if (!response.ok) {
+    throw new Error("Could not load providers.");
+  }
+
+  state.providers = await response.json();
   render();
 };
 
@@ -128,6 +161,6 @@ ui.form.addEventListener("submit", async (event) => {
   await loadTopology();
 });
 
-loadTopology().catch((error) => {
+Promise.all([loadTopology(), loadProviders()]).catch((error) => {
   showError(error instanceof Error ? error.message : "Unknown error");
 });
