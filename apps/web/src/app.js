@@ -12,7 +12,9 @@ const ui = {
   agentGrid: document.querySelector("#agent-grid"),
   linkGrid: document.querySelector("#link-grid"),
   form: document.querySelector("#agent-form"),
-  error: document.querySelector("#error")
+  error: document.querySelector("#error"),
+  providerReadyCount: document.querySelector("#provider-ready-count"),
+  providerReadinessList: document.querySelector("#provider-readiness-list")
 };
 
 const showError = (message) => {
@@ -24,6 +26,36 @@ const createChip = (text) => {
   const chip = document.createElement("span");
   chip.textContent = text;
   return chip;
+};
+
+const renderProviderReadiness = () => {
+  if (!state.providers || !ui.providerReadyCount || !ui.providerReadinessList) {
+    return;
+  }
+
+  const { readiness } = state.providers;
+  ui.providerReadyCount.textContent = `${readiness.firstWave.configured}/${readiness.firstWave.total}`;
+
+  ui.providerReadinessList.replaceChildren(
+    ...readiness.providers.map((provider) => {
+      const row = document.createElement("div");
+      row.className = "provider-row readiness-row";
+
+      const title = document.createElement("strong");
+      title.textContent = `${provider.priority}. ${provider.name}`;
+
+      const meta = document.createElement("div");
+      meta.className = "agent-meta";
+      meta.append(
+        createChip(provider.configured ? "configured" : "pending"),
+        createChip(provider.transport),
+        createChip(provider.readiness)
+      );
+
+      row.append(title, meta);
+      return row;
+    })
+  );
 };
 
 const render = () => {
@@ -105,6 +137,8 @@ const render = () => {
       })
     );
   }
+
+  renderProviderReadiness();
 };
 
 const loadTopology = async () => {
