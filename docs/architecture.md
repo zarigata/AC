@@ -1,5 +1,12 @@
 # Architecture
 
+## Product constraints
+
+- Must eventually cover the same core product surface as PicoClaw.
+- Must preserve the same small-factor spirit: lean runtime, fast startup, modest hardware expectations, and low-overhead operation.
+- Must remain conservative with token generation and prefer efficient routing over brute-force model usage.
+- Must use practical OpenClaw use-case research as an input to roadmap decisions, not just abstract parity checklists.
+
 ## First milestone goal
 
 Ship a credible vertical slice for a local-first multi-agent control plane:
@@ -51,3 +58,4 @@ Ship a credible vertical slice for a local-first multi-agent control plane:
 3. OpenClaw skill compatibility adapter
 4. Run history, metrics, and audit logs
 5. Background scheduler and execution workers
+6. Performance budget work to protect footprint and startup speed
