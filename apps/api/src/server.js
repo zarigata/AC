@@ -4,6 +4,8 @@ import { extname, join, normalize, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  getProviderReadinessSummary,
+  listProviderConnections,
   listProviders,
   parseCreateAgentInput,
   parseCreateLinkInput
@@ -45,6 +47,21 @@ const contentTypeFor = (path) => {
   }
 };
 
+const providerSummary = () => {
+  const providers = listProviders();
+  return {
+    providers,
+    summary: {
+      total: providers.length,
+      local: providers.filter((provider) => provider.category === "local").length,
+      cloud: providers.filter((provider) => provider.category === "cloud").length,
+      selfHosted: providers.filter((provider) => provider.category === "self-hosted").length,
+      routers: providers.filter((provider) => provider.category === "router").length
+    },
+    readiness: getProviderReadinessSummary(process.env)
+  };
+};
+
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
@@ -62,16 +79,13 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/providers") {
-      const providers = listProviders();
+      return sendJson(response, 200, providerSummary());
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/provider-readiness") {
       return sendJson(response, 200, {
-        providers,
-        summary: {
-          total: providers.length,
-          local: providers.filter((provider) => provider.category === "local").length,
-          cloud: providers.filter((provider) => provider.category === "cloud").length,
-          selfHosted: providers.filter((provider) => provider.category === "self-hosted").length,
-          routers: providers.filter((provider) => provider.category === "router").length
-        }
+        providers: listProviderConnections(process.env),
+        summary: getProviderReadinessSummary(process.env)
       });
     }
 
