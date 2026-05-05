@@ -65,7 +65,7 @@ RelayCore should learn from real OpenClaw usage, not just abstract feature lists
 - seeded machine topology
 - provider catalog with 50 target backends
 - first provider roadmap with ordered implementation priorities
-- tests covering agent capacity, self-link rejection, and provider catalog coverage
+- tests covering agent capacity, self-link rejection, provider catalog coverage, and LAN onboarding logic
 
 ## Current provider priority
 
@@ -101,8 +101,10 @@ The API and UI are served from `http://localhost:4000`.
 - `GET /api/topology`
 - `GET /api/agents`
 - `POST /api/agents`
+- `PATCH /api/agents/:id`
 - `POST /api/links`
 - `GET /api/providers`
+- `GET /api/onboarding`
 
 ## Roadmap themes
 
