@@ -10,6 +10,7 @@ import {
   parseUpdateAgentInput
 } from "../../../packages/shared/src/index.js";
 
+import { getOnboardingSnapshot } from "./onboarding.js";
 import { AgentRegistry } from "./registry.js";
 
 const port = Number(process.env.PORT ?? 4000);
@@ -77,6 +78,19 @@ const server = createServer(async (request, response) => {
           routers: providers.filter((provider) => provider.category === "router").length
         }
       });
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/onboarding") {
+      return sendJson(
+        response,
+        200,
+        getOnboardingSnapshot({
+          host,
+          port,
+          topology: registry.getTopology(),
+          providers: listProviders()
+        })
+      );
     }
 
     if (request.method === "POST" && url.pathname === "/api/agents") {
