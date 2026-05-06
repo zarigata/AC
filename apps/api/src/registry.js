@@ -40,6 +40,28 @@ export class AgentRegistry {
         FOREIGN KEY (sourceAgentId) REFERENCES agents(id) ON DELETE CASCADE,
         FOREIGN KEY (targetAgentId) REFERENCES agents(id) ON DELETE CASCADE
       );
+
+      CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY,
+        agentId TEXT NOT NULL,
+        title TEXT NOT NULL DEFAULT '',
+        model TEXT NOT NULL DEFAULT '',
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS messages (
+        id TEXT PRIMARY KEY,
+        sessionId TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        tokensIn INTEGER NOT NULL DEFAULT 0,
+        tokensOut INTEGER NOT NULL DEFAULT 0,
+        model TEXT NOT NULL DEFAULT '',
+        createdAt TEXT NOT NULL,
+        FOREIGN KEY (sessionId) REFERENCES sessions(id) ON DELETE CASCADE
+      );
     `);
   }
 
@@ -178,6 +200,151 @@ export class AgentRegistry {
       },
       agents,
       links
+    };
+  }
+
+  /* ─── Single Agent CRUD ─── */
+
+  getAgent(id) {
+    const row = this.db.prepare("SELECT * FROM agents WHERE id = ?").get(id);
+    if (!row) return null;
+    return parseAgent({ ...row, peerAccess: Boolean(row.peerAccess) });
+  }
+
+  updateAgent(id, updates) {
+    const existing = this.getAgent(id);
+    if (!existing) return null;
+
+    const allowed = ["name", "purpose", "status", "provider", "model", "isolationMode", "maxConcurrentTasks", "peerAccess"];
+    const fields = [];
+    const values = [];
+
+    for (const key of allowed) {
+      if (key in updates) {
+        fields.push(`${key} = ?`);
+        values.push(key === "peerAccess" ? Number(updates[key]) : updates[key]);
+      }
+    }
+
+    if (fields.length === 0) return existing;
+
+    fields.push("updatedAt = ?");
+    values.push(now());
+    values.push(id);
+
+    this.db.prepare(`UPDATE agents SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+    return this.getAgent(id);
+  }
+
+  deleteAgent(id) {
+    const existing = this.getAgent(id);
+    if (!existing) return false;
+    this.db.prepare("DELETE FROM agents WHERE id = ?").run(id);
+    return true;
+  }
+
+  /* ─── Link Delete ─── */
+
+  deleteLink(input) {
+    const result = this.db
+      .prepare("DELETE FROM agent_links WHERE sourceAgentId = ? AND targetAgentId = ?")
+      .run(input.sourceAgentId, input.targetAgentId);
+    return result.changes > 0;
+  }
+
+  /* ─── Sessions ─── */
+
+  listSessions(agentId) {
+    return this.db
+      .prepare("SELECT * FROM sessions WHERE agentId = ? ORDER BY createdAt DESC")
+      .all(agentId);
+  }
+
+  createSession(agentId, input = {}) {
+    const agent = this.getAgent(agentId);
+    if (!agent) return null;
+
+    const id = crypto.randomUUID();
+    const timestamp = now();
+    const session = {
+      id,
+      agentId,
+      title: input.title || "New session",
+      model: input.model || agent.model,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+
+    this.db
+      .prepare("INSERT INTO sessions (id, agentId, title, model, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(session.id, session.agentId, session.title, session.model, session.createdAt, session.updatedAt);
+
+    return session;
+  }
+
+  /* ─── Messages ─── */
+
+  listMessages(agentId, sessionId) {
+    return this.db
+      .prepare(
+        `SELECT m.* FROM messages m
+         JOIN sessions s ON m.sessionId = s.id
+         WHERE s.agentId = ? AND m.sessionId = ?
+         ORDER BY m.createdAt ASC`
+      )
+      .all(agentId, sessionId);
+  }
+
+  createMessage(agentId, sessionId, input) {
+    const session = this.db.prepare("SELECT * FROM sessions WHERE id = ? AND agentId = ?").get(sessionId, agentId);
+    if (!session) return null;
+
+    const id = crypto.randomUUID();
+    const timestamp = now();
+    const message = {
+      id,
+      sessionId,
+      role: input.role || "user",
+      content: input.content || "",
+      tokensIn: input.tokensIn || 0,
+      tokensOut: input.tokensOut || 0,
+      model: input.model || session.model,
+      createdAt: timestamp
+    };
+
+    this.db
+      .prepare("INSERT INTO messages (id, sessionId, role, content, tokensIn, tokensOut, model, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(message.id, message.sessionId, message.role, message.content, message.tokensIn, message.tokensOut, message.model, message.createdAt);
+
+    this.db.prepare("UPDATE sessions SET updatedAt = ? WHERE id = ?").run(timestamp, sessionId);
+
+    return message;
+  }
+
+  /* ─── Usage Stats ─── */
+
+  getAgentUsage(agentId) {
+    const agent = this.getAgent(agentId);
+    if (!agent) return null;
+
+    const sessionCount = this.db.prepare("SELECT COUNT(*) as count FROM sessions WHERE agentId = ?").get(agentId).count;
+    const tokenStats = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(tokensIn), 0) as totalTokensIn,
+                COALESCE(SUM(tokensOut), 0) as totalTokensOut,
+                COUNT(*) as totalMessages
+         FROM messages m
+         JOIN sessions s ON m.sessionId = s.id
+         WHERE s.agentId = ?`
+      )
+      .get(agentId);
+
+    return {
+      agentId,
+      sessions: sessionCount,
+      totalTokensIn: tokenStats.totalTokensIn,
+      totalTokensOut: tokenStats.totalTokensOut,
+      totalMessages: tokenStats.totalMessages
     };
   }
 }

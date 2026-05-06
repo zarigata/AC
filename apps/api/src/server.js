@@ -13,9 +13,12 @@ import {
 
 import { AgentRegistry } from "./registry.js";
 
+const VERSION = "0.2.0";
+const startTime = Date.now();
+
 const port = Number(process.env.PORT ?? 4000);
 const host = process.env.HOST ?? "0.0.0.0";
-const databasePath = process.env.CLAWFORGE_DB_PATH ?? new URL("../data/clawforge.sqlite", import.meta.url).pathname;
+const databasePath = process.env.ZSIISTANT_DB_PATH ?? new URL("../data/zsiistant.sqlite", import.meta.url).pathname;
 const webRoot = fileURLToPath(new URL("../../web/", import.meta.url));
 
 const registry = new AgentRegistry({ databasePath });
@@ -67,7 +70,101 @@ const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 
     if (request.method === "GET" && url.pathname === "/health") {
-      return sendJson(response, 200, { ok: true, service: "clawforge-api" });
+      return sendJson(response, 200, {
+        ok: true,
+        service: "zsiistant-api",
+        version: VERSION,
+        uptime: Math.floor((Date.now() - startTime) / 1000)
+      });
+    }
+
+    /* ─── Single Agent ─── */
+
+    const agentMatch = url.pathname.match(/^\/api\/agents\/([\w-]+)$/);
+
+    if (agentMatch) {
+      const agentId = agentMatch[1];
+
+      if (request.method === "GET") {
+        const agent = registry.getAgent(agentId);
+        if (!agent) return sendJson(response, 404, { error: "Agent not found" });
+        return sendJson(response, 200, { agent });
+      }
+
+      if (request.method === "PATCH") {
+        const body = await readRequestBody(request);
+        const agent = registry.updateAgent(agentId, body);
+        if (!agent) return sendJson(response, 404, { error: "Agent not found" });
+        return sendJson(response, 200, { agent });
+      }
+
+      if (request.method === "DELETE") {
+        const deleted = registry.deleteAgent(agentId);
+        if (!deleted) return sendJson(response, 404, { error: "Agent not found" });
+        return sendJson(response, 200, { deleted: true });
+      }
+    }
+
+    /* ─── Sessions ─── */
+
+    const sessionsMatch = url.pathname.match(/^\/api\/agents\/([\w-]+)\/sessions$/);
+
+    if (sessionsMatch && request.method === "GET") {
+      const sessions = registry.listSessions(sessionsMatch[1]);
+      return sendJson(response, 200, { sessions });
+    }
+
+    if (sessionsMatch && request.method === "POST") {
+      const body = await readRequestBody(request);
+      const session = registry.createSession(sessionsMatch[1], body);
+      if (!session) return sendJson(response, 404, { error: "Agent not found" });
+      return sendJson(response, 201, { session });
+    }
+
+    const sessionMsgMatch = url.pathname.match(/^\/api\/agents\/([\w-]+)\/sessions\/([\w-]+)\/messages$/);
+
+    if (sessionMsgMatch && request.method === "GET") {
+      const messages = registry.listMessages(sessionMsgMatch[1], sessionMsgMatch[2]);
+      return sendJson(response, 200, { messages });
+    }
+
+    if (sessionMsgMatch && request.method === "POST") {
+      const body = await readRequestBody(request);
+      const message = registry.createMessage(sessionMsgMatch[1], sessionMsgMatch[2], body);
+      if (!message) return sendJson(response, 404, { error: "Not found" });
+      return sendJson(response, 201, { message });
+    }
+
+    /* ─── Links ─── */
+
+    if (request.method === "DELETE" && url.pathname === "/api/links") {
+      const body = await readRequestBody(request);
+      const deleted = registry.deleteLink(body);
+      if (!deleted) return sendJson(response, 404, { error: "Link not found" });
+      return sendJson(response, 200, { deleted: true });
+    }
+
+    /* ─── Settings ─── */
+
+    if (request.method === "GET" && url.pathname === "/api/settings") {
+      return sendJson(response, 200, {
+        version: VERSION,
+        defaultModel: "qwen3",
+        maxAgents: 100,
+        supportedIsolationModes: ["isolated", "selective", "mesh"],
+        supportedLinkModes: ["observe", "message", "delegate"],
+        providers: listProviders().length
+      });
+    }
+
+    /* ─── Usage Stats ─── */
+
+    const usageMatch = url.pathname.match(/^\/api\/agents\/([\w-]+)\/usage$/);
+
+    if (usageMatch && request.method === "GET") {
+      const usage = registry.getAgentUsage(usageMatch[1]);
+      if (!usage) return sendJson(response, 404, { error: "Agent not found" });
+      return sendJson(response, 200, usage);
     }
 
     if (request.method === "GET" && url.pathname === "/api/agents") {
@@ -116,10 +213,11 @@ const server = createServer(async (request, response) => {
     sendJson(response, 404, { error: "Not found" });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    sendJson(response, 400, { error: message });
+    const status = error.status ?? 400;
+    sendJson(response, status, { error: message });
   }
 });
 
 server.listen(port, host, () => {
-  console.log(`ClawForge listening on http://${host}:${port}`);
+  console.log(`Zsiistant v${VERSION} listening on http://${host}:${port}`);
 });
