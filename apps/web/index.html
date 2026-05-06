@@ -3,245 +3,249 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ClawForge // Webcore Control Room</title>
+    <title>RelayCore // Local Agent Control Plane</title>
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
-    <div class="wallpaper"></div>
-    <div class="scanlines"></div>
-    <div class="shell">
-      <header class="os-bar">
-        <div>ClawForge Webcore Control Room</div>
-        <div class="os-actions">
-          <span>_</span>
-          <span>[]</span>
-          <span>X</span>
+    <div class="app-shell">
+      <header class="topbar reveal">
+        <div>
+          <p class="micro-label">RelayCore</p>
+          <a class="brand-lockup" href="/">RelayCore</a>
+        </div>
+        <div class="topbar-status">
+          <span class="status-pill">LAN-first runtime</span>
+          <span class="status-pill">Provider-flexible</span>
+          <span class="status-pill">Token-aware</span>
         </div>
       </header>
 
-      <section class="hero-window window">
-        <div class="window-bar">
-          <span>clawforge_boot.exe</span>
-          <span>dialup://connected</span>
-        </div>
-        <div class="hero-body">
-          <div>
-            <div class="eyebrow">Webcore Operator Surface</div>
-            <h1>Small-factor multi-agent control with old-web energy.</h1>
-            <p class="lede">
-              Built to stay compact and fast like PicoClaw, while scaling to 100 agents, 50 providers,
-              shared skills, and stricter token discipline.
-            </p>
-            <div class="status-strip">
-              <span class="badge">Ollama first</span>
-              <span class="badge">Token conservative</span>
-              <span class="badge">OpenClaw use-case driven</span>
-            </div>
-          </div>
-          <div class="hero-side">
-            <div class="mini-panel">
-              <strong id="active-agents">--</strong>
-              <span>active agents</span>
-            </div>
-            <div class="mini-panel">
-              <strong id="max-agents">--</strong>
-              <span>agent ceiling</span>
-            </div>
+      <section class="hero reveal">
+        <div class="hero-copy">
+          <p class="eyebrow">Multi-agent control plane</p>
+          <h1>Run a compact agent fleet without losing operational clarity.</h1>
+          <p class="lede">
+            RelayCore is a local-first orchestration surface for building, routing, and supervising up to
+            100 agents with strict isolation rules, broad model support, and disciplined token usage.
+          </p>
+          <div class="hero-actions">
+            <a class="primary-action" href="#agent-form">Launch an agent</a>
+            <p class="support-copy">Priority stack: Ollama, Ollama Cloud, Z.AI, Anthropic, OpenAI.</p>
           </div>
         </div>
-        <div class="marquee"><span>geocities // windows xp // pop-up control room // low-poly future // better outcomes per token //</span></div>
+
+        <div class="hero-rail">
+          <section class="metric-panel">
+            <span class="metric-label">Agents online</span>
+            <strong id="active-agents">--</strong>
+            <p>Current machine occupancy</p>
+          </section>
+          <section class="metric-panel">
+            <span class="metric-label">Capacity ceiling</span>
+            <strong id="max-agents">--</strong>
+            <p>Hard limit per machine</p>
+          </section>
+        </div>
       </section>
 
-      <main class="main-grid">
-        <aside class="left-column">
-          <section class="window">
-            <div class="window-bar">
-              <span>machine_stats.ini</span>
-              <span>F1</span>
-            </div>
-            <div class="window-body">
-              <h2>Machine capacity</h2>
-              <div class="metric">
-                <strong id="machine-active-agents">--</strong>
-                <span>active agents</span>
-              </div>
-              <div class="metric">
-                <strong id="machine-max-agents">--</strong>
-                <span>max agents per machine</span>
-              </div>
-            </div>
-          </section>
+      <section class="metrics-band reveal">
+        <article class="band-metric">
+          <span>Runtime load</span>
+          <strong id="machine-active-agents">--</strong>
+          <p>active agents on the local node</p>
+        </article>
+        <article class="band-metric">
+          <span>Fleet budget</span>
+          <strong id="machine-max-agents">--</strong>
+          <p>maximum registered agents per machine</p>
+        </article>
+        <article class="band-metric">
+          <span>Provider matrix</span>
+          <strong id="provider-summary">--</strong>
+          <p>catalog breadth with live-target priority lanes</p>
+        </article>
+      </section>
 
-          <section class="window">
-            <div class="window-bar">
-              <span>link_modes.dll</span>
-              <span>F2</span>
-            </div>
-            <div class="window-body">
-              <h2>Link modes</h2>
-              <ul class="plain-list" id="link-modes"></ul>
-            </div>
-          </section>
-
-          <section class="window">
-            <div class="window-bar">
-              <span>project_rules.txt</span>
-              <span>F3</span>
-            </div>
-            <div class="window-body">
-              <h2>Build rules</h2>
-              <ul class="plain-list">
-                <li>Match PicoClaw core surface</li>
-                <li>Protect footprint and startup speed</li>
-                <li>Prefer lean prompts and smaller models</li>
-                <li>Learn from real OpenClaw use cases</li>
-              </ul>
-            </div>
-          </section>
-        </aside>
-
-        <section class="center-column">
-          <section class="window">
-            <div class="window-bar">
-              <span>agent_graph.html</span>
-              <span>LIVE</span>
-            </div>
-            <div class="window-body">
+      <main class="workspace">
+        <section class="primary-column">
+          <section class="surface reveal">
+            <div class="surface-heading">
               <div>
-                <div class="section-label">Agents</div>
-                <h2>Current machine graph</h2>
+                <p class="section-label">First Run</p>
+                <h2>LAN onboarding</h2>
               </div>
-              <p id="error" class="error" hidden></p>
-              <div class="agent-grid" id="agent-grid"></div>
+              <p class="surface-note">The easiest path to getting RelayCore visible and usable on your local network.</p>
             </div>
+            <div class="onboarding-grid">
+              <article class="onboarding-card">
+                <span class="metric-label">This machine</span>
+                <a class="access-link" id="local-url" href="#">--</a>
+                <p>Use this address on the same device where RelayCore is running.</p>
+              </article>
+              <article class="onboarding-card">
+                <span class="metric-label">Local network</span>
+                <div class="lan-url-list" id="lan-url-list"></div>
+                <p id="lan-url-note">Open one of these from another phone, laptop, or tablet on the same LAN.</p>
+              </article>
+            </div>
+            <div class="checklist" id="onboarding-checklist"></div>
           </section>
 
-          <section class="window">
-            <div class="window-bar">
-              <span>connections.map</span>
-              <span>LIVE</span>
+          <section class="surface reveal">
+            <div class="surface-heading">
+              <div>
+                <p class="section-label">Fleet posture</p>
+                <h2>Live operating summary</h2>
+              </div>
+              <p class="surface-note">Quick read on isolation mix, coordination access, and provider spread.</p>
             </div>
-            <div class="window-body">
-              <div class="section-label">Communication</div>
-              <h2>Current agent links</h2>
-              <div class="plain-list links" id="link-grid"></div>
+            <div class="insight-grid" id="insight-grid"></div>
+          </section>
+
+          <section class="surface reveal">
+            <div class="surface-heading">
+              <div>
+                <p class="section-label">Live fleet</p>
+                <h2>Active agent registry</h2>
+              </div>
+              <p class="surface-note">Role, backend, isolation policy, and routing posture.</p>
             </div>
+            <div class="toolbar">
+              <label class="toolbar-field">
+                Search
+                <input id="agent-search" placeholder="Find by name, mission, model, or provider" />
+              </label>
+              <label class="toolbar-field">
+                Isolation
+                <select id="agent-isolation-filter">
+                  <option value="all">all modes</option>
+                  <option value="isolated">isolated</option>
+                  <option value="selective">selective</option>
+                  <option value="mesh">mesh</option>
+                </select>
+              </label>
+            </div>
+            <p id="error" class="error" hidden></p>
+            <div class="agent-grid" id="agent-grid"></div>
+          </section>
+
+          <section class="surface reveal">
+            <div class="surface-heading">
+              <div>
+                <p class="section-label">Communication</p>
+                <h2>Link topology</h2>
+              </div>
+              <p class="surface-note">Explicit coordination paths between agents.</p>
+            </div>
+            <form class="link-form" id="link-form">
+              <label>
+                Source agent
+                <select id="link-source" name="sourceAgentId" required></select>
+              </label>
+              <label>
+                Mode
+                <select id="link-mode" name="mode" required></select>
+              </label>
+              <label>
+                Target agent
+                <select id="link-target" name="targetAgentId" required></select>
+              </label>
+              <button class="primary" type="submit">Create link</button>
+            </form>
+            <div class="link-grid" id="link-grid"></div>
           </section>
         </section>
 
-        <aside class="right-column">
-          <section class="window">
-            <div class="window-bar">
-              <span>agent_wizard.exe</span>
-              <span>NEW</span>
-            </div>
-            <div class="window-body">
-              <div class="section-label">Provisioning</div>
-              <h2>Create a new agent</h2>
-              <p class="muted">
-                Define role, model backend, and how social this agent is allowed to be.
-              </p>
-
-              <form class="form-grid" id="agent-form">
-                <label>
-                  Name
-                  <input name="name" required minlength="2" maxlength="80" />
-                </label>
-
-                <label>
-                  Purpose
-                  <textarea name="purpose" required minlength="10" maxlength="240"></textarea>
-                </label>
-
-                <label>
-                  Provider
-                  <select name="provider" id="agent-provider"></select>
-                </label>
-
-                <label>
-                  Model
-                  <input name="model" id="agent-model" value="qwen3" required />
-                </label>
-
-                <p class="field-note" id="provider-hint">Recommended model will appear when you pick a provider.</p>
-
-                <label>
-                  Isolation mode
-                  <select name="isolationMode">
-                    <option value="isolated">isolated</option>
-                    <option value="selective" selected>selective</option>
-                    <option value="mesh">mesh</option>
-                  </select>
-                </label>
-
-                <label>
-                  Max concurrent tasks
-                  <input name="maxConcurrentTasks" type="number" min="1" max="32" value="4" />
-                </label>
-
-                <label class="toggle">
-                  <input name="peerAccess" type="checkbox" checked />
-                  Allow peer access
-                </label>
-
-                <button class="primary" type="submit">Create agent</button>
-              </form>
-            </div>
-          </section>
-
-          <section class="window">
-            <div class="window-bar">
-              <span>link_builder.exe</span>
-              <span>LIVE</span>
-            </div>
-            <div class="window-body">
-              <div class="section-label">Topology</div>
-              <h2>Create an agent link</h2>
-              <p class="muted">
-                Turn isolated agents into a deliberate network without making people memorize UUIDs.
-              </p>
-
-              <form class="form-grid" id="link-form">
-                <label>
-                  Source agent
-                  <select name="sourceAgentId" id="link-source"></select>
-                </label>
-
-                <label>
-                  Link mode
-                  <select name="mode" id="link-mode"></select>
-                </label>
-
-                <label>
-                  Target agent
-                  <select name="targetAgentId" id="link-target"></select>
-                </label>
-
-                <button class="primary" type="submit">Create link</button>
-              </form>
-            </div>
-          </section>
-
-          <section class="window">
-            <div class="window-bar">
-              <span>provider_index.net</span>
-              <span>50X</span>
-            </div>
-            <div class="window-body">
-              <div class="section-label">Providers</div>
-              <h2 id="provider-summary">Provider catalog</h2>
-              <p class="muted">
-                The near-term order is Ollama, Ollama Cloud, Z.AI, Anthropic, then OpenAI.
-              </p>
-              <div class="provider-readiness">
-                <div class="metric compact">
-                  <strong id="provider-ready-count">--</strong>
-                  <span>first-wave providers configured</span>
-                </div>
-                <div class="plain-list" id="provider-readiness-list"></div>
+        <aside class="secondary-column">
+          <section class="surface reveal">
+            <div class="surface-heading">
+              <div>
+                <p class="section-label">Provisioning</p>
+                <h2>Deploy a new worker</h2>
               </div>
-              <div class="provider-grid" id="provider-grid"></div>
+              <p class="surface-note">Pick the role, model target, and collaboration envelope.</p>
             </div>
+
+            <form class="form-grid" id="agent-form">
+              <label>
+                Agent name
+                <input name="name" required minlength="2" maxlength="80" />
+              </label>
+
+              <label>
+                Mission
+                <textarea name="purpose" required minlength="10" maxlength="240"></textarea>
+              </label>
+
+              <label>
+                Provider
+                <select name="provider" id="provider-input"></select>
+              </label>
+
+              <label>
+                Model
+                <input name="model" id="model-input" list="model-suggestions" value="qwen3" required />
+                <datalist id="model-suggestions"></datalist>
+              </label>
+
+              <label>
+                Isolation policy
+                <select name="isolationMode">
+                  <option value="isolated">isolated</option>
+                  <option value="selective" selected>selective</option>
+                  <option value="mesh">mesh</option>
+                </select>
+              </label>
+
+              <label>
+                Concurrent tasks
+                <input name="maxConcurrentTasks" type="number" min="1" max="32" value="4" />
+              </label>
+
+              <label class="toggle">
+                <input name="peerAccess" type="checkbox" checked />
+                Allow peer access
+              </label>
+
+              <button class="primary" type="submit">Create agent</button>
+            </form>
+          </section>
+
+          <section class="surface reveal">
+            <div class="surface-heading">
+              <div>
+                <p class="section-label">Execution policy</p>
+                <h2>Operating rules</h2>
+              </div>
+            </div>
+            <ul class="plain-list policy-list">
+              <li>Keep the runtime lean enough to preserve fast startup and low idle cost.</li>
+              <li>Use smaller models for routing, filtering, and health work by default.</li>
+              <li>Expose agent-to-agent permissions instead of assuming broad mesh access.</li>
+              <li>Expand tools and skills without bloating the everyday operator surface.</li>
+            </ul>
+          </section>
+
+          <section class="surface reveal">
+            <div class="surface-heading">
+              <div>
+                <p class="section-label">Platform coverage</p>
+                <h2>Provider and tooling matrix</h2>
+              </div>
+              <p class="surface-note">Twelve visible entries from the wider roadmap.</p>
+            </div>
+            <div class="provider-grid" id="provider-grid"></div>
+            <div class="provider-stats" id="provider-stats"></div>
+          </section>
+
+          <section class="surface reveal">
+            <div class="surface-heading">
+              <div>
+                <p class="section-label">Link modes</p>
+                <h2>Allowed coordination patterns</h2>
+              </div>
+            </div>
+            <ul class="plain-list mode-list" id="link-modes"></ul>
           </section>
         </aside>
       </main>

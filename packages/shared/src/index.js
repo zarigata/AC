@@ -2,14 +2,11 @@ export const agentStatusValues = ["idle", "running", "paused", "error"];
 export const isolationModeValues = ["isolated", "selective", "mesh"];
 export const agentLinkModeValues = ["observe", "message", "delegate"];
 export const providerStatusValues = ["live-target", "planned", "experimental"];
-export const providerCategoryValues = ["cloud", "local", "self-hosted", "router"];
-export const providerReadinessValues = ["ready", "needs-config"];
-export const firstWaveProviderIds = ["ollama", "ollama-cloud", "z-ai", "anthropic", "openai"];
 
 export const providerCatalog = [
-  { id: "openai", name: "OpenAI", category: "cloud", status: "live-target", suggestedModel: "gpt-5.4-mini" },
+  { id: "openai", name: "OpenAI", category: "cloud", status: "live-target" },
   { id: "azure-openai", name: "Azure OpenAI", category: "cloud", status: "planned" },
-  { id: "anthropic", name: "Anthropic", category: "cloud", status: "live-target", suggestedModel: "claude-sonnet-4.5" },
+  { id: "anthropic", name: "Anthropic", category: "cloud", status: "live-target" },
   { id: "google-gemini", name: "Google Gemini", category: "cloud", status: "planned" },
   { id: "vertex-ai", name: "Vertex AI", category: "cloud", status: "planned" },
   { id: "aws-bedrock", name: "AWS Bedrock", category: "cloud", status: "planned" },
@@ -36,8 +33,8 @@ export const providerCatalog = [
   { id: "deepinfra", name: "DeepInfra", category: "cloud", status: "planned" },
   { id: "writer", name: "Writer", category: "cloud", status: "planned" },
   { id: "ai21", name: "AI21", category: "cloud", status: "planned" },
-  { id: "ollama", name: "Ollama", category: "local", status: "live-target", suggestedModel: "qwen3" },
-  { id: "ollama-cloud", name: "Ollama Cloud", category: "cloud", status: "live-target", suggestedModel: "qwen3" },
+  { id: "ollama", name: "Ollama", category: "local", status: "live-target" },
+  { id: "ollama-cloud", name: "Ollama Cloud", category: "cloud", status: "live-target" },
   { id: "lm-studio", name: "LM Studio", category: "local", status: "planned" },
   { id: "vllm", name: "vLLM", category: "self-hosted", status: "planned" },
   { id: "llama-cpp", name: "llama.cpp Server", category: "local", status: "planned" },
@@ -46,7 +43,7 @@ export const providerCatalog = [
   { id: "koboldcpp", name: "KoboldCpp", category: "local", status: "experimental" },
   { id: "xinference", name: "Xinference", category: "self-hosted", status: "planned" },
   { id: "jan", name: "Jan", category: "local", status: "experimental" },
-  { id: "z-ai", name: "Z.AI", category: "cloud", status: "live-target", suggestedModel: "glm-4.6" },
+  { id: "z-ai", name: "Z.AI", category: "cloud", status: "live-target" },
   { id: "moonshot", name: "Moonshot AI", category: "cloud", status: "planned" },
   { id: "baidu-qianfan", name: "Baidu Qianfan", category: "cloud", status: "planned" },
   { id: "alibaba-dashscope", name: "Alibaba DashScope", category: "cloud", status: "planned" },
@@ -59,43 +56,68 @@ export const providerCatalog = [
   { id: "hyperbolic", name: "Hyperbolic", category: "cloud", status: "planned" }
 ];
 
-const firstWaveConnectionSpecs = {
-  ollama: {
-    transport: "local-http",
-    requiredEnv: ["OLLAMA_BASE_URL"],
-    baseUrlEnv: "CLAWFORGE_OLLAMA_BASE_URL",
-    defaultBaseUrl: "http://127.0.0.1:11434",
-    healthStrategy: "http-get:/api/tags"
+export const agentTemplateCatalog = [
+  {
+    id: "ops-coordinator",
+    name: "Ops Coordinator",
+    summary: "Routes work, keeps humans in the loop, and escalates when the chain gets stuck.",
+    purpose: "Coordinate small-team work, route tasks to specialists, summarize progress, and escalate blockers to a human operator.",
+    provider: "openai",
+    model: "gpt-5.4-mini",
+    isolationMode: "selective",
+    maxConcurrentTasks: 6,
+    peerAccess: true,
+    collaborationMode: "delegate"
   },
-  "ollama-cloud": {
-    transport: "cloud-http",
-    requiredEnv: ["OLLAMA_CLOUD_API_KEY"],
-    baseUrlEnv: "CLAWFORGE_OLLAMA_CLOUD_BASE_URL",
-    defaultBaseUrl: "https://ollama.com",
-    healthStrategy: "auth-http-get:/api/tags"
+  {
+    id: "research-scout",
+    name: "Research Scout",
+    summary: "Collects facts, compares options, and hands off concise briefs to another agent.",
+    purpose: "Gather source-backed findings, compare options, and deliver short briefs for a coordinator or reviewer.",
+    provider: "ollama",
+    model: "qwen3",
+    isolationMode: "isolated",
+    maxConcurrentTasks: 3,
+    peerAccess: false,
+    collaborationMode: "delegate"
   },
-  "z-ai": {
-    transport: "cloud-http",
-    requiredEnv: ["ZAI_API_KEY"],
-    baseUrlEnv: "CLAWFORGE_Z_AI_BASE_URL",
-    defaultBaseUrl: "https://api.z.ai",
-    healthStrategy: "auth-http-get:/v1/models"
+  {
+    id: "customer-reply-drafter",
+    name: "Customer Reply Drafter",
+    summary: "Prepares customer-facing responses for review before anything is sent.",
+    purpose: "Draft clear, friendly customer replies from tickets or notes and hand them to a reviewer before release.",
+    provider: "anthropic",
+    model: "claude-haiku-4.5",
+    isolationMode: "selective",
+    maxConcurrentTasks: 4,
+    peerAccess: true,
+    collaborationMode: "review"
   },
-  anthropic: {
-    transport: "cloud-http",
-    requiredEnv: ["ANTHROPIC_API_KEY"],
-    baseUrlEnv: "CLAWFORGE_ANTHROPIC_BASE_URL",
-    defaultBaseUrl: "https://api.anthropic.com",
-    healthStrategy: "auth-http-get:/v1/models"
+  {
+    id: "inbox-triage",
+    name: "Inbox Triage",
+    summary: "Sorts incoming work, tags urgency, and forwards the next-best action.",
+    purpose: "Classify inbound requests, mark urgency, and hand off the next action to the right teammate or operator.",
+    provider: "ollama",
+    model: "llama3.1",
+    isolationMode: "selective",
+    maxConcurrentTasks: 8,
+    peerAccess: true,
+    collaborationMode: "handoff"
   },
-  openai: {
-    transport: "cloud-http",
-    requiredEnv: ["OPENAI_API_KEY"],
-    baseUrlEnv: "CLAWFORGE_OPENAI_BASE_URL",
-    defaultBaseUrl: "https://api.openai.com/v1",
-    healthStrategy: "auth-http-get:/models"
+  {
+    id: "run-reviewer",
+    name: "Run Reviewer",
+    summary: "Checks outputs from other agents and surfaces risks before humans act.",
+    purpose: "Review drafts, plans, or summaries from other agents, point out risks, and recommend whether a human should approve the next step.",
+    provider: "z-ai",
+    model: "glm-4-air",
+    isolationMode: "isolated",
+    maxConcurrentTasks: 2,
+    peerAccess: false,
+    collaborationMode: "review"
   }
-};
+];
 
 const ensureString = (value, field, min, max) => {
   if (typeof value !== "string") {
@@ -137,12 +159,8 @@ const ensureEnum = (value, field, allowed) => {
 const ensureProvider = (input) => ({
   id: ensureString(input.id, "id", 2, 80),
   name: ensureString(input.name, "name", 2, 120),
-  category: ensureEnum(input.category, "category", providerCategoryValues),
-  status: ensureEnum(input.status, "status", providerStatusValues),
-  suggestedModel:
-    typeof input.suggestedModel === "string"
-      ? ensureString(input.suggestedModel, "suggestedModel", 2, 120)
-      : null
+  category: ensureEnum(input.category, "category", ["cloud", "local", "self-hosted", "router"]),
+  status: ensureEnum(input.status, "status", providerStatusValues)
 });
 
 const ensureUuid = (value, field) => {
@@ -156,27 +174,23 @@ const ensureUuid = (value, field) => {
   return value;
 };
 
-const normalizeOptionalUrl = (value, fallback) => {
-  if (typeof value === "string" && value.trim().length > 0) {
-    return value.trim().replace(/\/+$/, "");
-  }
-
-  return fallback;
-};
-
-const getProviderById = (id) => {
-  const provider = providerCatalog.find((entry) => entry.id === id);
-  if (!provider) {
-    throw new Error(`Unknown provider id: ${id}`);
-  }
-
-  return ensureProvider(provider);
-};
-
-const firstWavePriorityFor = (providerId) => {
-  const index = firstWaveProviderIds.indexOf(providerId);
-  return index === -1 ? null : index + 1;
-};
+const ensureTemplate = (input) => ({
+  id: ensureString(input.id, "id", 2, 80),
+  name: ensureString(input.name, "name", 2, 80),
+  summary: ensureString(input.summary, "summary", 10, 180),
+  purpose: ensureString(input.purpose, "purpose", 10, 240),
+  provider: ensureString(input.provider, "provider", 2, 80),
+  model: ensureString(input.model, "model", 2, 120),
+  isolationMode: ensureEnum(input.isolationMode, "isolationMode", isolationModeValues),
+  maxConcurrentTasks: ensureInteger(input.maxConcurrentTasks, "maxConcurrentTasks", 1, 32),
+  peerAccess: ensureBoolean(input.peerAccess, "peerAccess"),
+  collaborationMode: ensureEnum(input.collaborationMode, "collaborationMode", [
+    "delegate",
+    "review",
+    "handoff",
+    "summarize"
+  ])
+});
 
 export const parseAgent = (input) => ({
   id: ensureUuid(input.id, "id"),
@@ -192,18 +206,40 @@ export const parseAgent = (input) => ({
   updatedAt: ensureString(input.updatedAt, "updatedAt", 10, 40)
 });
 
-export const parseCreateAgentInput = (input) => {
-  const provider = getProviderById(ensureString(input.provider, "provider", 2, 80));
+export const parseCreateAgentInput = (input) => ({
+  name: ensureString(input.name, "name", 2, 80),
+  purpose: ensureString(input.purpose, "purpose", 10, 240),
+  provider: ensureString(input.provider, "provider", 2, 80),
+  model: ensureString(input.model, "model", 2, 120),
+  isolationMode: ensureEnum(input.isolationMode, "isolationMode", isolationModeValues),
+  maxConcurrentTasks: ensureInteger(input.maxConcurrentTasks, "maxConcurrentTasks", 1, 32),
+  peerAccess: ensureBoolean(input.peerAccess, "peerAccess")
+});
 
-  return {
-    name: ensureString(input.name, "name", 2, 80),
-    purpose: ensureString(input.purpose, "purpose", 10, 240),
-    provider: provider.id,
-    model: ensureString(input.model, "model", 2, 120),
-    isolationMode: ensureEnum(input.isolationMode, "isolationMode", isolationModeValues),
-    maxConcurrentTasks: ensureInteger(input.maxConcurrentTasks, "maxConcurrentTasks", 1, 32),
-    peerAccess: ensureBoolean(input.peerAccess, "peerAccess")
-  };
+export const parseUpdateAgentInput = (input) => {
+  if (typeof input !== "object" || input === null) {
+    throw new Error("Agent update payload must be an object.");
+  }
+
+  const updates = {};
+
+  if ("status" in input) {
+    updates.status = ensureEnum(input.status, "status", agentStatusValues);
+  }
+
+  if ("peerAccess" in input) {
+    updates.peerAccess = ensureBoolean(input.peerAccess, "peerAccess");
+  }
+
+  if ("isolationMode" in input) {
+    updates.isolationMode = ensureEnum(input.isolationMode, "isolationMode", isolationModeValues);
+  }
+
+  if (Object.keys(updates).length === 0) {
+    throw new Error("Agent update payload must include status, peerAccess, or isolationMode.");
+  }
+
+  return updates;
 };
 
 export const parseCreateLinkInput = (input) => ({
@@ -213,54 +249,4 @@ export const parseCreateLinkInput = (input) => ({
 });
 
 export const listProviders = () => providerCatalog.map((provider) => ensureProvider(provider));
-
-export const listProviderConnections = (env = process.env) => {
-  const prioritized = firstWaveProviderIds.map((providerId) => {
-    const provider = getProviderById(providerId);
-    const spec = firstWaveConnectionSpecs[providerId];
-    const configured = spec.requiredEnv.every((name) => typeof env[name] === "string" && env[name].trim().length > 0);
-
-    return {
-      ...provider,
-      priority: firstWavePriorityFor(providerId),
-      transport: spec.transport,
-      requiredEnv: [...spec.requiredEnv],
-      configured,
-      readiness: configured ? "ready" : "needs-config",
-      baseUrl: normalizeOptionalUrl(env[spec.baseUrlEnv], spec.defaultBaseUrl),
-      healthStrategy: spec.healthStrategy
-    };
-  });
-
-  const remaining = listProviders()
-    .filter((provider) => !firstWaveProviderIds.includes(provider.id))
-    .map((provider) => ({
-      ...provider,
-      priority: null,
-      transport: provider.category === "local" ? "local-http" : "cloud-http",
-      requiredEnv: [],
-      configured: false,
-      readiness: "needs-config",
-      baseUrl: null,
-      healthStrategy: "planned"
-    }));
-
-  return [...prioritized, ...remaining];
-};
-
-export const getProviderReadinessSummary = (env = process.env) => {
-  const providers = listProviderConnections(env).filter((provider) => provider.priority !== null);
-  const ready = providers.filter((provider) => provider.configured);
-  const pending = providers.filter((provider) => !provider.configured);
-
-  return {
-    firstWave: {
-      total: providers.length,
-      configured: ready.length,
-      pendingCount: pending.length,
-      ready: ready.map((provider) => provider.id),
-      pending: pending.map((provider) => provider.id)
-    },
-    providers
-  };
-};
+export const listAgentTemplates = () => agentTemplateCatalog.map((template) => ensureTemplate(template));

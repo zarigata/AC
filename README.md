@@ -1,16 +1,18 @@
-# ClawForge
+# RelayCore
 
-ClawForge is a local-first multi-agent platform being built to beat the current open agent assistants on three fronts at once:
+![RelayCore Control Plane Hero](docs/assets/webcore-hero.svg)
+
+RelayCore is a local-first multi-agent platform being built to beat the current open agent assistants on three fronts at once:
 
 - more capable multi-agent orchestration on a single machine
 - broader model and tool compatibility
 - a cleaner, faster, smaller-feeling product surface
 
-The project goal is not just to be feature-rich. It is to match everything PicoClaw can do in a similarly small, fast, portable package while expanding far beyond it in provider support, agent count, skill sharing, compatibility layers, and operational control.
+The project goal is not just to be feature-rich. It is to match everything PicoClaw can do in a similarly small, fast, portable package while expanding far beyond it in provider support, agent count, shared tooling, compatibility layers, and operational control.
 
 ## Product mission
 
-ClawForge is designed as an OpenClaw and PicoClaw competitor with these non-negotiables:
+RelayCore is designed as an OpenClaw and PicoClaw competitor with these non-negotiables:
 
 1. Run up to 100 agents per machine.
 2. Keep each agent isolated by default, with explicit opt-in communication rules.
@@ -22,7 +24,7 @@ ClawForge is designed as an OpenClaw and PicoClaw competitor with these non-nego
 
 ## PicoClaw parity requirements
 
-The plan now explicitly assumes that ClawForge must eventually do everything PicoClaw does, while preserving the same spirit of small-factor performance:
+The plan now explicitly assumes that RelayCore must eventually do everything PicoClaw does, while preserving the same spirit of small-factor performance:
 
 - self-contained, low-overhead operation
 - fast startup and low idle footprint
@@ -31,11 +33,11 @@ The plan now explicitly assumes that ClawForge must eventually do everything Pic
 - clean Web UI
 - portable deployment story
 
-PicoClaw currently presents itself around very small hardware, low memory use, very fast boot, and a compact runtime footprint. ClawForge should not drift into a heavy architecture that abandons those advantages.
+PicoClaw currently presents itself around very small hardware, low memory use, very fast boot, and a compact runtime footprint. RelayCore should not drift into a heavy architecture that abandons those advantages.
 
 ## Token discipline
 
-ClawForge should be deliberately conservative with token generation and model usage. That means:
+RelayCore should be deliberately conservative with token generation and model usage. That means:
 
 - prefer smaller models for routing, classification, filtering, and health checks
 - reserve expensive models for high-value reasoning only
@@ -44,11 +46,11 @@ ClawForge should be deliberately conservative with token generation and model us
 - make model/tool routing visible and controllable
 - keep autonomous runs efficient and bounded
 
-The right product here is not “more tokens everywhere.” It is “better outcomes per token.”
+The right product here is not "more tokens everywhere." It is "better outcomes per token."
 
 ## Toolkit and research posture
 
-ClawForge should learn from real OpenClaw usage, not just abstract feature lists.
+RelayCore should learn from real OpenClaw usage, not just abstract feature lists.
 
 - Use the `awesome-openclaw-usecases` collection as a recurring source of practical workflows and inspiration.
 - Prefer features that unlock verified daily-life or operator value over novelty.
@@ -63,7 +65,7 @@ ClawForge should learn from real OpenClaw usage, not just abstract feature lists
 - seeded machine topology
 - provider catalog with 50 target backends
 - first provider roadmap with ordered implementation priorities
-- tests covering agent capacity, self-link rejection, and provider catalog coverage
+- tests covering agent capacity, self-link rejection, provider catalog coverage, and LAN onboarding logic
 
 ## Current provider priority
 
@@ -99,8 +101,10 @@ The API and UI are served from `http://localhost:4000`.
 - `GET /api/topology`
 - `GET /api/agents`
 - `POST /api/agents`
+- `PATCH /api/agents/:id`
 - `POST /api/links`
 - `GET /api/providers`
+- `GET /api/onboarding`
 
 ## Roadmap themes
 
@@ -113,11 +117,15 @@ The API and UI are served from `http://localhost:4000`.
 
 ## Design direction
 
-The current UI direction uses a Webcore-inspired presentation layer:
+The current UI direction uses a cleaner control-plane presentation layer:
 
-- old-web and XP-era interface language
-- surreal early-internet atmosphere
-- browser-window framing, scanlines, gradients, badges, and pop-up energy
-- a nostalgic presentation wrapped around a serious control surface
+- serious operator-first hierarchy instead of decorative nostalgia
+- strong runtime metrics and deployment actions in the first viewport
+- restrained industrial styling with clear state surfaces and fewer gimmicks
+- product language centered on routing, policy, provider coverage, and capacity
 
-That aesthetic is decorative only at the edges. The core requirement remains an operator-friendly product that is fast to scan and safe to use.
+The visual system should feel compact, confident, and deployment-ready while still retaining enough atmosphere to feel like a modern agent operations product.
+
+## Visual direction
+
+![RelayCore concept board](docs/assets/webcore-collage.svg)

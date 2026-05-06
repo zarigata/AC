@@ -4,18 +4,22 @@ import { extname, join, normalize, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  getProviderReadinessSummary,
-  listProviderConnections,
+  listAgentTemplates,
   listProviders,
   parseCreateAgentInput,
-  parseCreateLinkInput
+  parseCreateLinkInput,
+  parseUpdateAgentInput
 } from "../../../packages/shared/src/index.js";
 
+import { getOnboardingSnapshot } from "./onboarding.js";
 import { AgentRegistry } from "./registry.js";
 
 const port = Number(process.env.PORT ?? 4000);
 const host = process.env.HOST ?? "0.0.0.0";
-const databasePath = process.env.CLAWFORGE_DB_PATH ?? new URL("../data/clawforge.sqlite", import.meta.url).pathname;
+const databasePath =
+  process.env.RELAYCORE_DB_PATH ??
+  process.env.CLAWFORGE_DB_PATH ??
+  new URL("../data/relaycore.sqlite", import.meta.url).pathname;
 const webRoot = fileURLToPath(new URL("../../web/", import.meta.url));
 
 const registry = new AgentRegistry({ databasePath });
@@ -47,27 +51,12 @@ const contentTypeFor = (path) => {
   }
 };
 
-const providerSummary = () => {
-  const providers = listProviders();
-  return {
-    providers,
-    summary: {
-      total: providers.length,
-      local: providers.filter((provider) => provider.category === "local").length,
-      cloud: providers.filter((provider) => provider.category === "cloud").length,
-      selfHosted: providers.filter((provider) => provider.category === "self-hosted").length,
-      routers: providers.filter((provider) => provider.category === "router").length
-    },
-    readiness: getProviderReadinessSummary(process.env)
-  };
-};
-
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 
     if (request.method === "GET" && url.pathname === "/health") {
-      return sendJson(response, 200, { ok: true, service: "clawforge-api" });
+      return sendJson(response, 200, { ok: true, service: "relaycore-api" });
     }
 
     if (request.method === "GET" && url.pathname === "/api/agents") {
@@ -79,14 +68,43 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/providers") {
-      return sendJson(response, 200, providerSummary());
+      const providers = listProviders();
+      return sendJson(response, 200, {
+        providers,
+        summary: {
+          total: providers.length,
+          local: providers.filter((provider) => provider.category === "local").length,
+          cloud: providers.filter((provider) => provider.category === "cloud").length,
+          selfHosted: providers.filter((provider) => provider.category === "self-hosted").length,
+          routers: providers.filter((provider) => provider.category === "router").length
+        }
+      });
     }
 
-    if (request.method === "GET" && url.pathname === "/api/provider-readiness") {
+    if (request.method === "GET" && url.pathname === "/api/templates") {
+      const templates = listAgentTemplates();
       return sendJson(response, 200, {
-        providers: listProviderConnections(process.env),
-        summary: getProviderReadinessSummary(process.env)
+        templates,
+        summary: {
+          total: templates.length,
+          collaborative: templates.filter((template) => template.peerAccess).length,
+          isolated: templates.filter((template) => template.isolationMode === "isolated").length
+        }
       });
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/onboarding") {
+      return sendJson(
+        response,
+        200,
+        getOnboardingSnapshot({
+          host,
+          port,
+          topology: registry.getTopology(),
+          providers: listProviders(),
+          templates: listAgentTemplates()
+        })
+      );
     }
 
     if (request.method === "POST" && url.pathname === "/api/agents") {
@@ -99,6 +117,13 @@ const server = createServer(async (request, response) => {
       const payload = parseCreateLinkInput(await readRequestBody(request));
       const link = registry.createLink(payload);
       return sendJson(response, 201, { link });
+    }
+
+    if (request.method === "PATCH" && url.pathname.startsWith("/api/agents/")) {
+      const agentId = url.pathname.slice("/api/agents/".length);
+      const payload = parseUpdateAgentInput(await readRequestBody(request));
+      const agent = registry.updateAgent(agentId, payload);
+      return sendJson(response, 200, { agent });
     }
 
     if (request.method === "GET") {
@@ -121,5 +146,5 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`ClawForge listening on http://${host}:${port}`);
+  console.log(`RelayCore listening on http://${host}:${port}`);
 });

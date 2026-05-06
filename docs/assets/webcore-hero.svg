@@ -50,72 +50,23 @@
     <circle cx="1370" cy="92" r="3" fill="#9AFFF5"/>
     <circle cx="1264" cy="186" r="2" fill="#FFD6F6"/>
     <circle cx="1102" cy="788" r="3" fill="#9AFFF5"/>
-    <path d="M302 102l6 18 19 1-15 11 5 18-15-11-15 11 5-18-15-11 19-1 6-18Z" fill="#A5FFF0" fill-opacity="0.22"/>
-    <path d="M1460 742l5 14 15 1-11 9 3 14-12-8-12 8 4-14-11-9 14-1 5-14Z" fill="#FFA4E6" fill-opacity="0.22"/>
   </g>
 
   <g transform="translate(92 64)">
     <rect x="0" y="0" width="1416" height="66" rx="2" fill="url(#bar)"/>
-    <text x="26" y="43" fill="#07162B" font-family="Verdana, Arial, sans-serif" font-size="28" font-weight="700">ClawForge // Webcore Control Room</text>
+    <text x="26" y="43" fill="#07162B" font-family="Verdana, Arial, sans-serif" font-size="28" font-weight="700">RelayCore // Local Control Plane</text>
     <text x="1268" y="43" fill="#07162B" font-family="Verdana, Arial, sans-serif" font-size="24" font-weight="700">_  □  X</text>
   </g>
 
   <g transform="translate(92 152)">
     <rect x="0" y="0" width="924" height="330" fill="url(#panel)" stroke="#6FDFFF" stroke-opacity="0.45"/>
     <rect x="0" y="0" width="924" height="48" fill="url(#bar)"/>
-    <text x="18" y="31" fill="#06152A" font-family="Verdana, Arial, sans-serif" font-size="22" font-weight="700">clawforge_boot.exe</text>
-    <text x="684" y="31" fill="#06152A" font-family="Verdana, Arial, sans-serif" font-size="22" font-weight="700">dialup://connected</text>
-    <text x="32" y="106" fill="#71E9FF" font-family="Arial Black, Arial, sans-serif" font-size="72" letter-spacing="2">CLAWFORGE</text>
-    <text x="34" y="154" fill="#A1F4FF" font-family="Verdana, Arial, sans-serif" font-size="22">small-factor multi-agent control with old-web energy</text>
+    <text x="18" y="31" fill="#06152A" font-family="Verdana, Arial, sans-serif" font-size="22" font-weight="700">relaycore_boot.exe</text>
+    <text x="664" y="31" fill="#06152A" font-family="Verdana, Arial, sans-serif" font-size="22" font-weight="700">runtime://synchronized</text>
+    <text x="32" y="106" fill="#71E9FF" font-family="Arial Black, Arial, sans-serif" font-size="72" letter-spacing="2">RELAYCORE</text>
+    <text x="34" y="154" fill="#A1F4FF" font-family="Verdana, Arial, sans-serif" font-size="22">compact multi-agent operations for local control</text>
     <text x="34" y="210" fill="#D7F5FF" font-family="Verdana, Arial, sans-serif" font-size="26">100 agents / machine</text>
     <text x="34" y="246" fill="#D7F5FF" font-family="Verdana, Arial, sans-serif" font-size="26">50 providers planned</text>
-    <text x="34" y="282" fill="#D7F5FF" font-family="Verdana, Arial, sans-serif" font-size="26">token conservative // PicoClaw parity // OpenClaw-compatible</text>
-    <rect x="34" y="296" width="220" height="18" fill="#86FFCD" fill-opacity="0.26"/>
-    <rect x="270" y="296" width="176" height="18" fill="#73E7FF" fill-opacity="0.22"/>
-    <rect x="462" y="296" width="232" height="18" fill="#FF92DF" fill-opacity="0.22"/>
-  </g>
-
-  <g transform="translate(1046 152)">
-    <rect x="0" y="0" width="462" height="330" fill="url(#panel)" stroke="#6FDFFF" stroke-opacity="0.45"/>
-    <rect x="0" y="0" width="462" height="48" fill="url(#bar)"/>
-    <text x="18" y="31" fill="#06152A" font-family="Verdana, Arial, sans-serif" font-size="22" font-weight="700">popup_gallery.html</text>
-    <rect x="36" y="80" width="174" height="122" fill="#10285A" stroke="#95E9FF" stroke-opacity="0.45"/>
-    <rect x="218" y="124" width="186" height="128" fill="#0A1E49" stroke="#FF92DF" stroke-opacity="0.55"/>
-    <rect x="96" y="214" width="210" height="76" fill="#0F224F" stroke="#A1FFCF" stroke-opacity="0.55"/>
-    <rect x="58" y="98" width="130" height="18" fill="#BEEFFF"/>
-    <rect x="240" y="142" width="140" height="18" fill="#FFD0F0"/>
-    <rect x="116" y="232" width="172" height="18" fill="#C7FFD8"/>
-    <circle cx="344" cy="104" r="38" fill="#6FE6FF" fill-opacity="0.36" filter="url(#glow)"/>
-    <path d="M96 184l34-62 36 20-30 60-40-18Z" fill="#86FFD0" fill-opacity="0.34"/>
-    <path d="M272 280l66-10 10 52-64 12-12-54Z" fill="#FF96E0" fill-opacity="0.28"/>
-    <text x="56" y="318" fill="#D7F5FF" font-family="Verdana, Arial, sans-serif" font-size="18">browser windows // popups // low poly // archived web dreamscape</text>
-  </g>
-
-  <g transform="translate(122 540)">
-    <rect x="0" y="0" width="430" height="204" fill="url(#panel)" stroke="#6FDFFF" stroke-opacity="0.42"/>
-    <rect x="0" y="0" width="430" height="40" fill="url(#bar)"/>
-    <text x="16" y="27" fill="#06152A" font-family="Verdana, Arial, sans-serif" font-size="19" font-weight="700">priority_queue.ini</text>
-    <text x="24" y="82" fill="#9BFFF1" font-family="Verdana, Arial, sans-serif" font-size="24">1. Ollama</text>
-    <text x="24" y="114" fill="#9BFFF1" font-family="Verdana, Arial, sans-serif" font-size="24">2. Ollama Cloud</text>
-    <text x="24" y="146" fill="#9BFFF1" font-family="Verdana, Arial, sans-serif" font-size="24">3. Z.AI</text>
-    <text x="24" y="178" fill="#9BFFF1" font-family="Verdana, Arial, sans-serif" font-size="24">4. Anthropic</text>
-  </g>
-
-  <g transform="translate(584 540)">
-    <rect x="0" y="0" width="396" height="204" fill="url(#panel)" stroke="#6FDFFF" stroke-opacity="0.42"/>
-    <rect x="0" y="0" width="396" height="40" fill="url(#bar)"/>
-    <text x="16" y="27" fill="#06152A" font-family="Verdana, Arial, sans-serif" font-size="19" font-weight="700">speed_budget.sys</text>
-    <text x="24" y="82" fill="#D7F5FF" font-family="Verdana, Arial, sans-serif" font-size="22">match PicoClaw feature surface</text>
-    <text x="24" y="118" fill="#D7F5FF" font-family="Verdana, Arial, sans-serif" font-size="22">protect small-factor runtime</text>
-    <text x="24" y="154" fill="#D7F5FF" font-family="Verdana, Arial, sans-serif" font-size="22">be stingy with tokens</text>
-  </g>
-
-  <g transform="translate(1010 540)">
-    <rect x="0" y="0" width="466" height="204" fill="url(#panel)" stroke="#6FDFFF" stroke-opacity="0.42"/>
-    <rect x="0" y="0" width="466" height="40" fill="url(#bar)"/>
-    <text x="16" y="27" fill="#06152A" font-family="Verdana, Arial, sans-serif" font-size="19" font-weight="700">usecases.db</text>
-    <text x="24" y="84" fill="#D7F5FF" font-family="Verdana, Arial, sans-serif" font-size="21">build from real OpenClaw workflows</text>
-    <text x="24" y="120" fill="#D7F5FF" font-family="Verdana, Arial, sans-serif" font-size="21">not benchmark vanity</text>
-    <text x="24" y="156" fill="#FFABE8" font-family="Verdana, Arial, sans-serif" font-size="20">awesome-openclaw-usecases → recurring roadmap input</text>
+    <text x="34" y="282" fill="#D7F5FF" font-family="Verdana, Arial, sans-serif" font-size="26">token conservative // PicoClaw parity // broad toolchain support</text>
   </g>
 </svg>

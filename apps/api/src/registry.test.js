@@ -1,13 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  firstWaveProviderIds,
-  getProviderReadinessSummary,
-  listProviders,
-  listProviderConnections,
-  parseCreateAgentInput
-} from "../../../packages/shared/src/index.js";
+import { listAgentTemplates, listProviders } from "../../../packages/shared/src/index.js";
 import { AgentRegistry } from "./registry.js";
 
 const createRegistry = () => new AgentRegistry({ databasePath: ":memory:" });
@@ -76,63 +70,35 @@ test("ships a 50-provider catalog including ollama, ollama cloud, and z.ai", () 
   assert.equal(ids.has("z-ai"), true);
 });
 
-test("builds first-wave provider readiness in the required order", () => {
-  const connections = listProviderConnections({
-    ANTHROPIC_API_KEY: "anthropic-key",
-    OLLAMA_BASE_URL: "http://localhost:11434",
-    OPENAI_API_KEY: "openai-key"
-  });
+test("ships starter agent templates for non-technical operators", () => {
+  const templates = listAgentTemplates();
+  const providerIds = new Set(listProviders().map((provider) => provider.id));
 
-  assert.deepEqual(
-    connections.slice(0, firstWaveProviderIds.length).map((provider) => provider.id),
-    firstWaveProviderIds
-  );
-
-  const readiness = getProviderReadinessSummary({
-    ANTHROPIC_API_KEY: "anthropic-key",
-    OLLAMA_BASE_URL: "http://localhost:11434",
-    OPENAI_API_KEY: "openai-key"
-  });
-
-  assert.equal(readiness.firstWave.total, 5);
-  assert.equal(readiness.firstWave.configured, 3);
-  assert.equal(readiness.firstWave.pendingCount, 2);
-  assert.equal(readiness.firstWave.ready.length, 3);
-  assert.equal(readiness.firstWave.pending.length, 2);
+  assert.equal(templates.length >= 5, true);
+  assert.equal(templates.some((template) => template.id === "ops-coordinator"), true);
+  assert.equal(templates.every((template) => providerIds.has(template.provider)), true);
+  assert.equal(templates.some((template) => template.collaborationMode === "review"), true);
 });
 
-test("marks first-wave provider connection requirements clearly", () => {
-  const [ollama, ollamaCloud, zAi, anthropic, openai] = listProviderConnections({
-    CLAWFORGE_OPENAI_BASE_URL: "https://gateway.example/v1"
+test("updates agent status and collaboration settings", () => {
+  const registry = createRegistry();
+  const agent = registry.createAgent({
+    name: "Operator",
+    purpose: "Monitor long-running work and adjust runtime posture.",
+    provider: "ollama",
+    model: "qwen3",
+    isolationMode: "isolated",
+    maxConcurrentTasks: 2,
+    peerAccess: false
   });
 
-  assert.equal(ollama.transport, "local-http");
-  assert.equal(ollama.configured, false);
-  assert.deepEqual(ollama.requiredEnv, ["OLLAMA_BASE_URL"]);
-  assert.equal(ollama.suggestedModel, "qwen3");
+  const updated = registry.updateAgent(agent.id, {
+    status: "running",
+    isolationMode: "mesh",
+    peerAccess: true
+  });
 
-  assert.equal(ollamaCloud.transport, "cloud-http");
-  assert.deepEqual(ollamaCloud.requiredEnv, ["OLLAMA_CLOUD_API_KEY"]);
-
-  assert.equal(zAi.id, "z-ai");
-  assert.equal(anthropic.id, "anthropic");
-  assert.equal(openai.id, "openai");
-  assert.equal(openai.baseUrl, "https://gateway.example/v1");
-  assert.equal(openai.suggestedModel, "gpt-5.4-mini");
-});
-
-test("rejects unknown providers during agent creation", () => {
-  assert.throws(
-    () =>
-      parseCreateAgentInput({
-        name: "Mystery",
-        purpose: "Attempt to use a provider that is not in the catalog.",
-        provider: "totally-made-up",
-        model: "imaginary-1",
-        isolationMode: "isolated",
-        maxConcurrentTasks: 1,
-        peerAccess: false
-      }),
-    /Unknown provider id/
-  );
+  assert.equal(updated.status, "running");
+  assert.equal(updated.isolationMode, "mesh");
+  assert.equal(updated.peerAccess, true);
 });
