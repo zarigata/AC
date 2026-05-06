@@ -1,4 +1,5 @@
 export const agentStatusValues = ["idle", "running", "paused", "error"];
+export const channelTypes = ["telegram", "discord", "signal", "whatsapp", "email"];
 export const isolationModeValues = ["isolated", "selective", "mesh"];
 export const agentLinkModeValues = ["observe", "message", "delegate"];
 export const providerStatusValues = ["live-target", "planned", "experimental"];

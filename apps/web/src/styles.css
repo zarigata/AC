@@ -618,3 +618,95 @@ select:focus {
     justify-content: start;
   }
 }
+
+/* Settings UI styles */
+.settings-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tab {
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 8px 16px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.tab:hover {
+  color: var(--ink);
+}
+
+.tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.tab-content {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.preference-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.preference-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.preference-item label {
+  font-size: 0.9em;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.preference-item input,
+.preference-item select {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 8px 12px;
+  border-radius: 4px;
+}
+
+.agent-list,
+.session-list {
+  display: grid;
+  gap: 12px;
+}
+
+.agent-item,
+.session-item {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  padding: 12px;
+  border-radius: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.agent-item h4,
+.session-item h4 {
+  margin: 0;
+  color: var(--accent);
+}
+
+.agent-item p,
+.session-item p {
+  margin: 4px 0 0 0;
+  font-size: 0.9em;
+  color: var(--muted);
+}
