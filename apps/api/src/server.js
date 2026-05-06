@@ -11,8 +11,10 @@ import {
   parseCreateLinkInput
 } from "../../../packages/shared/src/index.js";
 
+import { OllamaAdapter } from "./adapters/ollama.js";
 import { AgentRegistry } from "./registry.js";
 
+const ollama = new OllamaAdapter({ model: "qwen3:0.6b" });
 const VERSION = "0.2.0";
 const startTime = Date.now();
 
@@ -66,6 +68,25 @@ const providerSummary = () => {
 };
 
 const server = createServer(async (request, response) => {
+  const startTime = Date.now();
+  
+  const originalEnd = response.end;
+  response.end = function(chunk, encoding) {
+    const duration = Date.now() - startTime;
+    const status = response.statusCode || 200;
+    
+    registry.logRequest(
+      request.method,
+      request.url,
+      status,
+      duration,
+      request.headers['user-agent'],
+      request.headers['x-forwarded-for'] || request.socket.remoteAddress
+    );
+    
+    return originalEnd.call(this, chunk, encoding);
+  };
+  
   try {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 
@@ -165,6 +186,72 @@ const server = createServer(async (request, response) => {
       const usage = registry.getAgentUsage(usageMatch[1]);
       if (!usage) return sendJson(response, 404, { error: "Agent not found" });
       return sendJson(response, 200, usage);
+    }
+
+    /* ─── Request Logs ─── */
+
+    if (request.method === "GET" && url.pathname === "/api/logs") {
+      const logs = registry.getRecentLogs(100);
+      return sendJson(response, 200, { logs });
+    }
+
+    /* ─── Provider Health (Ollama) ─── */
+
+    if (request.method === "GET" && url.pathname === "/api/providers/health") {
+      const health = await ollama.health();
+      return sendJson(response, 200, { ollama: health });
+    }
+
+    /* ─── Agent Chat (via Ollama) ─── */
+
+    const chatMatch = url.pathname.match(/^\/api\/agents\/([\w-]+)\/chat$/);
+
+    if (chatMatch && request.method === "POST") {
+      const agentId = chatMatch[1];
+      const agent = registry.getAgent(agentId);
+      if (!agent) return sendJson(response, 404, { error: "Agent not found" });
+
+      const body = await readRequestBody(request);
+      const userMessage = body.message || body.content || "";
+      if (!userMessage.trim()) return sendJson(response, 400, { error: "Message is required" });
+
+      // Create or reuse session
+      const sessions = registry.listSessions(agentId);
+      let session = sessions.length > 0 ? sessions[0] : registry.createSession(agentId, { title: "Chat" });
+
+      // Save user message
+      registry.createMessage(agentId, session.id, {
+        role: "user",
+        content: userMessage,
+        tokensIn: 0
+      });
+
+      // Build message history for Ollama
+      const history = registry.listMessages(agentId, session.id).map((m) => ({
+        role: m.role,
+        content: m.content
+      }));
+
+      // Call Ollama
+      const result = await ollama.chat(history, { model: agent.model });
+
+      // Save assistant response
+      registry.createMessage(agentId, session.id, {
+        role: "assistant",
+        content: result.content,
+        tokensIn: result.tokensIn,
+        tokensOut: result.tokensOut,
+        model: result.model
+      });
+
+      return sendJson(response, 200, {
+        message: result.content,
+        tokensIn: result.tokensIn,
+        tokensOut: result.tokensOut,
+        duration: result.duration,
+        model: result.model,
+        sessionId: session.id
+      });
     }
 
     if (request.method === "GET" && url.pathname === "/api/agents") {

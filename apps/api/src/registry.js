@@ -62,6 +62,17 @@ export class AgentRegistry {
         createdAt TEXT NOT NULL,
         FOREIGN KEY (sessionId) REFERENCES sessions(id) ON DELETE CASCADE
       );
+
+      CREATE TABLE IF NOT EXISTS logs (
+        id TEXT PRIMARY KEY,
+        method TEXT NOT NULL,
+        path TEXT NOT NULL,
+        status INTEGER NOT NULL,
+        duration INTEGER NOT NULL,
+        userAgent TEXT,
+        ip TEXT,
+        createdAt TEXT NOT NULL
+      );
     `);
   }
 
@@ -346,5 +357,36 @@ export class AgentRegistry {
       totalTokensOut: tokenStats.totalTokensOut,
       totalMessages: tokenStats.totalMessages
     };
+  }
+
+  /* ─── Request Logging ─── */
+
+  logRequest(method, path, status, duration, userAgent = null, ip = null) {
+    const id = crypto.randomUUID();
+    const timestamp = now();
+    
+    this.db
+      .prepare("INSERT INTO logs (id, method, path, status, duration, userAgent, ip, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(id, method, path, status, duration, userAgent, ip, timestamp);
+    
+    return id;
+  }
+
+  getRecentLogs(limit = 100) {
+    return this.db
+      .prepare("SELECT * FROM logs ORDER BY createdAt DESC LIMIT ?")
+      .all(limit);
+  }
+
+  getLogsByStatus(status, limit = 100) {
+    return this.db
+      .prepare("SELECT * FROM logs WHERE status = ? ORDER BY createdAt DESC LIMIT ?")
+      .all(status, limit);
+  }
+
+  getLogsByPath(pathPattern, limit = 100) {
+    return this.db
+      .prepare("SELECT * FROM logs WHERE path LIKE ? ORDER BY createdAt DESC LIMIT ?")
+      .all(`%${pathPattern}%`, limit);
   }
 }
