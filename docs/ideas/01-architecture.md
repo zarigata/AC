@@ -1,0 +1,43 @@
+# Zsiistant — Architecture Overview
+
+## Core Components
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    Zsiistant                          │
+├─────────────────────────────────────────────────────┤
+│                                                      │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
+│  │  Web UI   │  │   API    │  │  Runtime Engine  │   │
+│  │ (browser) │◄─┤  Server  │◄─┤  (agent exec)    │   │
+│  └──────────┘  └────┬─────┘  └───────┬──────────┘   │
+│                      │                │               │
+│  ┌───────────────────┼────────────────┼───────────┐  │
+│  │                   ▼                ▼           │  │
+│  │  ┌─────────┐  ┌─────────┐  ┌────────────┐    │  │
+│  │  │ SQLite  │  │ Sessions │  │  Provider   │    │  │
+│  │  │  Store  │  │  Store   │  │  Adapters   │    │  │
+│  │  └─────────┘  └─────────┘  └────────────┘    │  │
+│  │              Data Layer                       │  │
+│  └───────────────────────────────────────────────┘  │
+│                                                      │
+│  ┌───────────────────────────────────────────────┐  │
+│  │  Channels: Telegram │ Discord │ Signal │ Web  │  │
+│  └───────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────┘
+```
+
+## Data Flow
+
+1. User → Channel → API Server → Router
+2. Router → Agent Registry (find agent)
+3. Agent → Provider Adapter → LLM
+4. LLM → Agent → Session Store → Channel → User
+
+## Key Design Decisions
+
+- **SQLite over PostgreSQL**: Local-first, zero-config, single-file deployment
+- **Vanilla JS over framework**: Minimal bundle, fast load, no build step
+- **Single binary feel**: `npm start` and it works
+- **Provider abstraction**: Any LLM backend behind a common interface
+- **Agent isolation**: Each agent has own config, sessions, memory
