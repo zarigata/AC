@@ -330,6 +330,22 @@ export class AgentRegistry {
     this.db.prepare("UPDATE sessions SET updatedAt = ? WHERE id = ?").run(timestamp, sessionId);
 
     return message;
+
+  }
+
+  /* ─── Support for message query by agent (needed for WebSocket) */
+
+  getAgentMessages(agentId) {
+    return this.db
+      .prepare(
+        `SELECT m.*, s.title as sessionTitle
+         FROM messages m
+         JOIN sessions s ON m.sessionId = s.id
+         WHERE s.agentId = ?
+         ORDER BY m.createdAt DESC
+         LIMIT 50`
+      )
+      .all(agentId);
   }
 
   /* ─── Usage Stats ─── */
@@ -388,5 +404,28 @@ export class AgentRegistry {
     return this.db
       .prepare("SELECT * FROM logs WHERE path LIKE ? ORDER BY createdAt DESC LIMIT ?")
       .all(`%${pathPattern}%`, limit);
+  }
+
+  /* ─── WebSocket Support Methods ─── */
+
+  getCurrentTaskCount(agentId) {
+    // This is a placeholder - in a real implementation, you'd track actual task execution
+    // For now, return a simulated count based on recent activity
+    const recentMessages = this.db
+      .prepare("SELECT COUNT(*) as count FROM messages WHERE agentId = ? AND datetime(createdAt) > datetime('now', '-5 minutes')")
+      .get(agentId);
+    return Math.max(0, recentMessages.count - 1); // Subtract 1 to exclude the last message
+  }
+
+  getTotalSessions() {
+    return this.db
+      .prepare("SELECT COUNT(*) as count FROM sessions")
+      .get().count;
+  }
+
+  getTotalMessages() {
+    return this.db
+      .prepare("SELECT COUNT(*) as count FROM messages")
+      .get().count;
   }
 }
