@@ -4,6 +4,7 @@ import { extname, join, normalize, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setInterval } from "node:timers";
 import { WebSocketServer } from "ws";
+import { createHash } from "node:crypto";
 
 import {
   getProviderReadinessSummary,
@@ -62,23 +63,56 @@ const webRoot = fileURLToPath(new URL("../../web/", import.meta.url));
 const registry = new AgentRegistry({ databasePath });
 registry.seed();
 
+const ALLOWED_ORIGINS = [
+  "http://localhost:3000",
+  "http://localhost:4000",
+  "http://127.0.0.1:3000",
+  "http://127.0.0.1:4000"
+];
+
+const isOriginAllowed = (origin) => {
+  if (!origin) return true; // No origin for non-browser requests
+  return ALLOWED_ORIGINS.includes(origin);
+};
+
 const sendJson = (response, statusCode, payload) => {
-  response.writeHead(statusCode, { 
+  const origin = response.getHeader('origin');
+  const headers = {
     "Content-Type": "application/json; charset=utf-8",
-    "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization"
-  });
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With"
+  };
+  
+  if (origin && isOriginAllowed(origin)) {
+    headers["Access-Control-Allow-Origin"] = origin;
+    headers["Access-Control-Allow-Credentials"] = "true";
+  }
+  
+  response.writeHead(statusCode, headers);
   response.end(JSON.stringify(payload));
 };
 
+const MAX_JSON_PAYLOAD_SIZE = 1024 * 1024; // 1MB limit
+
 const readRequestBody = async (request) => {
   let raw = "";
+  let totalLength = 0;
+  
   for await (const chunk of request) {
+    totalLength += chunk.length;
+    if (totalLength > MAX_JSON_PAYLOAD_SIZE) {
+      throw new Error(`Payload too large (max ${MAX_JSON_PAYLOAD_SIZE / 1024 / 1024}MB)`);
+    }
     raw += chunk;
   }
 
-  return raw ? JSON.parse(raw) : {};
+  if (!raw) return {};
+  
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new Error('Invalid JSON format');
+  }
 };
 
 const contentTypeFor = (path) => {
@@ -118,6 +152,15 @@ const server = createServer(async (request, response) => {
     return; // Response already sent for rate limit exceeded
   }
   
+  // Validate origin for API endpoints
+  if (request.url?.startsWith('/api/') && request.method !== 'OPTIONS') {
+    const origin = request.headers.origin;
+    if (!isOriginAllowed(origin)) {
+      sendJson(response, 403, { error: 'Forbidden: Origin not allowed' });
+      return;
+    }
+  }
+  
   const originalEnd = response.end;
   response.end = function(chunk, encoding) {
     const duration = Date.now() - requestStartTime;
@@ -137,11 +180,18 @@ const server = createServer(async (request, response) => {
   
   // Handle CORS preflight requests
   if (request.method === 'OPTIONS' && request.url?.startsWith('/api/')) {
-    response.writeHead(200, {
-      "Access-Control-Allow-Origin": "*",
+    const origin = request.headers.origin;
+    const headers = {
       "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization"
-    });
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With"
+    };
+    
+    if (origin && isOriginAllowed(origin)) {
+      headers["Access-Control-Allow-Origin"] = origin;
+      headers["Access-Control-Allow-Credentials"] = "true";
+    }
+    
+    response.writeHead(200, headers);
     response.end();
     return;
   }
@@ -316,6 +366,76 @@ const server = createServer(async (request, response) => {
         return sendJson(response, 400, { error: "Message is required" });
       }
 
+      // Check if streaming is requested
+      if (body.stream === true) {
+        // Set up SSE headers
+        response.writeHead(200, {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization"
+        });
+
+        try {
+          let accumulatedContent = "";
+          let accumulatedTokensIn = 0;
+          let accumulatedTokensOut = 0;
+          
+          await provider.chatStream(messages, {
+            model: body.model,
+            temperature: body.temperature,
+            maxTokens: body.maxTokens,
+          }, (chunk) => {
+            accumulatedContent += chunk.content || "";
+            accumulatedTokensIn += chunk.tokensIn || 0;
+            accumulatedTokensOut += chunk.tokensOut || 0;
+            
+            // Send SSE event
+            const eventData = JSON.stringify({
+              content: chunk.content || "",
+              accumulatedContent,
+              tokensIn: chunk.tokensIn || 0,
+              tokensOut: chunk.tokensOut || 0,
+              duration: chunk.duration || 0,
+              model: chunk.model || body.model || providerName,
+              provider: providerName,
+              done: chunk.done || false
+            });
+            
+            response.write(`data: ${eventData}\n\n`);
+          }, (finalResult) => {
+            // Send final event
+            const eventData = JSON.stringify({
+              content: finalResult.content || "",
+              accumulatedContent: finalResult.content || "",
+              tokensIn: finalResult.tokensIn || 0,
+              tokensOut: finalResult.tokensOut || 0,
+              duration: finalResult.duration || 0,
+              model: finalResult.model || body.model || providerName,
+              provider: providerName,
+              done: true,
+              final: true
+            });
+            
+            response.write(`data: ${eventData}\n\n`);
+            response.end();
+          });
+        } catch (e) {
+          // Send error event
+          const eventData = JSON.stringify({
+            error: e.message,
+            done: true,
+            final: true
+          });
+          response.write(`data: ${eventData}\n\n`);
+          response.end();
+        }
+        return;
+      }
+
+      // Regular (non-streaming) request
       try {
         const result = await provider.chat(messages, {
           model: body.model,
@@ -423,8 +543,13 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET") {
       const target = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
       const filePath = normalize(join(webRoot, target));
-      if (relative(webRoot, filePath).startsWith("..")) {
-        return sendJson(response, 403, { error: "Forbidden" });
+      if (relative(webRoot, filePath).startsWith("..") || !filePath.startsWith(webRoot)) {
+        return sendJson(response, 403, { error: "Forbidden: Invalid path" });
+      }
+      
+      // Additional security check for path traversal
+      if (filePath.includes('..') || filePath.includes('~') || filePath.includes('//')) {
+        return sendJson(response, 403, { error: "Forbidden: Invalid path characters" });
       }
       const asset = await readFile(filePath);
       response.writeHead(200, { "Content-Type": contentTypeFor(filePath) });
@@ -436,13 +561,23 @@ const server = createServer(async (request, response) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     const status = error.status ?? 400;
-    sendJson(response, status, { error: message });
+    
+    // Sanitize error messages to avoid information disclosure
+    const safeMessage = status >= 500 ? "Internal server error" : message;
+    
+    console.error(`Error ${status} for ${request.method} ${request.url}:`, error);
+    
+    sendJson(response, status, { 
+      error: safeMessage,
+      requestId: crypto.randomUUID() // For tracking, not exposing stack traces
+    });
   }
 });
 
 // Rate limiting middleware
 const applyRateLimit = (request, response) => {
   const clientIP = request.headers['x-forwarded-for'] || request.socket.remoteAddress;
+  const userAgent = request.headers['user-agent'] || '';
   const now = Date.now();
   
   // Clean up old entries
@@ -452,13 +587,16 @@ const applyRateLimit = (request, response) => {
     }
   }
   
+  // Create a more unique key that includes IP and user agent fingerprint
+  const userFingerprint = createHash('md5').update(`${clientIP}:${userAgent}`).digest('hex').slice(0, 8);
+  
   // Check if IP is already rate limited
-  if (rateLimit.has(clientIP)) {
-    const data = rateLimit.get(clientIP);
+  if (rateLimit.has(userFingerprint)) {
+    const data = rateLimit.get(userFingerprint);
     if (now - data.timestamp < RATE_LIMIT_WINDOW && data.count >= MAX_REQUESTS_PER_MINUTE) {
       sendJson(response, 429, { 
         error: "Rate limit exceeded",
-        message: `Max ${MAX_REQUESTS_PER_MINUTE} requests per minute per IP allowed`,
+        message: `Max ${MAX_REQUESTS_PER_MINUTE} requests per minute per client allowed`,
         retryAfter: Math.ceil((RATE_LIMIT_WINDOW - (now - data.timestamp)) / 1000)
       });
       return false;
@@ -469,7 +607,7 @@ const applyRateLimit = (request, response) => {
     data.timestamp = now;
   } else {
     // Create new entry
-    rateLimit.set(clientIP, { count: 1, timestamp: now });
+    rateLimit.set(userFingerprint, { count: 1, timestamp: now });
   }
   
   return true;
@@ -556,11 +694,19 @@ const shutdown = (signal) => {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-// Handle WebSocket upgrade
+// Handle WebSocket upgrade with origin validation
 server.on('upgrade', (request, socket, head) => {
   const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
   
   if (pathname === '/ws') {
+    // Validate WebSocket origin
+    const origin = request.headers.origin;
+    if (!isOriginAllowed(origin)) {
+      console.error('WebSocket connection rejected from origin:', origin);
+      socket.destroy();
+      return;
+    }
+    
     wss.handleUpgrade(request, socket, head, (ws) => {
       wss.emit('connection', ws, request);
       
@@ -579,6 +725,18 @@ server.on('upgrade', (request, socket, head) => {
       ws.on('error', (error) => {
         console.error('WebSocket error:', error);
         connectedClients.delete(ws);
+      });
+      
+      // Handle messages
+      ws.on('message', (message) => {
+        try {
+          // Only accept JSON messages
+          const data = JSON.parse(message.toString());
+          console.log('Received WebSocket message:', data);
+        } catch (err) {
+          console.error('Invalid WebSocket message format');
+          ws.close(1008, 'Invalid message format');
+        }
       });
     });
   } else {

@@ -107,6 +107,12 @@ const ensureString = (value, field, min, max) => {
     throw new Error(`${field} must be between ${min} and ${max} characters.`);
   }
 
+  // Basic sanitization to prevent injection attacks
+  if (normalized.includes('<script>') || normalized.includes('javascript:') || 
+      normalized.includes('data:') || normalized.includes('<iframe>')) {
+    throw new Error(`${field} contains invalid characters.`);
+  }
+
   return normalized;
 };
 
@@ -121,6 +127,11 @@ const ensureBoolean = (value, field) => {
 const ensureInteger = (value, field, min, max) => {
   if (!Number.isInteger(value) || value < min || value > max) {
     throw new Error(`${field} must be an integer between ${min} and ${max}.`);
+  }
+
+  // Ensure it's not a dangerous value
+  if (field === 'maxConcurrentTasks' && value > 100) {
+    throw new Error(`${field} cannot exceed 100 for security reasons.`);
   }
 
   return value;
@@ -191,6 +202,19 @@ export const parseAgent = (input) => ({
   createdAt: ensureString(input.createdAt, "createdAt", 10, 40),
   updatedAt: ensureString(input.updatedAt, "updatedAt", 10, 40)
 });
+
+const sanitizeContent = (content, field) => {
+  if (typeof content !== 'string') return content;
+  
+  // Remove potentially dangerous HTML/JS content
+  let sanitized = content
+    .replace(/<script[^>]*>.*?<\/script>/gi, '')
+    .replace(/javascript:/gi, '')
+    .replace(/data:/gi, '')
+    .replace(/<iframe[^>]*>.*?<\/iframe>/gi, '');
+  
+  return sanitized;
+};
 
 export const parseCreateAgentInput = (input) => {
   const provider = getProviderById(ensureString(input.provider, "provider", 2, 80));

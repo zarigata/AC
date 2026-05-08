@@ -3,6 +3,17 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
+const sanitizeContent = (content) => {
+  if (typeof content !== 'string') return content;
+  
+  // Remove potentially dangerous HTML/JS content
+  return content
+    .replace(/<script[^>]*>.*?<\/script>/gi, '')
+    .replace(/javascript:/gi, '')
+    .replace(/data:/gi, '')
+    .replace(/<iframe[^>]*>.*?<\/iframe>/gi, '');
+};
+
 import {
   agentLinkModeValues,
   parseAgent,
@@ -316,12 +327,17 @@ export class AgentRegistry {
       id,
       sessionId,
       role: input.role || "user",
-      content: input.content || "",
+      content: sanitizeContent(input.content || ""),
       tokensIn: input.tokensIn || 0,
       tokensOut: input.tokensOut || 0,
       model: input.model || session.model,
       createdAt: timestamp
     };
+
+    // Validate message content length
+    if (message.content.length > 50000) {
+      throw new Error('Message content too long (max 50000 characters)');
+    }
 
     this.db
       .prepare("INSERT INTO messages (id, sessionId, role, content, tokensIn, tokensOut, model, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
@@ -411,10 +427,17 @@ export class AgentRegistry {
   getCurrentTaskCount(agentId) {
     // This is a placeholder - in a real implementation, you'd track actual task execution
     // For now, return a simulated count based on recent activity
-    const recentMessages = this.db
-      .prepare("SELECT COUNT(*) as count FROM messages WHERE agentId = ? AND datetime(createdAt) > datetime('now', '-5 minutes')")
-      .get(agentId);
-    return Math.max(0, recentMessages.count - 1); // Subtract 1 to exclude the last message
+    const recentSessions = this.db
+      .prepare("SELECT id FROM sessions WHERE agentId = ? AND datetime(updatedAt) > datetime('now', '-5 minutes')")
+      .all(agentId);
+    let totalMessages = 0;
+    for (const session of recentSessions) {
+      const messageCount = this.db
+        .prepare("SELECT COUNT(*) as count FROM messages WHERE sessionId = ? AND datetime(createdAt) > datetime('now', '-5 minutes')")
+        .get(session.id).count;
+      totalMessages += messageCount;
+    }
+    return Math.max(0, totalMessages - recentSessions.length); // Subtract user messages
   }
 
   getTotalSessions() {
