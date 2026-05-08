@@ -57,6 +57,14 @@ const CONN_CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
 // Security: Secret for HMAC-based rate limiting
 const RATE_LIMIT_SECRET = process.env.RATE_LIMIT_SECRET || crypto.randomBytes(32).toString('hex');
 
+// Enhanced rate limiting with better security
+const createRateLimitKey = (clientIP, timestamp) => {
+  // Hash the IP for better privacy and security
+  const ipHash = crypto.createHash('sha256').update(clientIP).digest('hex').substring(0, 16);
+  const windowStart = Math.floor(timestamp / RATE_LIMIT_WINDOW) * RATE_LIMIT_WINDOW;
+  return `${ipHash}:${windowStart}`;
+};
+
 // WebSocket server for real-time updates
 const wss = new WebSocketServer({ noServer: true });
 const connectedClients = new Set();
@@ -79,6 +87,17 @@ const ALLOWED_ORIGINS = [
 const isOriginAllowed = (origin) => {
   if (!origin) return false; // Block requests without origin for API endpoints
   return ALLOWED_ORIGINS.includes(origin);
+};
+
+// Sanitize JSON payload to prevent injection
+const sanitizeJsonPayload = (payload) => {
+  try {
+    const jsonString = JSON.stringify(payload);
+    // Remove potentially dangerous characters that could break JSON parsing
+    return jsonString.replace(/\u0000/g, '').replace(/\r\n/g, '\n');
+  } catch (err) {
+    throw new Error('Failed to sanitize payload');
+  }
 };
 
 const sendJson = (response, statusCode, payload) => {
@@ -105,40 +124,67 @@ const sendJson = (response, statusCode, payload) => {
     return;
   }
   
-  response.writeHead(statusCode, headers);
-  response.end(JSON.stringify(payload));
+  try {
+    const sanitizedPayload = sanitizeJsonPayload(payload);
+    response.writeHead(statusCode, headers);
+    response.end(sanitizedPayload);
+  } catch (err) {
+    console.error('Failed to send JSON response:', err);
+    response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify({ error: 'Internal server error' }));
+  }
 };
 
 const MAX_JSON_PAYLOAD_SIZE = 1024 * 1024; // 1MB limit
 const MAX_REQUEST_TIMEOUT = 30000; // 30 seconds timeout for requests
 
 const readRequestBody = async (request) => {
-  let raw = "";
-  let totalLength = 0;
-  
-  // Add request timeout
-  const timeoutPromise = new Promise((_, reject) => {
-    setTimeout(() => reject(new Error('Request timeout')), MAX_REQUEST_TIMEOUT);
-  });
-  
-  const readPromise = (async () => {
-    for await (const chunk of request) {
-      totalLength += chunk.length;
-      if (totalLength > MAX_JSON_PAYLOAD_SIZE) {
-        throw new Error(`Payload too large (max ${MAX_JSON_PAYLOAD_SIZE / 1024 / 1024}MB)`);
-      }
-      raw += chunk;
-    }
-  })();
-  
-  await Promise.race([readPromise, timeoutPromise]);
-
-  if (!raw) return {};
-  
   try {
-    return JSON.parse(raw);
+    let raw = "";
+    let totalLength = 0;
+    
+    // Add request timeout
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Request timeout')), MAX_REQUEST_TIMEOUT);
+    });
+    
+    const readPromise = (async () => {
+      for await (const chunk of request) {
+        // Validate chunk size and content
+        if (chunk && typeof chunk === 'string') {
+          totalLength += Buffer.byteLength(chunk, 'utf8');
+          if (totalLength > MAX_JSON_PAYLOAD_SIZE) {
+            throw new Error(`Payload too large (max ${MAX_JSON_PAYLOAD_SIZE / 1024 / 1024}MB)`);
+          }
+          raw += chunk;
+        }
+      }
+    })();
+    
+    await Promise.race([readPromise, timeoutPromise]);
+
+    if (!raw || raw.trim().length === 0) return {};
+    
+    try {
+      const parsed = JSON.parse(raw);
+      
+      // Validate parsed object structure
+      if (!parsed || typeof parsed !== 'object') {
+        throw new Error('Invalid JSON structure');
+      }
+      
+      // Prevent prototype pollution
+      if (parsed.__proto__ !== Object.prototype && parsed.__proto__ !== null) {
+        throw new Error('Invalid JSON structure');
+      }
+      
+      return parsed;
+    } catch (err) {
+      throw new Error('Invalid JSON format');
+    }
   } catch (err) {
-    throw new Error('Invalid JSON format');
+    console.error('Request body read error:', err);
+    throw err;
   }
 };
 
@@ -868,7 +914,8 @@ const server = createServer(async (request, response) => {
         if (!filePath.startsWith(webRoot) || 
             relative(webRoot, filePath).startsWith("..") ||
             filePath.includes('..') || filePath.includes('~') || 
-            filePath.includes('//') || filePath.includes('\0')) {
+            filePath.includes('//') || filePath.includes('\0') ||
+            !filePath || filePath.length > 1024) {
           return sendJson(response, 403, { error: "Forbidden: Invalid path" });
         }
         
@@ -879,35 +926,70 @@ const server = createServer(async (request, response) => {
             return sendJson(response, 404, { error: "File not found" });
           }
           
-          // Security: Don't serve sensitive files
-          const sensitiveFiles = ['.env', 'config', 'secret', 'private', 'key'];
+          // Security: Don't serve sensitive files or directories
+          const sensitiveFiles = ['.env', 'config', 'secret', 'private', 'key', 'password', 'cert', 'pem', 'key'];
+          const sensitiveExtensions = ['.env', '.pem', '.key', '.p12', '.pfx', '.crt', '.cer'];
           const fileName = filePath.toLowerCase();
+          
+          // Check for sensitive file names
           if (sensitiveFiles.some(sensitive => fileName.includes(sensitive))) {
             return sendJson(response, 403, { error: "Forbidden: Cannot access this file" });
           }
           
-          response.writeHead(200, { "Content-Type": contentTypeFor(filePath) });
+          // Check for sensitive file extensions
+          const fileExtension = extname(filePath).toLowerCase();
+          if (sensitiveExtensions.includes(fileExtension)) {
+            return sendJson(response, 403, { error: "Forbidden: Cannot access this file type" });
+          }
+          
+          // Security headers for static files
+          response.writeHead(200, { 
+            "Content-Type": contentTypeFor(filePath),
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
+            "Referrer-Policy": "strict-origin-when-cross-origin"
+          });
           response.end(stats);
           return;
         } catch (fileErr) {
+          console.error('File access error:', fileErr);
           return sendJson(response, 404, { error: "File not found" });
         }
       } catch (err) {
+        console.error('File serving error:', err);
         return sendJson(response, 500, { error: "Internal server error" });
       }
     }
 
     sendJson(response, 404, { error: "Not found" });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    const status = error.status ?? 500;
+    let status = 500;
+    let safeMessage = "Internal server error";
     
-    // Sanitize error messages to avoid information disclosure
-    const safeMessage = status >= 500 ? "Internal server error" : "Bad request";
+    // Determine error type and status more precisely
+    if (error instanceof Error) {
+      if (error.message.includes('validation') || error.message.includes('invalid')) {
+        status = 400;
+        safeMessage = "Invalid request";
+      } else if (error.message.includes('not found')) {
+        status = 404;
+        safeMessage = "Resource not found";
+      } else if (error.message.includes('forbidden') || error.message.includes('unauthorized')) {
+        status = 403;
+        safeMessage = "Access denied";
+      } else if (error.message.includes('timeout')) {
+        status = 408;
+        safeMessage = "Request timeout";
+      } else if (error.message.includes('rate limit')) {
+        status = 429;
+        safeMessage = "Rate limit exceeded";
+      }
+    }
     
-    // Log detailed error (but don't expose to client)
+    // Always log the actual error for debugging
     console.error(`Error ${status} for ${request.method} ${request.url}:`, error);
     
+    // Send sanitized error response
     sendJson(response, status, { 
       error: safeMessage,
       requestId: crypto.randomUUID() // For tracking, not exposing stack traces
@@ -915,63 +997,113 @@ const server = createServer(async (request, response) => {
   }
 });
 
-// Rate limiting middleware with HMAC for better security
+// Enhanced rate limiting middleware with better security
 const applyRateLimit = (request, response) => {
-  const clientIP = request.headers['x-forwarded-for'] || request.socket.remoteAddress;
-  const userAgent = request.headers['user-agent'] || '';
-  const timestamp = Date.now();
-  
-  // Clean up old entries
-  for (const [key, data] of rateLimit.entries()) {
-    if (timestamp - data.timestamp > RATE_LIMIT_WINDOW) {
-      rateLimit.delete(key);
-    }
-  }
-  
-  // Create HMAC-based key for better security
-  const hmacKey = createHmac('sha256', RATE_LIMIT_SECRET)
-    .update(`${clientIP}:${timestamp - (timestamp % RATE_LIMIT_WINDOW)}`)
-    .digest('hex');
-  
-  // Check if IP is rate limited
-  if (rateLimit.has(hmacKey)) {
-    const data = rateLimit.get(hmacKey);
-    if (timestamp - data.timestamp < RATE_LIMIT_WINDOW && data.count >= MAX_REQUESTS_PER_MINUTE) {
-      response.writeHead(429, {
-        'Content-Type': 'application/json; charset=utf-8',
-        'X-RateLimit-Limit': MAX_REQUESTS_PER_MINUTE,
-        'X-RateLimit-Remaining': 0,
-        'Retry-After': Math.ceil((RATE_LIMIT_WINDOW - (timestamp - data.timestamp)) / 1000),
-        'X-Content-Type-Options': 'nosniff'
-      });
-      response.end(JSON.stringify({ 
-        error: "Rate limit exceeded",
-        message: `Max ${MAX_REQUESTS_PER_MINUTE} requests per minute per client allowed`,
-        retryAfter: Math.ceil((RATE_LIMIT_WINDOW - (timestamp - data.timestamp)) / 1000)
-      }));
+  try {
+    const clientIP = request.headers['x-forwarded-for'] || request.socket.remoteAddress;
+    const userAgent = request.headers['user-agent'] || '';
+    const timestamp = Date.now();
+    
+    // Validate client IP format
+    if (!clientIP || typeof clientIP !== 'string') {
+      response.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ error: 'Invalid client IP' }));
       return false;
     }
     
-    // Increment count
-    data.count++;
-    data.timestamp = timestamp;
-  } else {
-    // Create new entry
-    rateLimit.set(hmacKey, { count: 1, timestamp: timestamp });
+    // Clean up old entries more efficiently
+    cleanupRateLimitEntries();
+    
+    // Create secure rate limit key
+    const rateLimitKey = createRateLimitKey(clientIP, timestamp);
+    
+    // Check if IP is rate limited
+    if (rateLimit.has(rateLimitKey)) {
+      const data = rateLimit.get(rateLimitKey);
+      if (timestamp - data.timestamp < RATE_LIMIT_WINDOW && data.count >= MAX_REQUESTS_PER_MINUTE) {
+        response.writeHead(429, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'X-RateLimit-Limit': MAX_REQUESTS_PER_MINUTE,
+          'X-RateLimit-Remaining': 0,
+          'Retry-After': Math.ceil((RATE_LIMIT_WINDOW - (timestamp - data.timestamp)) / 1000),
+          'X-Content-Type-Options': 'nosniff'
+        });
+        response.end(JSON.stringify({ 
+          error: "Rate limit exceeded",
+          message: `Max ${MAX_REQUESTS_PER_MINUTE} requests per minute per client allowed`,
+          retryAfter: Math.ceil((RATE_LIMIT_WINDOW - (timestamp - data.timestamp)) / 1000)
+        }));
+        return false;
+      }
+      
+      // Increment count with bounds checking
+      data.count = Math.min(data.count + 1, MAX_REQUESTS_PER_MINUTE);
+      data.timestamp = timestamp;
+    } else {
+      // Create new entry with validation
+      if (userAgent && userAgent.length > 500) {
+        userAgent = userAgent.substring(0, 500);
+      }
+      rateLimit.set(rateLimitKey, { count: 1, timestamp: timestamp, userAgent });
+    }
+    
+    return true;
+  } catch (err) {
+    console.error('Rate limit error:', err);
+    response.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ error: 'Internal server error' }));
+    return false;
   }
-  
-  return true;
 };
 
-// Clean up rate limit map periodically
-setInterval(() => {
+// Cleanup rate limit entries periodically
+const cleanupRateLimitEntries = () => {
   const now = Date.now();
   for (const [key, data] of rateLimit.entries()) {
     if (now - data.timestamp > RATE_LIMIT_WINDOW) {
       rateLimit.delete(key);
     }
   }
+};
+
+// Improved rate limit cleanup with better efficiency
+const cleanupRateLimitInterval = setInterval(() => {
+  const now = Date.now();
+  const keysToDelete = [];
+  
+  // Collect keys to delete first to avoid modifying during iteration
+  for (const [key, data] of rateLimit.entries()) {
+    if (now - data.timestamp > RATE_LIMIT_WINDOW) {
+      keysToDelete.push(key);
+    }
+  }
+  
+  // Delete collected keys
+  for (const key of keysToDelete) {
+    rateLimit.delete(key);
+  }
+  
+  // Prevent memory growth by enforcing maximum size
+  if (rateLimit.size > MAX_REQUESTS_PER_MINUTE * 10) {
+    // Keep only the most recent entries
+    const sortedEntries = Array.from(rateLimit.entries())
+      .sort((a, b) => b[1].timestamp - a[1].timestamp);
+    rateLimit.clear();
+    for (const [key, data] of sortedEntries.slice(0, MAX_REQUESTS_PER_MINUTE * 5)) {
+      rateLimit.set(key, data);
+    }
+  }
 }, CONN_CLEANUP_INTERVAL);
+
+// Clean up on exit
+process.on('SIGINT', () => {
+  cleanupRateLimitInterval.clear();
+  rateLimit.clear();
+});
+process.on('SIGTERM', () => {
+  cleanupRateLimitInterval.clear();
+  rateLimit.clear();
+});
 
 // Clean up rate limit map on exit
 process.on('SIGINT', () => {
@@ -1052,52 +1184,91 @@ const shutdown = (signal) => {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-// Handle WebSocket upgrade with origin validation
+// Handle WebSocket upgrade with authentication and origin validation
 server.on('upgrade', (request, socket, head) => {
-  const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
-  
-  if (pathname === '/ws') {
-    // Validate WebSocket origin
-    const origin = request.headers.origin;
-    if (!isOriginAllowed(origin)) {
-      console.error('WebSocket connection rejected from origin:', origin);
-      socket.destroy();
-      return;
-    }
+  try {
+    const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
     
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit('connection', ws, request);
+    if (pathname === '/ws') {
+      // Validate WebSocket origin
+      const origin = request.headers.origin;
+      if (!isOriginAllowed(origin)) {
+        console.error('WebSocket connection rejected from origin:', origin);
+        socket.destroy();
+        return;
+      }
       
-      // Add client to set and send initial status
-      connectedClients.add(ws);
+      // Simple authentication check (API key in query parameter)
+      const url = new URL(request.url, `http://${request.headers.host}`);
+      const apiKey = url.searchParams.get('auth');
       
-      // Send initial status to new client
-      broadcastAgentStatus();
+      if (!apiKey) {
+        console.error('WebSocket connection rejected: missing authentication');
+        socket.destroy();
+        return;
+      }
       
-      // Handle client disconnect
-      ws.on('close', () => {
-        connectedClients.delete(ws);
-      });
+      // Validate API key (you might want to check against a database or environment variable)
+      const validApiKey = process.env.WEBSOCKET_API_KEY || crypto.randomBytes(32).toString('hex');
+      if (apiKey !== validApiKey) {
+        console.error('WebSocket connection rejected: invalid authentication');
+        socket.destroy();
+        return;
+      }
       
-      // Handle client errors
-      ws.on('error', (error) => {
-        console.error('WebSocket error:', error);
-        connectedClients.delete(ws);
-      });
-      
-      // Handle messages
-      ws.on('message', (message) => {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+        
+        // Add client to set and send initial status
+        connectedClients.add(ws);
+        
+        // Send initial status to new client
         try {
-          // Only accept JSON messages
-          const data = JSON.parse(message.toString());
-          console.log('Received WebSocket message:', data);
+          broadcastAgentStatus();
         } catch (err) {
-          console.error('Invalid WebSocket message format');
-          ws.close(1008, 'Invalid message format');
+          console.error('Error broadcasting initial status:', err);
         }
+        
+        // Handle client disconnect
+        ws.on('close', () => {
+          connectedClients.delete(ws);
+        });
+        
+        // Handle client errors
+        ws.on('error', (error) => {
+          console.error('WebSocket error:', error);
+          connectedClients.delete(ws);
+        });
+        
+        // Handle messages with validation
+        ws.on('message', (message) => {
+          try {
+            // Only accept JSON messages
+            const data = JSON.parse(message.toString());
+            
+            // Validate message structure
+            if (!data || typeof data !== 'object') {
+              throw new Error('Invalid message format');
+            }
+            
+            // Log message but don't process it in this implementation
+            console.log('Received WebSocket message:', {
+              type: data.type || 'unknown',
+              timestamp: Date.now(),
+              hasData: !!data.data
+            });
+            
+          } catch (err) {
+            console.error('Invalid WebSocket message format:', err.message);
+            ws.close(1008, 'Invalid message format');
+          }
+        });
       });
-    });
-  } else {
+    } else {
+      socket.destroy();
+    }
+  } catch (err) {
+    console.error('WebSocket upgrade error:', err);
     socket.destroy();
   }
 });

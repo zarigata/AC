@@ -176,10 +176,16 @@ export class AgentRegistry {
 
   createAgent(input) {
     try {
+      // Validate input structure
+      if (!input || typeof input !== 'object') {
+        throw new Error('Invalid input: must be an object');
+      }
+      
       const parsed = parseCreateAgentInput(input);
 
-      // Check agent limit
-      if (this.listAgents().length >= 100) {
+      // Check agent limit with error handling
+      const currentAgents = this.listAgents();
+      if (currentAgents.length >= 100) {
         throw new Error("This machine already has 100 registered agents.");
       }
 
@@ -193,54 +199,77 @@ export class AgentRegistry {
         ...parsed
       };
 
-      // Validate agent data before insertion
-      if (!agent.name || typeof agent.name !== 'string' || agent.name.length > 80) {
-        throw new Error('Invalid agent name');
+      // Validate agent data before insertion with additional checks
+      if (!agent.name || typeof agent.name !== 'string' || agent.name.length > 80 || agent.name.length < 2) {
+        throw new Error('Invalid agent name: must be 2-80 characters');
       }
       
-      if (!agent.purpose || typeof agent.purpose !== 'string' || agent.purpose.length > 240) {
-        throw new Error('Invalid agent purpose');
+      if (!agent.purpose || typeof agent.purpose !== 'string' || agent.purpose.length > 240 || agent.purpose.length < 10) {
+        throw new Error('Invalid agent purpose: must be 10-240 characters');
       }
+      
+      // Sanitize inputs
+      agent.name = agent.name.trim();
+      agent.purpose = agent.purpose.trim();
+      
+      // Begin transaction for data consistency
+      this.db.exec('BEGIN TRANSACTION');
+      try {
+        const insertStmt = this.db.prepare(
+          `
+            INSERT INTO agents (
+              id, name, purpose, status, provider, model, isolationMode,
+              maxConcurrentTasks, peerAccess, createdAt, updatedAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `
+        );
 
-      const insertStmt = this.db.prepare(
-        `
-          INSERT INTO agents (
-            id, name, purpose, status, provider, model, isolationMode,
-            maxConcurrentTasks, peerAccess, createdAt, updatedAt
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `
-      );
+        const result = insertStmt.run(
+          agent.id,
+          agent.name,
+          agent.purpose,
+          agent.status,
+          agent.provider,
+          agent.model,
+          agent.isolationMode,
+          agent.maxConcurrentTasks,
+          Number(agent.peerAccess),
+          agent.createdAt,
+          agent.updatedAt
+        );
 
-      const result = insertStmt.run(
-        agent.id,
-        agent.name,
-        agent.purpose,
-        agent.status,
-        agent.provider,
-        agent.model,
-        agent.isolationMode,
-        agent.maxConcurrentTasks,
-        Number(agent.peerAccess),
-        agent.createdAt,
-        agent.updatedAt
-      );
-
-      if (result.changes === 0) {
-        throw new Error('Failed to create agent');
+        if (result.changes === 0) {
+          throw new Error('Failed to create agent');
+        }
+        
+        this.db.exec('COMMIT');
+        return agent;
+      } catch (dbErr) {
+        this.db.exec('ROLLBACK');
+        console.error('Database error creating agent:', dbErr);
+        throw new Error('Database operation failed');
       }
-
-      return agent;
     } catch (err) {
       console.error('Error creating agent:', err);
-      throw err;
+      // Preserve specific error messages for important cases
+      if (err.message.includes('100 registered agents')) {
+        throw new Error('This machine already has 100 registered agents.');
+      }
+      // Sanitize error message for client
+      const errorMessage = err.message.includes('database') ? 'Database operation failed' : 
+                          err.message.includes('validation') ? 'Invalid input data' : 'Failed to create agent';
+      throw new Error(errorMessage);
     }
   }
 
-  listAgents() {
+  listAgents(limit = 100) {
     try {
+      // Enforce reasonable limit
+      const safeLimit = Math.min(Math.max(Number(limit), 1), 1000);
+      
       const rows = this.db
-        .prepare("SELECT * FROM agents ORDER BY createdAt ASC LIMIT 1000")
-        .all();
+        .prepare("SELECT * FROM agents ORDER BY createdAt DESC LIMIT ?")
+        .all(safeLimit);
 
       return rows.map((row) =>
         parseAgent({
@@ -594,47 +623,79 @@ export class AgentRegistry {
 
   createMessage(agentId, sessionId, input) {
     try {
-      // Validate agent and session ID formats
-      if (!agentId || typeof agentId !== 'string' || agentId.length > 64) {
+      // Validate agent and session ID formats with additional checks
+      if (!agentId || typeof agentId !== 'string' || agentId.length > 64 || agentId.length < 1) {
         return null;
       }
       
-      if (!sessionId || typeof sessionId !== 'string' || sessionId.length > 64) {
+      if (!sessionId || typeof sessionId !== 'string' || sessionId.length > 64 || sessionId.length < 1) {
         return null;
       }
       
       const session = this.db.prepare("SELECT * FROM sessions WHERE id = ? AND agentId = ?").get(sessionId, agentId);
-      if (!session) return null;
+      if (!session) {
+        console.error('Session not found:', { agentId, sessionId });
+        return null;
+      }
 
       const id = crypto.randomUUID();
       const timestamp = now();
       
-      // Validate and sanitize message input
-      if (!input.role || !['user', 'assistant', 'system'].includes(input.role)) {
-        throw new Error('Invalid message role');
+      // Validate and sanitize message input with comprehensive checks
+      if (!input || typeof input !== 'object') {
+        throw new Error('Invalid message input: must be an object');
       }
       
+      // Validate role
+      if (!input.role || !['user', 'assistant', 'system'].includes(input.role)) {
+        throw new Error('Invalid message role: must be user, assistant, or system');
+      }
+      
+      // Validate and sanitize content
       let content = input.content || "";
       if (typeof content !== 'string') {
         throw new Error('Message content must be a string');
       }
       
+      // Enhanced content sanitization
       content = sanitizeContent(content);
       
+      // Additional security checks
       if (content.length > 50000) {
         throw new Error('Message content too long (max 50000 characters)');
       }
       
-      // Validate token counts
+      if (content.trim().length === 0) {
+        throw new Error('Message content cannot be empty');
+      }
+      
+      // Check for potential injection attacks
+      const dangerousPatterns = [
+        /<script[^>]*>/gi,
+        /javascript:/gi,
+        /data:/gi,
+        /on\w+\s*=/gi,
+        /<iframe[^>]*>/gi,
+        /<object[^>]*>/gi,
+        /<embed[^>]*>/gi
+      ];
+      
+      for (const pattern of dangerousPatterns) {
+        if (pattern.test(content)) {
+          throw new Error('Message contains invalid content');
+        }
+      }
+      
+      // Validate token counts with bounds checking
       const tokensIn = input.tokensIn || 0;
       const tokensOut = input.tokensOut || 0;
       
-      if (!Number.isInteger(tokensIn) || tokensIn < 0) {
-        throw new Error('Invalid tokensIn value');
+      if (!Number.isInteger(tokensIn) || tokensIn < 0 || tokensIn > 1000000) {
+        throw new Error('Invalid tokensIn value: must be a positive integer less than 1,000,000');
       }
       
-      if (!Number.isInteger(tokensOut) || tokensOut < 0) {
-        throw new Error('Invalid tokensOut value');
+      if (!Number.isInteger(tokensOut) || tokensOut < 0 || tokensOut > 1000000) {
+        throw new Error('Invalid tokensOut value: must be a positive integer less than 1,000,000');
       }
       
       const message = {
@@ -649,24 +710,41 @@ export class AgentRegistry {
       };
 
       // Validate model
-      if (!message.model || typeof message.model !== 'string' || message.model.length > 120) {
-        throw new Error('Invalid model');
+      if (!message.model || typeof message.model !== 'string' || message.model.length > 120 || message.model.length < 1) {
+        throw new Error('Invalid model: must be 1-120 characters');
       }
 
-      const insertStmt = this.db.prepare("INSERT INTO messages (id, sessionId, role, content, tokensIn, tokensOut, model, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-      const result = insertStmt.run(message.id, message.sessionId, message.role, message.content, message.tokensIn, message.tokensOut, message.model, message.createdAt);
-      
-      if (result.changes === 0) {
-        throw new Error('Failed to create message');
+      // Begin transaction for data consistency
+      this.db.exec('BEGIN TRANSACTION');
+      try {
+        const insertStmt = this.db.prepare("INSERT INTO messages (id, sessionId, role, content, tokensIn, tokensOut, model, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+        const result = insertStmt.run(message.id, message.sessionId, message.role, message.content, message.tokensIn, message.tokensOut, message.model, message.createdAt);
+        
+        if (result.changes === 0) {
+          throw new Error('Failed to create message');
+        }
+        
+        // Update session timestamp
+        const updateStmt = this.db.prepare("UPDATE sessions SET updatedAt = ? WHERE id = ?");
+        const updateResult = updateStmt.run(timestamp, sessionId);
+        
+        if (updateResult.changes === 0) {
+          throw new Error('Failed to update session timestamp');
+        }
+        
+        this.db.exec('COMMIT');
+        return message;
+      } catch (dbErr) {
+        this.db.exec('ROLLBACK');
+        console.error('Database error creating message:', dbErr);
+        throw new Error('Database operation failed');
       }
-
-      // Update session timestamp
-      this.db.prepare("UPDATE sessions SET updatedAt = ? WHERE id = ?").run(timestamp, sessionId);
-
-      return message;
     } catch (err) {
       console.error('Error creating message:', err);
-      throw err;
+      // Sanitize error message for client
+      const errorMessage = err.message.includes('database') ? 'Database operation failed' : 
+                          err.message.includes('invalid') ? 'Invalid message data' : 'Failed to create message';
+      throw new Error(errorMessage);
     }
   }
 

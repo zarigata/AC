@@ -13,62 +13,119 @@ export class OllamaAdapter {
   }
 
   async chat(messages, options = {}) {
-    const model = options.model || this.model;
-    const body = JSON.stringify({
-      model,
-      messages,
-      stream: false,
-      think: false,
-      options: {
-        temperature: options.temperature ?? 0.3,
-        num_predict: options.maxTokens ?? 512
+    try {
+      // Validate input
+      if (!messages || !Array.isArray(messages) || messages.length === 0) {
+        throw new Error('Messages array is required and cannot be empty');
       }
-    });
+      
+      // Validate messages structure
+      for (const msg of messages) {
+        if (!msg.role || !msg.content) {
+          throw new Error('Each message must have role and content properties');
+        }
+        if (!['user', 'assistant', 'system'].includes(msg.role)) {
+          throw new Error(`Invalid role: ${msg.role}`);
+        }
+        if (typeof msg.content !== 'string' || msg.content.trim().length === 0) {
+          throw new Error('Message content must be a non-empty string');
+        }
+      }
+      
+      const model = options.model || this.model;
+      
+      // Validate model
+      if (!model || typeof model !== 'string' || model.trim().length === 0) {
+        throw new Error('Model name is required');
+      }
+      
+      const body = JSON.stringify({
+        model,
+        messages,
+        stream: false,
+        think: false,
+        options: {
+          temperature: Math.max(0, Math.min(2, options.temperature ?? 0.3)),
+          num_predict: Math.max(1, Math.min(32000, options.maxTokens ?? 512))
+        }
+      });
 
-    const url = new URL("/api/chat", this.baseUrl);
+      const url = new URL("/api/chat", this.baseUrl);
 
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        req.destroy();
-        reject(new Error(`Ollama request timed out after ${this.timeout}ms`));
-      }, this.timeout);
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          if (req) req.destroy();
+          reject(new Error(`Ollama request timed out after ${this.timeout}ms`));
+        }, this.timeout);
 
-      const req = request(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" }
-      }, (res) => {
-        let data = "";
-        res.on("data", (chunk) => { data += chunk; });
-        res.on("end", () => {
-          clearTimeout(timer);
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.error) {
-              reject(new Error(`Ollama error: ${parsed.error}`));
+        let req;
+        try {
+          req = request(url, {
+            method: "POST",
+            headers: { 
+              "Content-Type": "application/json",
+              "Content-Length": Buffer.byteLength(body)
+            }
+          }, (res) => {
+            let data = "";
+            
+            // Check for non-200 status codes
+            if (res.statusCode && res.statusCode >= 400) {
+              clearTimeout(timer);
+              reject(new Error(`Ollama API error: ${res.statusCode} ${res.statusMessage}`));
               return;
             }
-            resolve({
-              content: parsed.message?.content || parsed.message?.thinking || "",
-              tokensIn: parsed.prompt_eval_count || 0,
-              tokensOut: parsed.eval_count || 0,
-              duration: parsed.total_duration ? Math.round(parsed.total_duration / 1e6) : 0,
-              model: parsed.model || model,
-              done: parsed.done ?? true
+            
+            res.on("data", (chunk) => { data += chunk; });
+            res.on("end", () => {
+              clearTimeout(timer);
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.error) {
+                  reject(new Error(`Ollama error: ${parsed.error}`));
+                  return;
+                }
+                
+                // Validate response structure
+                if (!parsed.message && !parsed.message?.content) {
+                  throw new Error('Invalid response structure from Ollama');
+                }
+                
+                resolve({
+                  content: parsed.message?.content || parsed.message?.thinking || "",
+                  tokensIn: parsed.prompt_eval_count || 0,
+                  tokensOut: parsed.eval_count || 0,
+                  duration: parsed.total_duration ? Math.round(parsed.total_duration / 1e6) : 0,
+                  model: parsed.model || model,
+                  done: parsed.done ?? true
+                });
+              } catch (err) {
+                reject(new Error(`Failed to parse Ollama response: ${err.message}`));
+              }
             });
-          } catch (err) {
-            reject(new Error(`Failed to parse Ollama response: ${err.message}`));
-          }
-        });
-      });
+          });
 
-      req.on("error", (err) => {
-        clearTimeout(timer);
-        reject(new Error(`Ollama connection failed: ${err.message}`));
-      });
+          req.on("error", (err) => {
+            clearTimeout(timer);
+            reject(new Error(`Ollama connection failed: ${err.message}`));
+          });
 
-      req.write(body);
-      req.end();
-    });
+          req.on("timeout", () => {
+            req.destroy();
+            reject(new Error(`Ollama request timed out after ${this.timeout}ms`));
+          });
+
+          req.write(body);
+          req.end();
+        } catch (requestErr) {
+          clearTimeout(timer);
+          reject(new Error(`Failed to create Ollama request: ${requestErr.message}`));
+        }
+      });
+    } catch (err) {
+      console.error('Ollama chat error:', err);
+      throw err;
+    }
   }
 
   async chatStream(messages, options = {}, onChunk, onComplete) {
@@ -159,33 +216,82 @@ export class OllamaAdapter {
   }
 
   async health() {
-    const url = new URL("/api/tags", this.baseUrl);
+    try {
+      // Validate baseUrl
+      if (!this.baseUrl || typeof this.baseUrl !== 'string') {
+        return { ok: false, models: [], error: 'Invalid base URL' };
+      }
+      
+      const url = new URL("/api/tags", this.baseUrl);
 
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => resolve({ ok: false, models: [] }), 5000);
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          if (req) req.destroy();
+          resolve({ ok: false, models: [], error: 'Health check timeout' });
+        }, 5000);
 
-      const req = request(url, { method: "GET" }, (res) => {
-        let data = "";
-        res.on("data", (chunk) => { data += chunk; });
-        res.on("end", () => {
+        let req;
+        try {
+          req = request(url, { 
+            method: "GET",
+            timeout: 3000
+          }, (res) => {
+            let data = "";
+            
+            // Check for non-200 status codes
+            if (res.statusCode && res.statusCode >= 400) {
+              clearTimeout(timer);
+              resolve({ ok: false, models: [], error: `HTTP ${res.statusCode}` });
+              return;
+            }
+            
+            res.on("data", (chunk) => { data += chunk; });
+            res.on("end", () => {
+              clearTimeout(timer);
+              try {
+                const parsed = JSON.parse(data);
+                
+                // Validate models array
+                const models = Array.isArray(parsed.models) 
+                  ? parsed.models
+                    .filter(m => m && typeof m === 'object' && m.name && typeof m.name === 'string')
+                    .map((m) => String(m.name).trim())
+                  : [];
+                
+                // Return limited number of models to prevent memory issues
+                resolve({ 
+                  ok: true, 
+                  models: models.slice(0, 50),
+                  totalModels: models.length
+                });
+              } catch (parseErr) {
+                console.error('Failed to parse health check response:', parseErr);
+                resolve({ ok: false, models: [], error: 'Invalid response format' });
+              }
+            });
+          });
+
+          req.on("error", (err) => {
+            clearTimeout(timer);
+            console.error('Health check connection error:', err);
+            resolve({ ok: false, models: [], error: 'Connection failed' });
+          });
+
+          req.on("timeout", () => {
+            req.destroy();
+            resolve({ ok: false, models: [], error: 'Request timeout' });
+          });
+
+          req.end();
+        } catch (requestErr) {
           clearTimeout(timer);
-          try {
-            const parsed = JSON.parse(data);
-            const models = (parsed.models || []).map((m) => m.name);
-            resolve({ ok: true, models });
-          } catch {
-            resolve({ ok: false, models: [] });
-          }
-        });
+          resolve({ ok: false, models: [], error: 'Request creation failed' });
+        }
       });
-
-      req.on("error", () => {
-        clearTimeout(timer);
-        resolve({ ok: false, models: [] });
-      });
-
-      req.end();
-    });
+    } catch (err) {
+      console.error('Health check error:', err);
+      return Promise.resolve({ ok: false, models: [], error: 'Health check failed' });
+    }
   }
 }
 

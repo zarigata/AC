@@ -217,6 +217,11 @@ const sanitizeContent = (content, field) => {
 };
 
 export const parseCreateAgentInput = (input) => {
+  // Validate input structure
+  if (!input || typeof input !== 'object') {
+    throw new Error('Agent input must be an object');
+  }
+  
   const provider = getProviderById(ensureString(input.provider, "provider", 2, 80));
 
   return {
