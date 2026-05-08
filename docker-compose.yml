@@ -1,0 +1,18 @@
+services:
+  zsiistant:
+    build: .
+    container_name: zsiistant-test
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./data:/app/data
+      - ./apps/api/src:/app/apps/api/src
+      - ./packages/shared/src:/app/packages/shared/src
+    environment:
+      - PORT=4000
+      - HOST=0.0.0.0
+      - ZSIISTANT_DB_PATH=/app/data/zsiistant.sqlite
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

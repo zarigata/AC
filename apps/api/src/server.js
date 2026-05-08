@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { extname, join, normalize, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setInterval } from "node:timers";
-import { WebSocketServer } from "node:ws";
+import { WebSocketServer } from "ws";
 
 import {
   getProviderReadinessSummary,
@@ -13,10 +13,35 @@ import {
   parseCreateLinkInput
 } from "../../../packages/shared/src/index.js";
 
-import { OllamaAdapter } from "./adapters/ollama.js";
+import { OllamaAdapter, createProvider } from "./adapters/ollama.js";
 import { AgentRegistry } from "./registry.js";
 
-const ollama = new OllamaAdapter({ model: "qwen3:0.6b" });
+// Multi-provider setup — primary is Ollama (local), fallbacks configured via env
+const providers = {};
+const providerNames = ["ollama", "openai", "anthropic", "gemini", "openrouter", "groq", "together", "lmstudio"];
+const DEFAULT_PROVIDER = process.env.DEFAULT_PROVIDER || "ollama";
+
+// Initialize Ollama as primary
+providers.ollama = new OllamaAdapter({
+  baseUrl: process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434",
+  model: process.env.OLLAMA_MODEL || "qwen3:1.7b",
+  timeout: parseInt(process.env.OLLAMA_TIMEOUT || "120000", 10),
+});
+
+// Lazy-init other providers (only when API key is set)
+for (const name of providerNames.slice(1)) {
+  const envKey = name.toUpperCase() + "_API_KEY";
+  if (process.env[envKey]) {
+    try {
+      providers[name] = createProvider(name);
+    } catch (e) {
+      console.warn(`Failed to init provider ${name}: ${e.message}`);
+    }
+  }
+}
+
+// Keep 'ollama' reference for backward compatibility
+const ollama = providers.ollama;
 const VERSION = "0.2.0";
 const startTime = Date.now();
 
@@ -69,15 +94,17 @@ const contentTypeFor = (path) => {
 };
 
 const providerSummary = () => {
-  const providers = listProviders();
+  const staticProviders = listProviders();
   return {
-    providers,
+    providers: staticProviders,
+    configured: Object.keys(providers),
+    default: DEFAULT_PROVIDER,
     summary: {
-      total: providers.length,
-      local: providers.filter((provider) => provider.category === "local").length,
-      cloud: providers.filter((provider) => provider.category === "cloud").length,
-      selfHosted: providers.filter((provider) => provider.category === "self-hosted").length,
-      routers: providers.filter((provider) => provider.category === "router").length
+      total: staticProviders.length,
+      local: staticProviders.filter((p) => p.category === "local").length,
+      cloud: staticProviders.filter((p) => p.category === "cloud").length,
+      selfHosted: staticProviders.filter((p) => p.category === "self-hosted").length,
+      routers: staticProviders.filter((p) => p.category === "router").length
     },
     readiness: getProviderReadinessSummary(process.env)
   };
@@ -262,14 +289,53 @@ const server = createServer(async (request, response) => {
       return sendJson(response, 200, { logs });
     }
 
-    /* ─── Provider Health (Ollama) ─── */
+    /* ─── Provider Health (all configured) ─── */
 
     if (request.method === "GET" && url.pathname === "/api/providers/health") {
-      const health = await ollama.health();
-      return sendJson(response, 200, { ollama: health });
+      const results = {};
+      for (const [name, provider] of Object.entries(providers)) {
+        try {
+          results[name] = await provider.health();
+        } catch (e) {
+          results[name] = { ok: false, error: e.message };
+        }
+      }
+      return sendJson(response, 200, results);
     }
 
-    /* ─── Agent Chat (via Ollama) ─── */
+    /* ─── Provider Chat (direct, no agent needed) ─── */
+
+    if (request.method === "POST" && url.pathname === "/api/chat") {
+      const body = await readRequestBody(request);
+      const providerName = body.provider || DEFAULT_PROVIDER;
+      const provider = providers[providerName];
+      if (!provider) return sendJson(response, 400, { error: `Provider '${providerName}' not configured. Available: ${Object.keys(providers).join(", ")}` });
+
+      const messages = body.messages || [{ role: "user", content: body.message || "" }];
+      if (!messages.length || !messages[messages.length - 1]?.content?.trim()) {
+        return sendJson(response, 400, { error: "Message is required" });
+      }
+
+      try {
+        const result = await provider.chat(messages, {
+          model: body.model,
+          temperature: body.temperature,
+          maxTokens: body.maxTokens,
+        });
+        return sendJson(response, 200, {
+          content: result.content,
+          tokensIn: result.tokensIn,
+          tokensOut: result.tokensOut,
+          duration: result.duration,
+          model: result.model,
+          provider: providerName,
+        });
+      } catch (e) {
+        return sendJson(response, 502, { error: e.message });
+      }
+    }
+
+    /* ─── Agent Chat (via configured provider) ─── */
 
     const chatMatch = url.pathname.match(/^\/api\/agents\/([\w-]+)\/chat$/);
 
@@ -299,8 +365,10 @@ const server = createServer(async (request, response) => {
         content: m.content
       }));
 
-      // Call Ollama
-      const result = await ollama.chat(history, { model: agent.model });
+      // Call provider (default to ollama, agent can override)
+      const chatProvider = providers[agent.provider?.toLowerCase()] || providers[DEFAULT_PROVIDER];
+      if (!chatProvider) return sendJson(response, 502, { error: `No provider configured for agent '${agent.name}' (tried '${agent.provider}')` });
+      const result = await chatProvider.chat(history, { model: agent.model });
 
       // Save assistant response
       registry.createMessage(agentId, session.id, {
