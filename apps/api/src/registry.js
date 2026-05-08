@@ -391,6 +391,69 @@ export class AgentRegistry {
     };
   }
 
+  getUsageStats(period = 'daily') {
+    const now = new Date();
+    let cutoffDate;
+    
+    switch (period) {
+      case 'daily':
+        cutoffDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        break;
+      case 'weekly':
+        cutoffDate = new Date(now.getTime() - (6 * 24 * 60 * 60 * 1000));
+        break;
+      case 'monthly':
+        cutoffDate = new Date(now.getTime() - (29 * 24 * 60 * 60 * 1000));
+        break;
+      default:
+        cutoffDate = new Date(0); // All time
+    }
+    
+    const cutoffIso = cutoffDate.toISOString();
+
+    // Get overall usage stats
+    const overallStats = this.db
+      .prepare(
+        `SELECT 
+          COUNT(DISTINCT s.id) as totalSessions,
+          COALESCE(SUM(m.tokensIn), 0) as totalTokensIn,
+          COALESCE(SUM(m.tokensOut), 0) as totalTokensOut,
+          COUNT(m.id) as totalMessages
+         FROM sessions s
+         LEFT JOIN messages m ON s.id = m.sessionId
+         WHERE s.createdAt >= ?`
+      )
+      .get(cutoffIso);
+
+    // Get agent breakdown
+    const agentBreakdown = this.db
+      .prepare(
+        `SELECT 
+          a.id,
+          a.name,
+          COUNT(DISTINCT s.id) as agentSessions,
+          COALESCE(SUM(m.tokensIn), 0) as agentTokensIn,
+          COALESCE(SUM(m.tokensOut), 0) as agentTokensOut,
+          COUNT(m.id) as agentMessages
+         FROM agents a
+         LEFT JOIN sessions s ON a.id = s.agentId AND s.createdAt >= ?
+         LEFT JOIN messages m ON s.id = m.sessionId AND m.createdAt >= ?
+         GROUP BY a.id, a.name
+         ORDER BY agentTokensOut DESC
+         LIMIT 10`
+      )
+      .all(cutoffIso, cutoffIso);
+
+    return {
+      period,
+      totalSessions: overallStats.totalSessions,
+      totalTokensIn: overallStats.totalTokensIn,
+      totalTokensOut: overallStats.totalTokensOut,
+      totalMessages: overallStats.totalMessages,
+      agents: agentBreakdown
+    };
+  }
+
   /* ─── Request Logging ─── */
 
   logRequest(method, path, status, duration, userAgent = null, ip = null) {

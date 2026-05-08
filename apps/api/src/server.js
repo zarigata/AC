@@ -297,6 +297,21 @@ const server = createServer(async (request, response) => {
       return sendJson(response, 200, usage);
     }
 
+    /* ─── Global Usage Stats ─── */
+
+    if (request.method === "GET" && url.pathname === "/api/usage") {
+      const period = new URLSearchParams(url.search).get('period') || 'daily';
+      
+      // Validate period parameter
+      const validPeriods = ['daily', 'weekly', 'monthly', 'all'];
+      if (!validPeriods.includes(period)) {
+        return sendJson(response, 400, { error: "Invalid period parameter. Must be: daily, weekly, monthly, or all" });
+      }
+      
+      const usage = registry.getUsageStats(period);
+      return sendJson(response, 200, usage);
+    }
+
     /* ─── Agent History ─── */
 
     const historyMatch = url.pathname.match(/^\/api\/agents\/([\w-]+)\/history$/);
