@@ -468,6 +468,111 @@ const server = createServer(async (request, response) => {
       const userMessage = body.message || body.content || "";
       if (!userMessage.trim()) return sendJson(response, 400, { error: "Message is required" });
 
+      // Check if streaming is requested
+      if (body.stream === true) {
+        // Create or reuse session
+        const sessions = registry.listSessions(agentId);
+        let session = sessions.length > 0 ? sessions[0] : registry.createSession(agentId, { title: "Chat" });
+
+        // Save user message
+        registry.createMessage(agentId, session.id, {
+          role: "user",
+          content: userMessage,
+          tokensIn: 0
+        });
+
+        // Build message history for provider
+        const history = registry.listMessages(agentId, session.id).map((m) => ({
+          role: m.role,
+          content: m.content
+        }));
+
+        // Set up SSE headers
+        response.writeHead(200, {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization"
+        });
+
+        // Call provider (default to ollama, agent can override)
+        const chatProvider = providers[agent.provider?.toLowerCase()] || providers[DEFAULT_PROVIDER];
+        if (!chatProvider) {
+          const eventData = JSON.stringify({
+            error: `No provider configured for agent '${agent.name}' (tried '${agent.provider}')`,
+            done: true,
+            final: true
+          });
+          response.write(`data: ${eventData}\n\n`);
+          response.end();
+          return;
+        }
+
+        try {
+          let accumulatedContent = "";
+          let accumulatedTokensIn = 0;
+          let accumulatedTokensOut = 0;
+          
+          await chatProvider.chatStream(history, { model: agent.model, temperature: body.temperature, maxTokens: body.maxTokens }, (chunk) => {
+            accumulatedContent += chunk.content || "";
+            accumulatedTokensIn += chunk.tokensIn || 0;
+            accumulatedTokensOut += chunk.tokensOut || 0;
+            
+            // Send SSE event
+            const eventData = JSON.stringify({
+              content: chunk.content || "",
+              accumulatedContent,
+              tokensIn: chunk.tokensIn || 0,
+              tokensOut: chunk.tokensOut || 0,
+              duration: chunk.duration || 0,
+              model: chunk.model || agent.model,
+              sessionId: session.id,
+              done: chunk.done || false
+            });
+            
+            response.write(`data: ${eventData}\n\n`);
+          }, (finalResult) => {
+            // Save assistant response
+            registry.createMessage(agentId, session.id, {
+              role: "assistant",
+              content: finalResult.content,
+              tokensIn: finalResult.tokensIn,
+              tokensOut: finalResult.tokensOut,
+              model: finalResult.model
+            });
+            
+            // Send final event
+            const eventData = JSON.stringify({
+              content: finalResult.content || "",
+              accumulatedContent: finalResult.content || "",
+              tokensIn: finalResult.tokensIn || 0,
+              tokensOut: finalResult.tokensOut || 0,
+              duration: finalResult.duration || 0,
+              model: finalResult.model || agent.model,
+              sessionId: session.id,
+              done: true,
+              final: true
+            });
+            
+            response.write(`data: ${eventData}\n\n`);
+            response.end();
+          });
+        } catch (e) {
+          // Send error event
+          const eventData = JSON.stringify({
+            error: e.message,
+            done: true,
+            final: true
+          });
+          response.write(`data: ${eventData}\n\n`);
+          response.end();
+        }
+        return;
+      }
+
+      // Regular (non-streaming) request
       // Create or reuse session
       const sessions = registry.listSessions(agentId);
       let session = sessions.length > 0 ? sessions[0] : registry.createSession(agentId, { title: "Chat" });
@@ -479,7 +584,7 @@ const server = createServer(async (request, response) => {
         tokensIn: 0
       });
 
-      // Build message history for Ollama
+      // Build message history for provider
       const history = registry.listMessages(agentId, session.id).map((m) => ({
         role: m.role,
         content: m.content
@@ -488,7 +593,7 @@ const server = createServer(async (request, response) => {
       // Call provider (default to ollama, agent can override)
       const chatProvider = providers[agent.provider?.toLowerCase()] || providers[DEFAULT_PROVIDER];
       if (!chatProvider) return sendJson(response, 502, { error: `No provider configured for agent '${agent.name}' (tried '${agent.provider}')` });
-      const result = await chatProvider.chat(history, { model: agent.model });
+      const result = await chatProvider.chat(history, { model: agent.model, temperature: body.temperature, maxTokens: body.maxTokens });
 
       // Save assistant response
       registry.createMessage(agentId, session.id, {
