@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { inspect } from "node:util";
 
 const sanitizeContent = (content) => {
   if (typeof content !== 'string') return content;
@@ -25,66 +26,120 @@ const now = () => new Date().toISOString();
 
 export class AgentRegistry {
   constructor(options) {
-    mkdirSync(dirname(options.databasePath), { recursive: true });
-    this.db = new DatabaseSync(options.databasePath);
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS agents (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        purpose TEXT NOT NULL,
-        status TEXT NOT NULL,
-        provider TEXT NOT NULL,
-        model TEXT NOT NULL,
-        isolationMode TEXT NOT NULL,
-        maxConcurrentTasks INTEGER NOT NULL,
-        peerAccess INTEGER NOT NULL,
-        createdAt TEXT NOT NULL,
-        updatedAt TEXT NOT NULL
-      );
+    try {
+      // Validate database path
+      if (!options.databasePath) {
+        throw new Error('Database path is required');
+      }
+      
+      // Ensure directory exists with proper permissions
+      const dbDir = dirname(options.databasePath);
+      mkdirSync(dbDir, { recursive: true, mode: 0o755 });
+      
+      // Initialize database with error handling
+      try {
+        this.db = new DatabaseSync(options.databasePath);
+        
+        // Enable foreign key constraints
+        this.db.exec('PRAGMA foreign_keys = ON');
+        
+        // Create tables with proper indexes
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS agents (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            purpose TEXT NOT NULL,
+            status TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            isolationMode TEXT NOT NULL,
+            maxConcurrentTasks INTEGER NOT NULL,
+            peerAccess INTEGER NOT NULL,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
+          CREATE INDEX IF NOT EXISTS idx_agents_provider ON agents(provider);
+          CREATE INDEX IF NOT EXISTS idx_agents_created_at ON agents(createdAt);
+        `);
 
-      CREATE TABLE IF NOT EXISTS agent_links (
-        sourceAgentId TEXT NOT NULL,
-        targetAgentId TEXT NOT NULL,
-        mode TEXT NOT NULL,
-        createdAt TEXT NOT NULL,
-        PRIMARY KEY (sourceAgentId, targetAgentId),
-        FOREIGN KEY (sourceAgentId) REFERENCES agents(id) ON DELETE CASCADE,
-        FOREIGN KEY (targetAgentId) REFERENCES agents(id) ON DELETE CASCADE
-      );
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS agent_links (
+            sourceAgentId TEXT NOT NULL,
+            targetAgentId TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            createdAt TEXT NOT NULL,
+            PRIMARY KEY (sourceAgentId, targetAgentId),
+            FOREIGN KEY (sourceAgentId) REFERENCES agents(id) ON DELETE CASCADE,
+            FOREIGN KEY (targetAgentId) REFERENCES agents(id) ON DELETE CASCADE
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_links_source ON agent_links(sourceAgentId);
+          CREATE INDEX IF NOT EXISTS idx_links_target ON agent_links(targetAgentId);
+        `);
 
-      CREATE TABLE IF NOT EXISTS sessions (
-        id TEXT PRIMARY KEY,
-        agentId TEXT NOT NULL,
-        title TEXT NOT NULL DEFAULT '',
-        model TEXT NOT NULL DEFAULT '',
-        createdAt TEXT NOT NULL,
-        updatedAt TEXT NOT NULL,
-        FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE
-      );
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY,
+            agentId TEXT NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '',
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL,
+            FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agentId);
+          CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(createdAt);
+          CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updatedAt);
+        `);
 
-      CREATE TABLE IF NOT EXISTS messages (
-        id TEXT PRIMARY KEY,
-        sessionId TEXT NOT NULL,
-        role TEXT NOT NULL,
-        content TEXT NOT NULL,
-        tokensIn INTEGER NOT NULL DEFAULT 0,
-        tokensOut INTEGER NOT NULL DEFAULT 0,
-        model TEXT NOT NULL DEFAULT '',
-        createdAt TEXT NOT NULL,
-        FOREIGN KEY (sessionId) REFERENCES sessions(id) ON DELETE CASCADE
-      );
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS messages (
+            id TEXT PRIMARY KEY,
+            sessionId TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            tokensIn INTEGER NOT NULL DEFAULT 0,
+            tokensOut INTEGER NOT NULL DEFAULT 0,
+            model TEXT NOT NULL DEFAULT '',
+            createdAt TEXT NOT NULL,
+            FOREIGN KEY (sessionId) REFERENCES sessions(id) ON DELETE CASCADE
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(sessionId);
+          CREATE INDEX IF NOT EXISTS idx_messages_role ON messages(role);
+          CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(createdAt);
+        `);
 
-      CREATE TABLE IF NOT EXISTS logs (
-        id TEXT PRIMARY KEY,
-        method TEXT NOT NULL,
-        path TEXT NOT NULL,
-        status INTEGER NOT NULL,
-        duration INTEGER NOT NULL,
-        userAgent TEXT,
-        ip TEXT,
-        createdAt TEXT NOT NULL
-      );
-    `);
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS logs (
+            id TEXT PRIMARY KEY,
+            method TEXT NOT NULL,
+            path TEXT NOT NULL,
+            status INTEGER NOT NULL,
+            duration INTEGER NOT NULL,
+            userAgent TEXT,
+            ip TEXT,
+            createdAt TEXT NOT NULL
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_logs_status ON logs(status);
+          CREATE INDEX IF NOT EXISTS idx_logs_path ON logs(path);
+          CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs(createdAt);
+        `);
+        
+        // Enable WAL mode for better performance
+        this.db.exec('PRAGMA journal_mode = WAL');
+        this.db.exec('PRAGMA synchronous = NORMAL');
+        
+      } catch (dbErr) {
+        throw new Error(`Database initialization failed: ${dbErr.message}`);
+      }
+    } catch (initErr) {
+      throw new Error(`Registry initialization failed: ${initErr.message}`);
+    }
   }
 
   seed() {
@@ -97,19 +152,19 @@ export class AgentRegistry {
       purpose: "Break work into tasks, supervise runs, and route model usage.",
       provider: "openai",
       model: "gpt-5.4",
-      isolationMode: "selective",
+      isolationMode: "strict",
       maxConcurrentTasks: 8,
-      peerAccess: true
+      peerAccess: false,
     });
 
     const researcher = this.createAgent({
       name: "Researcher",
-      purpose: "Collect docs, compare backends, and prepare implementation briefs.",
-      provider: "anthropic",
-      model: "claude-sonnet-4.5",
-      isolationMode: "isolated",
-      maxConcurrentTasks: 4,
-      peerAccess: false
+      purpose: "Research and summarize the web",
+      provider: "openai",
+      model: "gpt-5.4",
+      isolationMode: "strict",
+      maxConcurrentTasks: 8,
+      peerAccess: false,
     });
 
     this.createLink({
@@ -119,46 +174,44 @@ export class AgentRegistry {
     });
   }
 
-  listAgents() {
-    const rows = this.db
-      .prepare("SELECT * FROM agents ORDER BY createdAt ASC")
-      .all();
-
-    return rows.map((row) =>
-      parseAgent({
-        ...row,
-        peerAccess: Boolean(row.peerAccess)
-      })
-    );
-  }
-
   createAgent(input) {
-    const parsed = parseCreateAgentInput(input);
+    try {
+      const parsed = parseCreateAgentInput(input);
 
-    if (this.listAgents().length >= 100) {
-      throw new Error("This machine already has 100 registered agents.");
-    }
+      // Check agent limit
+      if (this.listAgents().length >= 100) {
+        throw new Error("This machine already has 100 registered agents.");
+      }
 
-    const id = crypto.randomUUID();
-    const timestamp = now();
-    const agent = {
-      id,
-      status: "idle",
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      ...parsed
-    };
+      const id = crypto.randomUUID();
+      const timestamp = now();
+      const agent = {
+        id,
+        status: "idle",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        ...parsed
+      };
 
-    this.db
-      .prepare(
+      // Validate agent data before insertion
+      if (!agent.name || typeof agent.name !== 'string' || agent.name.length > 80) {
+        throw new Error('Invalid agent name');
+      }
+      
+      if (!agent.purpose || typeof agent.purpose !== 'string' || agent.purpose.length > 240) {
+        throw new Error('Invalid agent purpose');
+      }
+
+      const insertStmt = this.db.prepare(
         `
           INSERT INTO agents (
             id, name, purpose, status, provider, model, isolationMode,
             maxConcurrentTasks, peerAccess, createdAt, updatedAt
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `
-      )
-      .run(
+      );
+
+      const result = insertStmt.run(
         agent.id,
         agent.name,
         agent.purpose,
@@ -172,346 +225,598 @@ export class AgentRegistry {
         agent.updatedAt
       );
 
-    return agent;
+      if (result.changes === 0) {
+        throw new Error('Failed to create agent');
+      }
+
+      return agent;
+    } catch (err) {
+      console.error('Error creating agent:', err);
+      throw err;
+    }
+  }
+
+  listAgents() {
+    try {
+      const rows = this.db
+        .prepare("SELECT * FROM agents ORDER BY createdAt ASC LIMIT 1000")
+        .all();
+
+      return rows.map((row) =>
+        parseAgent({
+          ...row,
+          peerAccess: Boolean(row.peerAccess)
+        })
+      );
+    } catch (err) {
+      console.error('Error listing agents:', err);
+      return [];
+    }
+  }
+
+  getAgent(id) {
+    try {
+      // Validate ID format
+      if (!id || typeof id !== 'string' || id.length > 64) {
+        return null;
+      }
+      
+      const row = this.db.prepare("SELECT * FROM agents WHERE id = ?").get(id);
+      if (!row) return null;
+      
+      return parseAgent({ ...row, peerAccess: Boolean(row.peerAccess) });
+    } catch (err) {
+      console.error('Error getting agent:', err);
+      return null;
+    }
+  }
+
+  updateAgent(id, updates) {
+    try {
+      // Validate ID format
+      if (!id || typeof id !== 'string' || id.length > 64) {
+        return null;
+      }
+      
+      const existing = this.getAgent(id);
+      if (!existing) return null;
+
+      const allowed = ["name", "purpose", "status", "provider", "model", "isolationMode", "maxConcurrentTasks", "peerAccess"];
+      const fields = [];
+      const values = [];
+
+      // Validate and sanitize updates
+      for (const key of allowed) {
+        if (key in updates) {
+          let value = updates[key];
+          
+          // Type validation
+          if (key === "peerAccess" && typeof value !== "boolean") {
+            throw new Error(`Invalid ${key} value`);
+          }
+          
+          if (key === "maxConcurrentTasks" && (!Number.isInteger(value) || value < 1 || value > 32)) {
+            throw new Error(`Invalid ${key} value`);
+          }
+          
+          if (key === "name" && (typeof value !== "string" || value.length > 80)) {
+            throw new Error(`Invalid ${key} value`);
+          }
+          
+          if (key === "purpose" && (typeof value !== "string" || value.length > 240)) {
+            throw new Error(`Invalid ${key} value`);
+          }
+          
+          fields.push(`${key} = ?`);
+          values.push(key === "peerAccess" ? Number(value) : value);
+        }
+      }
+
+      if (fields.length === 0) return existing;
+
+      fields.push("updatedAt = ?");
+      values.push(now());
+      values.push(id);
+
+      const updateStmt = this.db.prepare(`UPDATE agents SET ${fields.join(", ")} WHERE id = ?`);
+      const result = updateStmt.run(...values);
+      
+      if (result.changes === 0) {
+        return null;
+      }
+      
+      return this.getAgent(id);
+    } catch (err) {
+      console.error('Error updating agent:', err);
+      throw err;
+    }
+  }
+
+  deleteAgent(id) {
+    try {
+      // Validate ID format
+      if (!id || typeof id !== 'string' || id.length > 64) {
+        return false;
+      }
+      
+      const existing = this.getAgent(id);
+      if (!existing) return false;
+      
+      // Begin transaction for safe deletion
+      this.db.exec('BEGIN TRANSACTION');
+      try {
+        // Delete dependent records first (foreign key constraints will handle this)
+        this.db.prepare("DELETE FROM agent_links WHERE sourceAgentId = ? OR targetAgentId = ?").run(id, id);
+        this.db.prepare("DELETE FROM sessions WHERE agentId = ?").run(id);
+        
+        // Delete the agent
+        const result = this.db.prepare("DELETE FROM agents WHERE id = ?").run(id);
+        
+        this.db.exec('COMMIT');
+        return result.changes > 0;
+      } catch (deleteErr) {
+        this.db.exec('ROLLBACK');
+        console.error('Error deleting agent:', deleteErr);
+        throw deleteErr;
+      }
+    } catch (err) {
+      console.error('Error deleting agent:', err);
+      return false;
+    }
   }
 
   listLinks() {
-    return this.db
-      .prepare("SELECT * FROM agent_links ORDER BY createdAt ASC")
-      .all();
+    try {
+      return this.db
+        .prepare("SELECT * FROM agent_links ORDER BY createdAt ASC LIMIT 1000")
+        .all();
+    } catch (err) {
+      console.error('Error listing links:', err);
+      return [];
+    }
   }
 
   createLink(input) {
-    const parsed = parseCreateLinkInput(input);
+    try {
+      const parsed = parseCreateLinkInput(input);
 
-    if (parsed.sourceAgentId === parsed.targetAgentId) {
-      throw new Error("An agent cannot create a link to itself.");
-    }
+      // Prevent self-links
+      if (parsed.sourceAgentId === parsed.targetAgentId) {
+        throw new Error("An agent cannot create a link to itself.");
+      }
 
-    const agentIds = new Set(this.listAgents().map((agent) => agent.id));
-    if (!agentIds.has(parsed.sourceAgentId) || !agentIds.has(parsed.targetAgentId)) {
-      throw new Error("Both agents must exist before creating a link.");
-    }
+      // Check if both agents exist
+      const agentIds = new Set(this.listAgents().map((agent) => agent.id));
+      if (!agentIds.has(parsed.sourceAgentId) || !agentIds.has(parsed.targetAgentId)) {
+        throw new Error("Both agents must exist before creating a link.");
+      }
 
-    const createdAt = now();
-    this.db
-      .prepare(
+      const createdAt = now();
+      const insertStmt = this.db.prepare(
         `
           INSERT OR REPLACE INTO agent_links (
             sourceAgentId, targetAgentId, mode, createdAt
           ) VALUES (?, ?, ?, ?)
         `
-      )
-      .run(parsed.sourceAgentId, parsed.targetAgentId, parsed.mode, createdAt);
+      );
 
-    return {
-      ...parsed,
-      createdAt
-    };
-  }
+      const result = insertStmt.run(parsed.sourceAgentId, parsed.targetAgentId, parsed.mode, createdAt);
 
-  getTopology() {
-    const agents = this.listAgents();
-    const links = this.listLinks();
-
-    return {
-      capacity: {
-        maxAgentsPerMachine: 100,
-        activeAgents: agents.length,
-        supportedLinkModes: agentLinkModeValues
-      },
-      agents,
-      links
-    };
-  }
-
-  /* ─── Single Agent CRUD ─── */
-
-  getAgent(id) {
-    const row = this.db.prepare("SELECT * FROM agents WHERE id = ?").get(id);
-    if (!row) return null;
-    return parseAgent({ ...row, peerAccess: Boolean(row.peerAccess) });
-  }
-
-  updateAgent(id, updates) {
-    const existing = this.getAgent(id);
-    if (!existing) return null;
-
-    const allowed = ["name", "purpose", "status", "provider", "model", "isolationMode", "maxConcurrentTasks", "peerAccess"];
-    const fields = [];
-    const values = [];
-
-    for (const key of allowed) {
-      if (key in updates) {
-        fields.push(`${key} = ?`);
-        values.push(key === "peerAccess" ? Number(updates[key]) : updates[key]);
+      if (result.changes === 0) {
+        throw new Error('Failed to create link');
       }
+
+      return {
+        ...parsed,
+        createdAt
+      };
+    } catch (err) {
+      console.error('Error creating link:', err);
+      throw err;
     }
-
-    if (fields.length === 0) return existing;
-
-    fields.push("updatedAt = ?");
-    values.push(now());
-    values.push(id);
-
-    this.db.prepare(`UPDATE agents SET ${fields.join(", ")} WHERE id = ?`).run(...values);
-    return this.getAgent(id);
   }
-
-  deleteAgent(id) {
-    const existing = this.getAgent(id);
-    if (!existing) return false;
-    this.db.prepare("DELETE FROM agents WHERE id = ?").run(id);
-    return true;
-  }
-
-  /* ─── Link Delete ─── */
 
   deleteLink(input) {
-    const result = this.db
-      .prepare("DELETE FROM agent_links WHERE sourceAgentId = ? AND targetAgentId = ?")
-      .run(input.sourceAgentId, input.targetAgentId);
-    return result.changes > 0;
-  }
-
-  /* ─── Sessions ─── */
-
-  listSessions(agentId) {
-    return this.db
-      .prepare("SELECT * FROM sessions WHERE agentId = ? ORDER BY createdAt DESC")
-      .all(agentId);
+    try {
+      // Support both object and parameter calls
+      const sourceAgentId = input.sourceAgentId;
+      const targetAgentId = input.targetAgentId;
+      
+      // Validate ID formats
+      if (!sourceAgentId || typeof sourceAgentId !== 'string' || sourceAgentId.length > 64) {
+        return false;
+      }
+      
+      if (!targetAgentId || typeof targetAgentId !== 'string' || targetAgentId.length > 64) {
+        return false;
+      }
+      
+      const deleteStmt = this.db.prepare(
+        "DELETE FROM agent_links WHERE sourceAgentId = ? AND targetAgentId = ?"
+      );
+      const result = deleteStmt.run(sourceAgentId, targetAgentId);
+      
+      return result.changes > 0;
+    } catch (err) {
+      console.error('Error deleting link:', err);
+      return false;
+    }
   }
 
   createSession(agentId, input = {}) {
-    const agent = this.getAgent(agentId);
-    if (!agent) return null;
+    try {
+      // Validate agent ID format
+      if (!agentId || typeof agentId !== 'string' || agentId.length > 64) {
+        return null;
+      }
+      
+      const agent = this.getAgent(agentId);
+      if (!agent) return null;
 
-    const id = crypto.randomUUID();
-    const timestamp = now();
-    const session = {
-      id,
-      agentId,
-      title: input.title || "New session",
-      model: input.model || agent.model,
-      createdAt: timestamp,
-      updatedAt: timestamp
-    };
+      const id = crypto.randomUUID();
+      const timestamp = now();
+      const session = {
+        id,
+        agentId,
+        title: input.title ? String(input.title).substring(0, 200) : "New session",
+        model: input.model ? String(input.model).substring(0, 120) : agent.model,
+        createdAt: timestamp,
+        updatedAt: timestamp
+      };
 
-    this.db
-      .prepare("INSERT INTO sessions (id, agentId, title, model, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)")
-      .run(session.id, session.agentId, session.title, session.model, session.createdAt, session.updatedAt);
+      // Validate session data
+      if (!session.title || typeof session.title !== 'string') {
+        throw new Error('Invalid session title');
+      }
+      
+      if (!session.model || typeof session.model !== 'string') {
+        throw new Error('Invalid session model');
+      }
 
-    return session;
+      const insertStmt = this.db.prepare("INSERT INTO sessions (id, agentId, title, model, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)");
+      const result = insertStmt.run(session.id, session.agentId, session.title, session.model, session.createdAt, session.updatedAt);
+      
+      if (result.changes === 0) {
+        throw new Error('Failed to create session');
+      }
+
+      return session;
+    } catch (err) {
+      console.error('Error creating session:', err);
+      throw err;
+    }
   }
 
-  /* ─── Messages ─── */
+  updateSession(sessionId, updates) {
+    try {
+      // Validate session ID format
+      if (!sessionId || typeof sessionId !== 'string' || sessionId.length > 64) {
+        return null;
+      }
+      
+      // Get existing session
+      const existing = this.db.prepare("SELECT * FROM sessions WHERE id = ?").get(sessionId);
+      if (!existing) return null;
 
-  listMessages(agentId, sessionId) {
-    return this.db
-      .prepare(
-        `SELECT m.* FROM messages m
-         JOIN sessions s ON m.sessionId = s.id
-         WHERE s.agentId = ? AND m.sessionId = ?
-         ORDER BY m.createdAt ASC`
-      )
-      .all(agentId, sessionId);
+      const allowed = ["title", "model"];
+      const fields = [];
+      const values = [];
+
+      // Validate and sanitize updates
+      for (const key of allowed) {
+        if (key in updates) {
+          let value = updates[key];
+          
+          if (key === "title" && (typeof value !== "string" || value.length > 200)) {
+            throw new Error(`Invalid ${key} value`);
+          }
+          
+          if (key === "model" && (typeof value !== "string" || value.length > 120)) {
+            throw new Error(`Invalid ${key} value`);
+          }
+          
+          fields.push(`${key} = ?`);
+          values.push(value);
+        }
+      }
+
+      if (fields.length === 0) return existing;
+
+      fields.push("updatedAt = ?");
+      values.push(now());
+      values.push(sessionId);
+
+      const updateStmt = this.db.prepare(`UPDATE sessions SET ${fields.join(", ")} WHERE id = ?`);
+      const result = updateStmt.run(...values);
+      
+      if (result.changes === 0) {
+        return null;
+      }
+      
+      return this.getSession(sessionId);
+    } catch (err) {
+      console.error('Error updating session:', err);
+      throw err;
+    }
+  }
+
+  deleteSession(sessionId) {
+    try {
+      // Validate session ID format
+      if (!sessionId || typeof sessionId !== 'string' || sessionId.length > 64) {
+        return false;
+      }
+      
+      const result = this.db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
+      
+      // Also delete all messages in this session
+      this.db.prepare("DELETE FROM messages WHERE sessionId = ?").run(sessionId);
+      
+      return result.changes > 0;
+    } catch (err) {
+      console.error('Error deleting session:', err);
+      return false;
+    }
+  }
+
+  listSessions(agentId) {
+    try {
+      // Validate agent ID format
+      if (!agentId || typeof agentId !== 'string' || agentId.length > 64) {
+        return [];
+      }
+      
+      return this.db
+        .prepare("SELECT * FROM sessions WHERE agentId = ? ORDER BY createdAt DESC LIMIT 1000")
+        .all(agentId);
+    } catch (err) {
+      console.error('Error listing sessions:', err);
+      return [];
+    }
+  }
+
+  getSession(sessionId) {
+    try {
+      // Validate session ID format
+      if (!sessionId || typeof sessionId !== 'string' || sessionId.length > 64) {
+        return null;
+      }
+      
+      const row = this.db.prepare("SELECT * FROM sessions WHERE id = ?").get(sessionId);
+      if (!row) return null;
+      
+      return row;
+    } catch (err) {
+      console.error('Error getting session:', err);
+      return null;
+    }
   }
 
   createMessage(agentId, sessionId, input) {
-    const session = this.db.prepare("SELECT * FROM sessions WHERE id = ? AND agentId = ?").get(sessionId, agentId);
-    if (!session) return null;
+    try {
+      // Validate agent and session ID formats
+      if (!agentId || typeof agentId !== 'string' || agentId.length > 64) {
+        return null;
+      }
+      
+      if (!sessionId || typeof sessionId !== 'string' || sessionId.length > 64) {
+        return null;
+      }
+      
+      const session = this.db.prepare("SELECT * FROM sessions WHERE id = ? AND agentId = ?").get(sessionId, agentId);
+      if (!session) return null;
 
-    const id = crypto.randomUUID();
-    const timestamp = now();
-    const message = {
-      id,
-      sessionId,
-      role: input.role || "user",
-      content: sanitizeContent(input.content || ""),
-      tokensIn: input.tokensIn || 0,
-      tokensOut: input.tokensOut || 0,
-      model: input.model || session.model,
-      createdAt: timestamp
-    };
+      const id = crypto.randomUUID();
+      const timestamp = now();
+      
+      // Validate and sanitize message input
+      if (!input.role || !['user', 'assistant', 'system'].includes(input.role)) {
+        throw new Error('Invalid message role');
+      }
+      
+      let content = input.content || "";
+      if (typeof content !== 'string') {
+        throw new Error('Message content must be a string');
+      }
+      
+      content = sanitizeContent(content);
+      
+      if (content.length > 50000) {
+        throw new Error('Message content too long (max 50000 characters)');
+      }
+      
+      // Validate token counts
+      const tokensIn = input.tokensIn || 0;
+      const tokensOut = input.tokensOut || 0;
+      
+      if (!Number.isInteger(tokensIn) || tokensIn < 0) {
+        throw new Error('Invalid tokensIn value');
+      }
+      
+      if (!Number.isInteger(tokensOut) || tokensOut < 0) {
+        throw new Error('Invalid tokensOut value');
+      }
+      
+      const message = {
+        id,
+        sessionId,
+        role: input.role,
+        content,
+        tokensIn,
+        tokensOut,
+        model: input.model || session.model,
+        createdAt: timestamp
+      };
 
-    // Validate message content length
-    if (message.content.length > 50000) {
-      throw new Error('Message content too long (max 50000 characters)');
+      // Validate model
+      if (!message.model || typeof message.model !== 'string' || message.model.length > 120) {
+        throw new Error('Invalid model');
+      }
+
+      const insertStmt = this.db.prepare("INSERT INTO messages (id, sessionId, role, content, tokensIn, tokensOut, model, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+      const result = insertStmt.run(message.id, message.sessionId, message.role, message.content, message.tokensIn, message.tokensOut, message.model, message.createdAt);
+      
+      if (result.changes === 0) {
+        throw new Error('Failed to create message');
+      }
+
+      // Update session timestamp
+      this.db.prepare("UPDATE sessions SET updatedAt = ? WHERE id = ?").run(timestamp, sessionId);
+
+      return message;
+    } catch (err) {
+      console.error('Error creating message:', err);
+      throw err;
     }
-
-    this.db
-      .prepare("INSERT INTO messages (id, sessionId, role, content, tokensIn, tokensOut, model, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-      .run(message.id, message.sessionId, message.role, message.content, message.tokensIn, message.tokensOut, message.model, message.createdAt);
-
-    this.db.prepare("UPDATE sessions SET updatedAt = ? WHERE id = ?").run(timestamp, sessionId);
-
-    return message;
-
   }
 
-  /* ─── Support for message query by agent (needed for WebSocket) */
-
-  getAgentMessages(agentId) {
-    return this.db
-      .prepare(
-        `SELECT m.*, s.title as sessionTitle
-         FROM messages m
-         JOIN sessions s ON m.sessionId = s.id
-         WHERE s.agentId = ?
-         ORDER BY m.createdAt DESC
-         LIMIT 50`
-      )
-      .all(agentId);
-  }
-
-  /* ─── Usage Stats ─── */
-
-  getAgentUsage(agentId) {
-    const agent = this.getAgent(agentId);
-    if (!agent) return null;
-
-    const sessionCount = this.db.prepare("SELECT COUNT(*) as count FROM sessions WHERE agentId = ?").get(agentId).count;
-    const tokenStats = this.db
-      .prepare(
-        `SELECT COALESCE(SUM(tokensIn), 0) as totalTokensIn,
-                COALESCE(SUM(tokensOut), 0) as totalTokensOut,
-                COUNT(*) as totalMessages
-         FROM messages m
-         JOIN sessions s ON m.sessionId = s.id
-         WHERE s.agentId = ?`
-      )
-      .get(agentId);
-
-    return {
-      agentId,
-      sessions: sessionCount,
-      totalTokensIn: tokenStats.totalTokensIn,
-      totalTokensOut: tokenStats.totalTokensOut,
-      totalMessages: tokenStats.totalMessages
-    };
-  }
-
-  getUsageStats(period = 'daily') {
-    const now = new Date();
-    let cutoffDate;
-    
-    switch (period) {
-      case 'daily':
-        cutoffDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        break;
-      case 'weekly':
-        cutoffDate = new Date(now.getTime() - (6 * 24 * 60 * 60 * 1000));
-        break;
-      case 'monthly':
-        cutoffDate = new Date(now.getTime() - (29 * 24 * 60 * 60 * 1000));
-        break;
-      default:
-        cutoffDate = new Date(0); // All time
+  listMessages(agentId, sessionId, limit = 100) {
+    try {
+      // Validate agent and session ID formats
+      if (!agentId || typeof agentId !== 'string' || agentId.length > 64) {
+        return [];
+      }
+      
+      if (!sessionId || typeof sessionId !== 'string' || sessionId.length > 64) {
+        return [];
+      }
+      
+      // Enforce reasonable limit
+      const safeLimit = Math.min(Math.max(Number(limit), 1), 1000);
+      
+      return this.db
+        .prepare("SELECT * FROM messages WHERE sessionId = ? AND sessionId IN (SELECT id FROM sessions WHERE agentId = ?) ORDER BY createdAt ASC LIMIT ?")
+        .all(sessionId, agentId, String(safeLimit));
+    } catch (err) {
+      console.error('Error listing messages:', err);
+      return [];
     }
-    
-    const cutoffIso = cutoffDate.toISOString();
-
-    // Get overall usage stats
-    const overallStats = this.db
-      .prepare(
-        `SELECT 
-          COUNT(DISTINCT s.id) as totalSessions,
-          COALESCE(SUM(m.tokensIn), 0) as totalTokensIn,
-          COALESCE(SUM(m.tokensOut), 0) as totalTokensOut,
-          COUNT(m.id) as totalMessages
-         FROM sessions s
-         LEFT JOIN messages m ON s.id = m.sessionId
-         WHERE s.createdAt >= ?`
-      )
-      .get(cutoffIso);
-
-    // Get agent breakdown
-    const agentBreakdown = this.db
-      .prepare(
-        `SELECT 
-          a.id,
-          a.name,
-          COUNT(DISTINCT s.id) as agentSessions,
-          COALESCE(SUM(m.tokensIn), 0) as agentTokensIn,
-          COALESCE(SUM(m.tokensOut), 0) as agentTokensOut,
-          COUNT(m.id) as agentMessages
-         FROM agents a
-         LEFT JOIN sessions s ON a.id = s.agentId AND s.createdAt >= ?
-         LEFT JOIN messages m ON s.id = m.sessionId AND m.createdAt >= ?
-         GROUP BY a.id, a.name
-         ORDER BY agentTokensOut DESC
-         LIMIT 10`
-      )
-      .all(cutoffIso, cutoffIso);
-
-    return {
-      period,
-      totalSessions: overallStats.totalSessions,
-      totalTokensIn: overallStats.totalTokensIn,
-      totalTokensOut: overallStats.totalTokensOut,
-      totalMessages: overallStats.totalMessages,
-      agents: agentBreakdown
-    };
   }
 
-  /* ─── Request Logging ─── */
+  deleteMessage(messageId) {
+    try {
+      // Validate message ID format
+      if (!messageId || typeof messageId !== 'string' || messageId.length > 64) {
+        return false;
+      }
+      
+      const result = this.db.prepare("DELETE FROM messages WHERE id = ?").run(messageId);
+      
+      return result.changes > 0;
+    } catch (err) {
+      console.error('Error deleting message:', err);
+      return false;
+    }
+  }
 
   logRequest(method, path, status, duration, userAgent = null, ip = null) {
-    const id = crypto.randomUUID();
-    const timestamp = now();
-    
-    this.db
-      .prepare("INSERT INTO logs (id, method, path, status, duration, userAgent, ip, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-      .run(id, method, path, status, duration, userAgent, ip, timestamp);
-    
-    return id;
+    try {
+      // Validate input parameters
+      if (!method || !path || typeof status !== 'number' || typeof duration !== 'number') {
+        return null;
+      }
+      
+      // Sanitize sensitive data
+      const safeUserAgent = userAgent ? String(userAgent).substring(0, 500) : null;
+      const safeIp = ip ? String(ip).substring(0, 45) : null; // Max IPv6 length
+      const safePath = String(path).substring(0, 500);
+      
+      const id = crypto.randomUUID();
+      const timestamp = now();
+      
+      const insertStmt = this.db.prepare("INSERT INTO logs (id, method, path, status, duration, userAgent, ip, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+      const result = insertStmt.run(id, method, safePath, status, duration, safeUserAgent, safeIp, timestamp);
+      
+      return result.changes > 0 ? id : null;
+    } catch (err) {
+      console.error('Error logging request:', err);
+      return null;
+    }
   }
 
   getRecentLogs(limit = 100) {
-    return this.db
-      .prepare("SELECT * FROM logs ORDER BY createdAt DESC LIMIT ?")
-      .all(limit);
+    try {
+      // Enforce reasonable limit
+      const safeLimit = Math.min(Math.max(Number(limit), 1), 1000);
+      return this.db
+        .prepare("SELECT * FROM logs ORDER BY createdAt DESC LIMIT ?")
+        .all(safeLimit);
+    } catch (err) {
+      console.error('Error getting recent logs:', err);
+      return [];
+    }
   }
-
-  getLogsByStatus(status, limit = 100) {
-    return this.db
-      .prepare("SELECT * FROM logs WHERE status = ? ORDER BY createdAt DESC LIMIT ?")
-      .all(status, limit);
-  }
-
-  getLogsByPath(pathPattern, limit = 100) {
-    return this.db
-      .prepare("SELECT * FROM logs WHERE path LIKE ? ORDER BY createdAt DESC LIMIT ?")
-      .all(`%${pathPattern}%`, limit);
-  }
-
-  /* ─── WebSocket Support Methods ─── */
 
   getCurrentTaskCount(agentId) {
-    // This is a placeholder - in a real implementation, you'd track actual task execution
-    // For now, return a simulated count based on recent activity
-    const recentSessions = this.db
-      .prepare("SELECT id FROM sessions WHERE agentId = ? AND datetime(updatedAt) > datetime('now', '-5 minutes')")
-      .all(agentId);
-    let totalMessages = 0;
-    for (const session of recentSessions) {
-      const messageCount = this.db
-        .prepare("SELECT COUNT(*) as count FROM messages WHERE sessionId = ? AND datetime(createdAt) > datetime('now', '-5 minutes')")
-        .get(session.id).count;
-      totalMessages += messageCount;
+    try {
+      // Validate agent ID format
+      if (!agentId || typeof agentId !== 'string' || agentId.length > 64) {
+        return 0;
+      }
+      
+      // This is a placeholder - in a real implementation, you'd track actual task execution
+      // For now, return a simulated count based on recent activity
+      const recentSessions = this.db
+        .prepare("SELECT id FROM sessions WHERE agentId = ? AND datetime(updatedAt) > datetime('now', '-5 minutes')")
+        .all(agentId);
+      
+      let totalMessages = 0;
+      for (const session of recentSessions) {
+        const messageCount = this.db
+          .prepare("SELECT COUNT(*) as count FROM messages WHERE sessionId = ? AND datetime(createdAt) > datetime('now', '-5 minutes')")
+          .get(session.id).count;
+        totalMessages += messageCount;
+      }
+      
+      return Math.max(0, totalMessages - recentSessions.length); // Subtract user messages
+    } catch (err) {
+      console.error('Error getting current task count:', err);
+      return 0;
     }
-    return Math.max(0, totalMessages - recentSessions.length); // Subtract user messages
   }
 
-  getTotalSessions() {
-    return this.db
-      .prepare("SELECT COUNT(*) as count FROM sessions")
-      .get().count;
-  }
-
-  getTotalMessages() {
-    return this.db
-      .prepare("SELECT COUNT(*) as count FROM messages")
-      .get().count;
+  getAgentUsage(agentId) {
+    try {
+      // Validate agent ID format
+      if (!agentId || typeof agentId !== 'string' || agentId.length > 64) {
+        return null;
+      }
+      
+      // Check if agent exists
+      const agent = this.getAgent(agentId);
+      if (!agent) return null;
+      
+      // Get token counts
+      const tokenQuery = this.db.prepare(
+        `SELECT 
+          COALESCE(SUM(tokensIn), 0) as totalTokensIn,
+          COALESCE(SUM(tokensOut), 0) as totalTokensOut
+        FROM messages 
+        WHERE sessionId IN (SELECT id FROM sessions WHERE agentId = ?)`
+      );
+      
+      const tokenResult = tokenQuery.get(agentId);
+      
+      // Get session count
+      const sessionCount = this.db.prepare(
+        "SELECT COUNT(*) as count FROM sessions WHERE agentId = ?"
+      ).get(agentId).count;
+      
+      // Get total message count
+      const messageCount = this.db.prepare(
+        "SELECT COUNT(*) as count FROM messages WHERE sessionId IN (SELECT id FROM sessions WHERE agentId = ?)"
+      ).get(agentId).count;
+      
+      return {
+        agentId,
+        totalTokensIn: tokenResult.totalTokensIn,
+        totalTokensOut: tokenResult.totalTokensOut,
+        sessions: sessionCount,
+        totalMessages: messageCount
+      };
+    } catch (err) {
+      console.error('Error getting agent usage:', err);
+      return null;
+    }
   }
 }

@@ -71,6 +71,93 @@ export class OllamaAdapter {
     });
   }
 
+  async chatStream(messages, options = {}, onChunk, onComplete) {
+    const model = options.model || this.model;
+    const body = JSON.stringify({
+      model,
+      messages,
+      stream: true,
+      think: false,
+      options: {
+        temperature: options.temperature ?? 0.3,
+        num_predict: options.maxTokens ?? 512
+      }
+    });
+
+    const url = new URL("/api/chat", this.baseUrl);
+    
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        req.destroy();
+        reject(new Error(`Ollama request timed out after ${this.timeout}ms`));
+      }, this.timeout);
+
+      const req = request(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      }, (res) => {
+        let accumulatedContent = "";
+        let accumulatedTokensIn = 0;
+        let accumulatedTokensOut = 0;
+        let accumulatedDuration = 0;
+        
+        res.on("data", (chunk) => {
+          const lines = chunk.toString().split("\n").filter(line => line.trim());
+          
+          for (const line of lines) {
+            if (line.startsWith("data: ") && line !== "data: [DONE]") {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (data.message?.content) {
+                  accumulatedContent += data.message.content;
+                  accumulatedTokensOut = data.eval_count || 0;
+                  accumulatedDuration = data.total_duration ? Math.round(data.total_duration / 1e6) : 0;
+                  
+                  onChunk({
+                    content: data.message.content,
+                    tokensIn: data.prompt_eval_count || 0,
+                    tokensOut: data.eval_count || 0,
+                    duration: data.total_duration ? Math.round(data.total_duration / 1e6) : 0,
+                    model: data.model || model,
+                    done: data.done || false
+                  });
+                }
+              } catch (err) {
+                console.error("Failed to parse SSE chunk:", err);
+              }
+            }
+          }
+        });
+        
+        res.on("end", () => {
+          clearTimeout(timer);
+          onComplete({
+            content: accumulatedContent,
+            tokensIn: accumulatedTokensIn,
+            tokensOut: accumulatedTokensOut,
+            duration: accumulatedDuration,
+            model: model,
+            done: true
+          });
+          resolve();
+        });
+        
+        res.on("error", (err) => {
+          clearTimeout(timer);
+          reject(new Error(`Ollama stream error: ${err.message}`));
+        });
+      });
+
+      req.on("error", (err) => {
+        clearTimeout(timer);
+        reject(new Error(`Ollama connection failed: ${err.message}`));
+      });
+
+      req.write(body);
+      req.end();
+    });
+  }
+
   async health() {
     const url = new URL("/api/tags", this.baseUrl);
 
@@ -167,6 +254,103 @@ export class OpenAIAdapter {
           } catch (err) {
             reject(new Error(`Failed to parse OpenAI response: ${err.message}`));
           }
+        });
+      });
+
+      req.on("error", (err) => {
+        clearTimeout(timer);
+        reject(new Error(`OpenAI connection failed: ${err.message}`));
+      });
+
+      req.write(body);
+      req.end();
+    });
+  }
+
+  async chatStream(messages, options = {}, onChunk, onComplete) {
+    const model = options.model || this.model;
+    const body = JSON.stringify({
+      model,
+      messages,
+      temperature: options.temperature ?? 0.7,
+      max_tokens: options.maxTokens ?? 1024,
+      stream: true,
+    });
+
+    const url = new URL("/chat/completions", this.baseUrl);
+    const isHttps = url.protocol === "https:";
+    const httpModule = isHttps ? httpsRequest : request;
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        req.destroy();
+        reject(new Error(`OpenAI request timed out after ${this.timeout}ms`));
+      }, this.timeout);
+
+      const req = httpModule(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+      }, (res) => {
+        let accumulatedContent = "";
+        let accumulatedTokensIn = 0;
+        let accumulatedTokensOut = 0;
+        
+        res.on("data", (chunk) => {
+          const lines = chunk.toString().split("\n").filter(line => line.trim());
+          
+          for (const line of lines) {
+            if (line.startsWith("data: ") && line !== "data: [DONE]") {
+              try {
+                const data = JSON.parse(line.slice(6));
+                const delta = data.choices?.[0]?.delta?.content || "";
+                const finishReason = data.choices?.[0]?.finish_reason;
+                
+                if (delta) {
+                  accumulatedContent += delta;
+                  
+                  onChunk({
+                    content: delta,
+                    tokensIn: 0, // OpenAI doesn't provide token counts for streaming
+                    tokensOut: 0,
+                    duration: 0,
+                    model: data.model || model,
+                    done: finishReason === "stop"
+                  });
+                }
+                
+                if (finishReason === "stop") {
+                  // Get final usage from the final response if available
+                  if (data.usage) {
+                    accumulatedTokensIn = data.usage.prompt_tokens || 0;
+                    accumulatedTokensOut = data.usage.completion_tokens || 0;
+                  }
+                }
+              } catch (err) {
+                console.error("Failed to parse SSE chunk:", err);
+              }
+            }
+          }
+        });
+        
+        res.on("end", () => {
+          clearTimeout(timer);
+          onComplete({
+            content: accumulatedContent,
+            tokensIn: accumulatedTokensIn,
+            tokensOut: accumulatedTokensOut,
+            duration: 0,
+            model: model,
+            done: true
+          });
+          resolve();
+        });
+        
+        res.on("error", (err) => {
+          clearTimeout(timer);
+          reject(new Error(`OpenAI stream error: ${err.message}`));
         });
       });
 
@@ -301,6 +485,116 @@ export class AnthropicAdapter {
     });
   }
 
+  async chatStream(messages, options = {}, onChunk, onComplete) {
+    const model = options.model || this.model;
+    // Anthropic uses "user" and "assistant" roles; convert "system" to top-level param
+    let systemMsg = "";
+    const anthropicMessages = [];
+    for (const msg of messages) {
+      if (msg.role === "system") {
+        systemMsg += (systemMsg ? "\n" : "") + msg.content;
+      } else {
+        anthropicMessages.push({ role: msg.role, content: msg.content });
+      }
+    }
+
+    const body = JSON.stringify({
+      model,
+      messages: anthropicMessages,
+      max_tokens: options.maxTokens ?? 1024,
+      temperature: options.temperature ?? 0.7,
+      stream: true,
+      ...(systemMsg ? { system: systemMsg } : {}),
+    });
+
+    const url = new URL("/v1/messages", this.baseUrl);
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        req.destroy();
+        reject(new Error(`Anthropic request timed out after ${this.timeout}ms`));
+      }, this.timeout);
+
+      const req = httpsRequest(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": this.apiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+      }, (res) => {
+        let accumulatedContent = "";
+        let accumulatedTokensIn = 0;
+        let accumulatedTokensOut = 0;
+        let eventType = "";
+        
+        res.on("data", (chunk) => {
+          const lines = chunk.toString().split("\n").filter(line => line.trim());
+          
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              try {
+                const event = JSON.parse(line.slice(6));
+                
+                if (event.type === "content_block_delta" && event.delta?.text) {
+                  accumulatedContent += event.delta.text;
+                  
+                  onChunk({
+                    content: event.delta.text,
+                    tokensIn: 0, // Anthropic doesn't provide per-chunk token counts
+                    tokensOut: 0,
+                    duration: 0,
+                    model: model,
+                    done: false
+                  });
+                }
+                
+                if (event.type === "message_stop") {
+                  accumulatedTokensIn = event.usage?.input_tokens || 0;
+                  accumulatedTokensOut = event.usage?.output_tokens || 0;
+                }
+                
+                if (event.type === "error") {
+                  reject(new Error(`Anthropic error: ${event.error?.message || "Unknown error"}`));
+                  return;
+                }
+              } catch (err) {
+                console.error("Failed to parse SSE chunk:", err);
+              }
+            }
+          }
+        });
+        
+        res.on("end", () => {
+          clearTimeout(timer);
+          onComplete({
+            content: accumulatedContent,
+            tokensIn: accumulatedTokensIn,
+            tokensOut: accumulatedTokensOut,
+            duration: 0,
+            model: model,
+            done: true
+          });
+          resolve();
+        });
+        
+        res.on("error", (err) => {
+          clearTimeout(timer);
+          reject(new Error(`Anthropic stream error: ${err.message}`));
+        });
+      });
+
+      req.on("error", (err) => {
+        clearTimeout(timer);
+        reject(new Error(`Anthropic connection failed: ${err.message}`));
+      });
+
+      req.write(body);
+      req.end();
+    });
+  }
+
   async health() {
     if (!this.apiKey) return { ok: false, models: [], error: "No API key configured" };
     return { ok: true, models: ["claude-sonnet-4-20250514", "claude-haiku-4-20250414"] };
@@ -384,6 +678,132 @@ export class GeminiAdapter {
           } catch (err) {
             reject(new Error(`Failed to parse Gemini response: ${err.message}`));
           }
+        });
+      });
+
+      req.on("error", (err) => {
+        clearTimeout.timer;
+        reject(new Error(`Gemini connection failed: ${err.message}`));
+      });
+
+      req.write(body);
+      req.end();
+    });
+  }
+
+  async chatStream(messages, options = {}, onChunk, onComplete) {
+    const model = options.model || this.model;
+    // Gemini uses "user" and "model" roles
+    let systemInstruction = undefined;
+    const contents = [];
+    for (const msg of messages) {
+      if (msg.role === "system") {
+        systemInstruction = { parts: [{ text: msg.content }] };
+      } else {
+        contents.push({
+          role: msg.role === "assistant" ? "model" : "user",
+          parts: [{ text: msg.content }],
+        });
+      }
+    }
+
+    const bodyObj = {
+      contents,
+      generationConfig: {
+        temperature: options.temperature ?? 0.7,
+        maxOutputTokens: options.maxTokens ?? 1024,
+      },
+      safetySettings: [
+        {
+          category: "HARM_CATEGORY_HARASSMENT",
+          threshold: "BLOCK_NONE"
+        },
+        {
+          category: "HARM_CATEGORY_HATE_SPEECH",
+          threshold: "BLOCK_NONE"
+        },
+        {
+          category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+          threshold: "BLOCK_NONE"
+        },
+        {
+          category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+          threshold: "BLOCK_NONE"
+        }
+      ],
+    };
+    if (systemInstruction) bodyObj.systemInstruction = systemInstruction;
+
+    const body = JSON.stringify(bodyObj);
+    const url = new URL(
+      `/v1beta/models/${model}:streamGenerateContent?key=${this.apiKey}`,
+      "https://generativelanguage.googleapis.com"
+    );
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        req.destroy();
+        reject(new Error(`Gemini request timed out after ${this.timeout}ms`));
+      }, this.timeout);
+
+      const req = httpsRequest(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      }, (res) => {
+        let accumulatedContent = "";
+        let accumulatedTokensIn = 0;
+        let accumulatedTokensOut = 0;
+        
+        res.on("data", (chunk) => {
+          const lines = chunk.toString().split("\n").filter(line => line.trim());
+          
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              try {
+                const event = JSON.parse(line.slice(6));
+                const candidate = event.candidates?.[0];
+                const content = candidate?.content?.parts?.[0]?.text || "";
+                
+                if (content) {
+                  accumulatedContent += content;
+                  
+                  onChunk({
+                    content: content,
+                    tokensIn: 0, // Gemini doesn't provide per-chunk token counts
+                    tokensOut: 0,
+                    duration: 0,
+                    model: model,
+                    done: candidate?.finishReason === "STOP" || candidate?.finishReason === "MAX_TOKENS"
+                  });
+                }
+                
+                if (candidate?.finishReason === "STOP" || candidate?.finishReason === "MAX_TOKENS") {
+                  accumulatedTokensIn = event.usageMetadata?.promptTokenCount || 0;
+                  accumulatedTokensOut = event.usageMetadata?.candidatesTokenCount || 0;
+                }
+              } catch (err) {
+                console.error("Failed to parse SSE chunk:", err);
+              }
+            }
+          }
+        });
+        
+        res.on("end", () => {
+          clearTimeout(timer);
+          onComplete({
+            content: accumulatedContent,
+            tokensIn: accumulatedTokensIn,
+            tokensOut: accumulatedTokensOut,
+            duration: 0,
+            model: model,
+            done: true
+          });
+          resolve();
+        });
+        
+        res.on("error", (err) => {
+          clearTimeout(timer);
+          reject(new Error(`Gemini stream error: ${err.message}`));
         });
       });
 

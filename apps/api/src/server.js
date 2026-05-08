@@ -4,7 +4,8 @@ import { extname, join, normalize, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setInterval } from "node:timers";
 import { WebSocketServer } from "ws";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
+import { inspect } from "node:util";
 
 import {
   getProviderReadinessSummary,
@@ -50,6 +51,11 @@ const startTime = Date.now();
 const rateLimit = new Map();
 const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
 const MAX_REQUESTS_PER_MINUTE = 60;
+const MAX_CONCURRENT_CONNECTIONS = 100; // Maximum concurrent connections per IP
+const CONN_CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
+
+// Security: Secret for HMAC-based rate limiting
+const RATE_LIMIT_SECRET = process.env.RATE_LIMIT_SECRET || crypto.randomBytes(32).toString('hex');
 
 // WebSocket server for real-time updates
 const wss = new WebSocketServer({ noServer: true });
@@ -71,7 +77,7 @@ const ALLOWED_ORIGINS = [
 ];
 
 const isOriginAllowed = (origin) => {
-  if (!origin) return true; // No origin for non-browser requests
+  if (!origin) return false; // Block requests without origin for API endpoints
   return ALLOWED_ORIGINS.includes(origin);
 };
 
@@ -80,12 +86,23 @@ const sendJson = (response, statusCode, payload) => {
   const headers = {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With"
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin"
   };
   
   if (origin && isOriginAllowed(origin)) {
     headers["Access-Control-Allow-Origin"] = origin;
     headers["Access-Control-Allow-Credentials"] = "true";
+  } else if (request.url?.startsWith('/api/')) {
+    // Block unauthorized origins for API endpoints
+    response.writeHead(403, {
+      "Content-Type": "application/json; charset=utf-8",
+      "X-Content-Type-Options": "nosniff"
+    });
+    response.end(JSON.stringify({ error: 'Forbidden: Origin not allowed' }));
+    return;
   }
   
   response.writeHead(statusCode, headers);
@@ -93,18 +110,28 @@ const sendJson = (response, statusCode, payload) => {
 };
 
 const MAX_JSON_PAYLOAD_SIZE = 1024 * 1024; // 1MB limit
+const MAX_REQUEST_TIMEOUT = 30000; // 30 seconds timeout for requests
 
 const readRequestBody = async (request) => {
   let raw = "";
   let totalLength = 0;
   
-  for await (const chunk of request) {
-    totalLength += chunk.length;
-    if (totalLength > MAX_JSON_PAYLOAD_SIZE) {
-      throw new Error(`Payload too large (max ${MAX_JSON_PAYLOAD_SIZE / 1024 / 1024}MB)`);
+  // Add request timeout
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Request timeout')), MAX_REQUEST_TIMEOUT);
+  });
+  
+  const readPromise = (async () => {
+    for await (const chunk of request) {
+      totalLength += chunk.length;
+      if (totalLength > MAX_JSON_PAYLOAD_SIZE) {
+        throw new Error(`Payload too large (max ${MAX_JSON_PAYLOAD_SIZE / 1024 / 1024}MB)`);
+      }
+      raw += chunk;
     }
-    raw += chunk;
-  }
+  })();
+  
+  await Promise.race([readPromise, timeoutPromise]);
 
   if (!raw) return {};
   
@@ -197,7 +224,27 @@ const server = createServer(async (request, response) => {
   }
   
   try {
-    const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+    // Validate request method and path
+    if (!request.method || !request.url) {
+      sendJson(response, 400, { error: 'Bad request: missing method or URL' });
+      return;
+    }
+
+    // Validate URL format
+    let url;
+    try {
+      url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+    } catch (err) {
+      sendJson(response, 400, { error: 'Invalid URL format' });
+      return;
+    }
+
+    // Path validation for security
+    const normalizedPath = url.pathname.replace(/\/+/g, '/');
+    if (normalizedPath.includes('..') || normalizedPath.includes('~') || normalizedPath.includes('//')) {
+      sendJson(response, 403, { error: 'Forbidden: Invalid path characters' });
+      return;
+    }
 
     if (request.method === "GET" && url.pathname === "/health") {
       return sendJson(response, 200, {
@@ -212,8 +259,15 @@ const server = createServer(async (request, response) => {
 
     const agentMatch = url.pathname.match(/^\/api\/agents\/([\w-]+)$/);
 
+    // Agent ID validation
+    const agentIdPattern = /^[a-zA-Z0-9-]+$/;
     if (agentMatch) {
       const agentId = agentMatch[1];
+      
+      // Validate agent ID format
+      if (!agentIdPattern.test(agentId) || agentId.length > 64) {
+        return sendJson(response, 400, { error: "Invalid agent ID format" });
+      }
 
       if (request.method === "GET") {
         const agent = registry.getAgent(agentId);
@@ -222,10 +276,28 @@ const server = createServer(async (request, response) => {
       }
 
       if (request.method === "PATCH") {
-        const body = await readRequestBody(request);
-        const agent = registry.updateAgent(agentId, body);
-        if (!agent) return sendJson(response, 404, { error: "Agent not found" });
-        return sendJson(response, 200, { agent });
+        try {
+          const body = await readRequestBody(request);
+          
+          // Validate update input
+          if (body.name && (typeof body.name !== 'string' || body.name.length > 80)) {
+            return sendJson(response, 400, { error: "Invalid agent name" });
+          }
+          
+          if (body.purpose && (typeof body.purpose !== 'string' || body.purpose.length > 240)) {
+            return sendJson(response, 400, { error: "Invalid agent purpose" });
+          }
+          
+          if (body.maxConcurrentTasks && (!Number.isInteger(body.maxConcurrentTasks) || body.maxConcurrentTasks < 1 || body.maxConcurrentTasks > 32)) {
+            return sendJson(response, 400, { error: "Invalid maxConcurrentTasks" });
+          }
+          
+          const agent = registry.updateAgent(agentId, body);
+          if (!agent) return sendJson(response, 404, { error: "Agent not found" });
+          return sendJson(response, 200, { agent });
+        } catch (err) {
+          return sendJson(response, 400, { error: "Invalid request body" });
+        }
       }
 
       if (request.method === "DELETE") {
@@ -245,33 +317,113 @@ const server = createServer(async (request, response) => {
     }
 
     if (sessionsMatch && request.method === "POST") {
-      const body = await readRequestBody(request);
-      const session = registry.createSession(sessionsMatch[1], body);
-      if (!session) return sendJson(response, 404, { error: "Agent not found" });
-      return sendJson(response, 201, { session });
+      try {
+        const agentId = sessionsMatch[1];
+        
+        // Validate agent ID format
+        if (!agentIdPattern.test(agentId) || agentId.length > 64) {
+          return sendJson(response, 400, { error: "Invalid agent ID format" });
+        }
+        
+        const agent = registry.getAgent(agentId);
+        if (!agent) return sendJson(response, 404, { error: "Agent not found" });
+        
+        const body = await readRequestBody(request);
+        
+        // Validate session input
+        if (body.title && (typeof body.title !== 'string' || body.title.length > 200)) {
+          return sendJson(response, 400, { error: "Invalid session title" });
+        }
+        
+        if (body.model && (typeof body.model !== 'string' || body.model.length > 120)) {
+          return sendJson(response, 400, { error: "Invalid session model" });
+        }
+        
+        const session = registry.createSession(agentId, body);
+        if (!session) return sendJson(response, 404, { error: "Agent not found" });
+        return sendJson(response, 201, { session });
+      } catch (err) {
+        return sendJson(response, 400, { error: "Invalid request body" });
+      }
     }
 
     const sessionMsgMatch = url.pathname.match(/^\/api\/agents\/([\w-]+)\/sessions\/([\w-]+)\/messages$/);
 
-    if (sessionMsgMatch && request.method === "GET") {
-      const messages = registry.listMessages(sessionMsgMatch[1], sessionMsgMatch[2]);
-      return sendJson(response, 200, { messages });
-    }
+    if (sessionMsgMatch) {
+      try {
+        const agentId = sessionMsgMatch[1];
+        const sessionId = sessionMsgMatch[2];
+        
+        // Validate IDs format
+        if (!agentIdPattern.test(agentId) || agentId.length > 64 || 
+            !agentIdPattern.test(sessionId) || sessionId.length > 64) {
+          return sendJson(response, 400, { error: "Invalid ID format" });
+        }
+        
+        if (request.method === "GET") {
+          const messages = registry.listMessages(agentId, sessionId);
+          return sendJson(response, 200, { messages });
+        }
 
-    if (sessionMsgMatch && request.method === "POST") {
-      const body = await readRequestBody(request);
-      const message = registry.createMessage(sessionMsgMatch[1], sessionMsgMatch[2], body);
-      if (!message) return sendJson(response, 404, { error: "Not found" });
-      return sendJson(response, 201, { message });
+        if (request.method === "POST") {
+          const body = await readRequestBody(request);
+          
+          // Validate message input
+          if (!body.role || !['user', 'assistant', 'system'].includes(body.role)) {
+            return sendJson(response, 400, { error: "Invalid message role" });
+          }
+          
+          if (!body.content || typeof body.content !== 'string' || body.content.length === 0) {
+            return sendJson(response, 400, { error: "Message content is required" });
+          }
+          
+          if (body.content.length > 50000) {
+            return sendJson(response, 400, { error: "Message content too long (max 50000 characters)" });
+          }
+          
+          if (body.tokensIn && (!Number.isInteger(body.tokensIn) || body.tokensIn < 0)) {
+            return sendJson(response, 400, { error: "Invalid tokensIn value" });
+          }
+          
+          if (body.tokensOut && (!Number.isInteger(body.tokensOut) || body.tokensOut < 0)) {
+            return sendJson(response, 400, { error: "Invalid tokensOut value" });
+          }
+          
+          const message = registry.createMessage(agentId, sessionId, body);
+          if (!message) return sendJson(response, 404, { error: "Not found" });
+          return sendJson(response, 201, { message });
+        }
+      } catch (err) {
+        return sendJson(response, 400, { error: "Invalid request body" });
+      }
     }
 
     /* ─── Links ─── */
 
     if (request.method === "DELETE" && url.pathname === "/api/links") {
-      const body = await readRequestBody(request);
-      const deleted = registry.deleteLink(body);
-      if (!deleted) return sendJson(response, 404, { error: "Link not found" });
-      return sendJson(response, 200, { deleted: true });
+      try {
+        const body = await readRequestBody(request);
+        
+        // Validate link deletion input
+        if (!body.sourceAgentId || !body.targetAgentId) {
+          return sendJson(response, 400, { error: "sourceAgentId and targetAgentId are required" });
+        }
+        
+        if (!agentIdPattern.test(body.sourceAgentId) || body.sourceAgentId.length > 64 ||
+            !agentIdPattern.test(body.targetAgentId) || body.targetAgentId.length > 64) {
+          return sendJson(response, 400, { error: "Invalid agent ID format" });
+        }
+        
+        if (body.sourceAgentId === body.targetAgentId) {
+          return sendJson(response, 400, { error: "An agent cannot create a link to itself" });
+        }
+        
+        const deleted = registry.deleteLink(body);
+        if (!deleted) return sendJson(response, 404, { error: "Link not found" });
+        return sendJson(response, 200, { deleted: true });
+      } catch (err) {
+        return sendJson(response, 400, { error: "Invalid request body" });
+      }
     }
 
     /* ─── Settings ─── */
@@ -300,16 +452,20 @@ const server = createServer(async (request, response) => {
     /* ─── Global Usage Stats ─── */
 
     if (request.method === "GET" && url.pathname === "/api/usage") {
-      const period = new URLSearchParams(url.search).get('period') || 'daily';
-      
-      // Validate period parameter
-      const validPeriods = ['daily', 'weekly', 'monthly', 'all'];
-      if (!validPeriods.includes(period)) {
-        return sendJson(response, 400, { error: "Invalid period parameter. Must be: daily, weekly, monthly, or all" });
+      try {
+        const period = new URLSearchParams(url.search).get('period') || 'daily';
+        
+        // Validate period parameter
+        const validPeriods = ['daily', 'weekly', 'monthly', 'all'];
+        if (!validPeriods.includes(period)) {
+          return sendJson(response, 400, { error: "Invalid period parameter. Must be: daily, weekly, monthly, or all" });
+        }
+        
+        const usage = registry.getUsageStats(period);
+        return sendJson(response, 200, usage);
+      } catch (err) {
+        return sendJson(response, 500, { error: "Internal server error" });
       }
-      
-      const usage = registry.getUsageStats(period);
-      return sendJson(response, 200, usage);
     }
 
     /* ─── Agent History ─── */
@@ -630,61 +786,126 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/agents") {
-      return sendJson(response, 200, { agents: registry.listAgents() });
+      try {
+        const agents = registry.listAgents();
+        
+        // Limit response size to prevent DoS
+        if (agents.length > 1000) {
+          return sendJson(response, 200, { 
+            agents: agents.slice(0, 1000),
+            warning: "Response truncated to first 1000 agents"
+          });
+        }
+        
+        return sendJson(response, 200, { agents });
+      } catch (err) {
+        return sendJson(response, 500, { error: "Internal server error" });
+      }
     }
 
     if (request.method === "GET" && url.pathname === "/api/topology") {
-      return sendJson(response, 200, registry.getTopology());
+      try {
+        const topology = registry.getTopology();
+        
+        // Limit response size
+        if (topology.agents && topology.agents.length > 1000) {
+          topology.agents = topology.agents.slice(0, 1000);
+        }
+        
+        return sendJson(response, 200, topology);
+      } catch (err) {
+        return sendJson(response, 500, { error: "Internal server error" });
+      }
     }
 
     if (request.method === "GET" && url.pathname === "/api/providers") {
-      return sendJson(response, 200, providerSummary());
+      try {
+        return sendJson(response, 200, providerSummary());
+      } catch (err) {
+        return sendJson(response, 500, { error: "Internal server error" });
+      }
     }
 
     if (request.method === "GET" && url.pathname === "/api/provider-readiness") {
-      return sendJson(response, 200, {
-        providers: listProviderConnections(process.env),
-        summary: getProviderReadinessSummary(process.env)
-      });
+      try {
+        return sendJson(response, 200, {
+          providers: listProviderConnections(process.env),
+          summary: getProviderReadinessSummary(process.env)
+        });
+      } catch (err) {
+        return sendJson(response, 500, { error: "Internal server error" });
+      }
     }
 
     if (request.method === "POST" && url.pathname === "/api/agents") {
-      const payload = parseCreateAgentInput(await readRequestBody(request));
-      const agent = registry.createAgent(payload);
-      return sendJson(response, 201, { agent });
+      try {
+        const body = await readRequestBody(request);
+        const payload = parseCreateAgentInput(body);
+        const agent = registry.createAgent(payload);
+        return sendJson(response, 201, { agent });
+      } catch (err) {
+        return sendJson(response, 400, { error: err.message || "Invalid request body" });
+      }
     }
 
     if (request.method === "POST" && url.pathname === "/api/links") {
-      const payload = parseCreateLinkInput(await readRequestBody(request));
-      const link = registry.createLink(payload);
-      return sendJson(response, 201, { link });
+      try {
+        const body = await readRequestBody(request);
+        const payload = parseCreateLinkInput(body);
+        const link = registry.createLink(payload);
+        return sendJson(response, 201, { link });
+      } catch (err) {
+        return sendJson(response, 400, { error: err.message || "Invalid request body" });
+      }
     }
 
     if (request.method === "GET") {
-      const target = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
-      const filePath = normalize(join(webRoot, target));
-      if (relative(webRoot, filePath).startsWith("..") || !filePath.startsWith(webRoot)) {
-        return sendJson(response, 403, { error: "Forbidden: Invalid path" });
+      try {
+        const target = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
+        const filePath = normalize(join(webRoot, target));
+        
+        // Enhanced path validation
+        if (!filePath.startsWith(webRoot) || 
+            relative(webRoot, filePath).startsWith("..") ||
+            filePath.includes('..') || filePath.includes('~') || 
+            filePath.includes('//') || filePath.includes('\0')) {
+          return sendJson(response, 403, { error: "Forbidden: Invalid path" });
+        }
+        
+        // Check file exists and is readable
+        try {
+          const stats = await readFile(filePath, { throwIfNoEntry: false });
+          if (!stats) {
+            return sendJson(response, 404, { error: "File not found" });
+          }
+          
+          // Security: Don't serve sensitive files
+          const sensitiveFiles = ['.env', 'config', 'secret', 'private', 'key'];
+          const fileName = filePath.toLowerCase();
+          if (sensitiveFiles.some(sensitive => fileName.includes(sensitive))) {
+            return sendJson(response, 403, { error: "Forbidden: Cannot access this file" });
+          }
+          
+          response.writeHead(200, { "Content-Type": contentTypeFor(filePath) });
+          response.end(stats);
+          return;
+        } catch (fileErr) {
+          return sendJson(response, 404, { error: "File not found" });
+        }
+      } catch (err) {
+        return sendJson(response, 500, { error: "Internal server error" });
       }
-      
-      // Additional security check for path traversal
-      if (filePath.includes('..') || filePath.includes('~') || filePath.includes('//')) {
-        return sendJson(response, 403, { error: "Forbidden: Invalid path characters" });
-      }
-      const asset = await readFile(filePath);
-      response.writeHead(200, { "Content-Type": contentTypeFor(filePath) });
-      response.end(asset);
-      return;
     }
 
     sendJson(response, 404, { error: "Not found" });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    const status = error.status ?? 400;
+    const status = error.status ?? 500;
     
     // Sanitize error messages to avoid information disclosure
-    const safeMessage = status >= 500 ? "Internal server error" : message;
+    const safeMessage = status >= 500 ? "Internal server error" : "Bad request";
     
+    // Log detailed error (but don't expose to client)
     console.error(`Error ${status} for ${request.method} ${request.url}:`, error);
     
     sendJson(response, status, { 
@@ -694,54 +915,71 @@ const server = createServer(async (request, response) => {
   }
 });
 
-// Rate limiting middleware
+// Rate limiting middleware with HMAC for better security
 const applyRateLimit = (request, response) => {
   const clientIP = request.headers['x-forwarded-for'] || request.socket.remoteAddress;
   const userAgent = request.headers['user-agent'] || '';
-  const now = Date.now();
+  const timestamp = Date.now();
   
   // Clean up old entries
-  for (const [ip, data] of rateLimit.entries()) {
-    if (now - data.timestamp > RATE_LIMIT_WINDOW) {
-      rateLimit.delete(ip);
+  for (const [key, data] of rateLimit.entries()) {
+    if (timestamp - data.timestamp > RATE_LIMIT_WINDOW) {
+      rateLimit.delete(key);
     }
   }
   
-  // Create a more unique key that includes IP and user agent fingerprint
-  const userFingerprint = createHash('md5').update(`${clientIP}:${userAgent}`).digest('hex').slice(0, 8);
+  // Create HMAC-based key for better security
+  const hmacKey = createHmac('sha256', RATE_LIMIT_SECRET)
+    .update(`${clientIP}:${timestamp - (timestamp % RATE_LIMIT_WINDOW)}`)
+    .digest('hex');
   
-  // Check if IP is already rate limited
-  if (rateLimit.has(userFingerprint)) {
-    const data = rateLimit.get(userFingerprint);
-    if (now - data.timestamp < RATE_LIMIT_WINDOW && data.count >= MAX_REQUESTS_PER_MINUTE) {
-      sendJson(response, 429, { 
+  // Check if IP is rate limited
+  if (rateLimit.has(hmacKey)) {
+    const data = rateLimit.get(hmacKey);
+    if (timestamp - data.timestamp < RATE_LIMIT_WINDOW && data.count >= MAX_REQUESTS_PER_MINUTE) {
+      response.writeHead(429, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-RateLimit-Limit': MAX_REQUESTS_PER_MINUTE,
+        'X-RateLimit-Remaining': 0,
+        'Retry-After': Math.ceil((RATE_LIMIT_WINDOW - (timestamp - data.timestamp)) / 1000),
+        'X-Content-Type-Options': 'nosniff'
+      });
+      response.end(JSON.stringify({ 
         error: "Rate limit exceeded",
         message: `Max ${MAX_REQUESTS_PER_MINUTE} requests per minute per client allowed`,
-        retryAfter: Math.ceil((RATE_LIMIT_WINDOW - (now - data.timestamp)) / 1000)
-      });
+        retryAfter: Math.ceil((RATE_LIMIT_WINDOW - (timestamp - data.timestamp)) / 1000)
+      }));
       return false;
     }
     
     // Increment count
     data.count++;
-    data.timestamp = now;
+    data.timestamp = timestamp;
   } else {
     // Create new entry
-    rateLimit.set(userFingerprint, { count: 1, timestamp: now });
+    rateLimit.set(hmacKey, { count: 1, timestamp: timestamp });
   }
   
   return true;
 };
 
-// Clean up rate limit map every 5 minutes
+// Clean up rate limit map periodically
 setInterval(() => {
   const now = Date.now();
-  for (const [ip, data] of rateLimit.entries()) {
+  for (const [key, data] of rateLimit.entries()) {
     if (now - data.timestamp > RATE_LIMIT_WINDOW) {
-      rateLimit.delete(ip);
+      rateLimit.delete(key);
     }
   }
-}, 5 * 60 * 1000);
+}, CONN_CLEANUP_INTERVAL);
+
+// Clean up rate limit map on exit
+process.on('SIGINT', () => {
+  rateLimit.clear();
+});
+process.on('SIGTERM', () => {
+  rateLimit.clear();
+});
 
 // Broadcast agent status updates to all connected clients
 const broadcastAgentStatus = () => {
