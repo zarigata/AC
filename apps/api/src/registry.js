@@ -212,6 +212,28 @@ export class AgentRegistry {
           CREATE INDEX IF NOT EXISTS idx_files_uploaded_at ON agent_files(uploadedAt);
           CREATE INDEX IF NOT EXISTS idx_files_filetype ON agent_files(fileType);
           CREATE INDEX IF NOT EXISTS idx_files_hash ON agent_files(fileHash);
+          
+          CREATE TABLE IF NOT EXISTS jobs (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            priority INTEGER NOT NULL DEFAULT 0,
+            progress INTEGER NOT NULL DEFAULT 0,
+            result TEXT,
+            error TEXT,
+            createdAt TEXT NOT NULL,
+            startedAt TEXT,
+            completedAt TEXT,
+            updatedAt TEXT NOT NULL
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+          CREATE INDEX IF NOT EXISTS idx_jobs_priority ON jobs(priority);
+          CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(createdAt);
+          CREATE INDEX IF NOT EXISTS idx_jobs_started_at ON jobs(startedAt);
+          CREATE INDEX IF NOT EXISTS idx_jobs_updated_at ON jobs(updatedAt);
         `);
         
         // Create file storage directory
@@ -1358,6 +1380,236 @@ export class AgentRegistry {
       return this.getFile(agentId, fileId);
     } catch (err) {
       console.error('Error updating file:', err);
+      throw err;
+    }
+  }
+
+  // Job Queue Methods
+  
+  createJob(input) {
+    try {
+      // Validate input
+      validateInput(input, {
+        name: { required: true, type: 'string', minLength: 2, maxLength: 100 },
+        type: { required: true, type: 'string', minLength: 2, maxLength: 50 },
+        payload: { required: true, type: 'object' },
+        priority: { required: false, type: 'number', min: 0, max: 100, default: 0 }
+      }, 'Job input');
+
+      const id = crypto.randomUUID();
+      const timestamp = now();
+      
+      const job = {
+        id,
+        name: sanitizeContent(input.name, 'job name').trim(),
+        type: sanitizeContent(input.type, 'job type').trim(),
+        payload: JSON.stringify(input.payload),
+        status: 'pending',
+        priority: input.priority || 0,
+        progress: 0,
+        createdAt: timestamp,
+        updatedAt: timestamp
+      };
+
+      this.db.exec('BEGIN TRANSACTION');
+      try {
+        const insertStmt = this.db.prepare(
+          `INSERT INTO jobs (id, name, type, payload, status, priority, progress, createdAt, updatedAt) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        );
+
+        const result = insertStmt.run(
+          job.id,
+          job.name,
+          job.type,
+          job.payload,
+          job.status,
+          job.priority,
+          job.progress,
+          job.createdAt,
+          job.updatedAt
+        );
+
+        if (result.changes === 0) {
+          throw new Error('Failed to create job');
+        }
+
+        this.db.exec('COMMIT');
+        return job;
+      } catch (dbErr) {
+        try {
+          this.db.exec('ROLLBACK');
+        } catch (rollbackErr) {
+          console.error('Error during rollback:', rollbackErr);
+        }
+        throw new Error(`Failed to create job: ${dbErr.message}`);
+      }
+    } catch (err) {
+      console.error('Error creating job:', err);
+      throw err;
+    }
+  }
+
+  listJobs(status = null, limit = 50, offset = 0) {
+    try {
+      let query = 'SELECT * FROM jobs';
+      const params = [];
+      
+      if (status) {
+        query += ' WHERE status = ?';
+        params.push(status);
+      }
+      
+      query += ' ORDER BY priority DESC, createdAt DESC LIMIT ? OFFSET ?';
+      params.push(limit, offset);
+      
+      const stmt = this.db.prepare(query);
+      const jobs = stmt.all(...params);
+      
+      // Parse payload JSON
+      return jobs.map(job => ({
+        ...job,
+        payload: JSON.parse(job.payload),
+        ...(job.result ? { result: JSON.parse(job.result) } : {})
+      }));
+    } catch (err) {
+      console.error('Error listing jobs:', err);
+      throw err;
+    }
+  }
+
+  getJob(jobId) {
+    try {
+      const stmt = this.db.prepare('SELECT * FROM jobs WHERE id = ?');
+      const job = stmt.get(jobId);
+      
+      if (!job) {
+        return null;
+      }
+      
+      return {
+        ...job,
+        payload: JSON.parse(job.payload),
+        ...(job.result ? { result: JSON.parse(job.result) } : {})
+      };
+    } catch (err) {
+      console.error('Error getting job:', err);
+      throw err;
+    }
+  }
+
+  updateJob(jobId, updates) {
+    try {
+      // Validate job exists
+      const existingJob = this.getJob(jobId);
+      if (!existingJob) {
+        throw new Error('Job not found');
+      }
+
+      validateInput(updates, {
+        status: { required: false, type: 'string', enum: ['pending', 'running', 'completed', 'failed'] },
+        progress: { required: false, type: 'number', min: 0, max: 100 },
+        result: { required: false, type: 'object' },
+        error: { required: false, type: 'string' },
+        priority: { required: false, type: 'number', min: 0, max: 100 }
+      }, 'Job updates');
+
+      const fields = [];
+      const values = [];
+      const timestamp = now();
+
+      // Handle special fields
+      if (updates.status) {
+        fields.push('status = ?');
+        values.push(updates.status);
+        
+        // Set startedAt when job starts
+        if (updates.status === 'running' && !existingJob.startedAt) {
+          fields.push('startedAt = ?');
+          values.push(timestamp);
+        }
+        
+        // Set completedAt when job completes
+        if (updates.status === 'completed' && !existingJob.completedAt) {
+          fields.push('completedAt = ?');
+          values.push(timestamp);
+        }
+      }
+
+      if (updates.progress !== undefined) {
+        fields.push('progress = ?');
+        values.push(updates.progress);
+      }
+
+      if (updates.result !== undefined) {
+        fields.push('result = ?');
+        values.push(JSON.stringify(updates.result));
+      }
+
+      if (updates.error !== undefined) {
+        fields.push('error = ?');
+        values.push(updates.error);
+      }
+
+      if (updates.priority !== undefined) {
+        fields.push('priority = ?');
+        values.push(updates.priority);
+      }
+
+      // Always update updatedAt timestamp
+      fields.push('updatedAt = ?');
+      values.push(timestamp);
+      values.push(jobId);
+
+      if (fields.length === 0) {
+        return existingJob;
+      }
+
+      const updateStmt = this.db.prepare(`UPDATE jobs SET ${fields.join(', ')} WHERE id = ?`);
+      const result = updateStmt.run(...values);
+
+      if (result.changes === 0) {
+        throw new Error('Failed to update job');
+      }
+
+      return this.getJob(jobId);
+    } catch (err) {
+      console.error('Error updating job:', err);
+      throw err;
+    }
+  }
+
+  deleteJob(jobId) {
+    try {
+      // Validate job ID format
+      if (!jobId || typeof jobId !== 'string' || jobId.length !== 36) {
+        throw new Error('Invalid job ID format');
+      }
+
+      const deleteStmt = this.db.prepare('DELETE FROM jobs WHERE id = ?');
+      const result = deleteStmt.run(jobId);
+
+      return result.changes > 0;
+    } catch (err) {
+      console.error('Error deleting job:', err);
+      throw err;
+    }
+  }
+
+  getPendingJobs(limit = 10) {
+    try {
+      const stmt = this.db.prepare(
+        'SELECT * FROM jobs WHERE status = "pending" ORDER BY priority DESC, createdAt DESC LIMIT ?'
+      );
+      const jobs = stmt.all(limit);
+      
+      return jobs.map(job => ({
+        ...job,
+        payload: JSON.parse(job.payload),
+        ...(job.result ? { result: JSON.parse(job.result) } : {})
+      }));
+    } catch (err) {
+      console.error('Error getting pending jobs:', err);
       throw err;
     }
   }

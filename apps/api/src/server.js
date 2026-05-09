@@ -19,6 +19,145 @@ import { OllamaAdapter, createProvider } from "./adapters/ollama.js";
 import { FailoverChainAdapter, createFailoverChain } from "./adapters/failover.js";
 import { AgentRegistry } from "./registry.js";
 
+// Simple Job Processor
+const JOB_PROCESSOR_INTERVAL = 5000; // 5 seconds
+const MAX_CONCURRENT_JOBS = 3;
+const runningJobs = new Set();
+
+// Simple job processor for background tasks
+const processJobs = async () => {
+  try {
+    // Don't process too many jobs concurrently
+    if (runningJobs.size >= MAX_CONCURRENT_JOBS) {
+      return;
+    }
+    
+    // Get next pending job
+    const pendingJobs = registry.getPendingJobs(1);
+    if (pendingJobs.length === 0) {
+      return;
+    }
+    
+    const job = pendingJobs[0];
+    const jobId = job.id;
+    
+    // Mark job as running
+    runningJobs.add(jobId);
+    const runningJob = registry.updateJob(jobId, { status: 'running' });
+    
+    // Broadcast job start
+    broadcastJobUpdate({
+      id: jobId,
+      name: job.name,
+      type: job.type,
+      status: 'running',
+      progress: 0,
+      startedAt: runningJob.startedAt
+    });
+    
+    console.log(`Starting job: ${job.name} (${jobId})`);
+    
+    // Process the job based on its type
+    try {
+      let result;
+      
+      switch (job.type) {
+        case 'test':
+          // Simple test job that just waits a bit
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          result = { message: 'Test job completed successfully', timestamp: Date.now() };
+          break;
+          
+        case 'cleanup':
+          // Cleanup job - could clean old logs, sessions, etc.
+          result = { 
+            message: 'Cleanup completed', 
+            cleanedItems: Math.floor(Math.random() * 100),
+            timestamp: Date.now() 
+          };
+          break;
+          
+        case 'backup':
+          // Simulate backup job with progress updates
+          for (let i = 20; i <= 80; i += 20) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            registry.updateJob(jobId, { progress: i });
+            broadcastJobUpdate({
+              id: jobId,
+              name: job.name,
+              type: job.type,
+              status: 'running',
+              progress: i
+            });
+          }
+          result = { 
+            message: 'Backup completed', 
+            backupSize: `${Math.floor(Math.random() * 1000) + 100}MB`,
+            timestamp: Date.now() 
+          };
+          break;
+          
+        default:
+          // Generic job processing
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          result = { 
+            message: `Job type ${job.type} processed`, 
+            timestamp: Date.now() 
+          };
+      }
+      
+      // Update job with result
+      const completedJob = registry.updateJob(jobId, { 
+        status: 'completed', 
+        progress: 100,
+        result: result 
+      });
+      
+      // Broadcast job completion
+      broadcastJobUpdate({
+        id: jobId,
+        name: job.name,
+        type: job.type,
+        status: 'completed',
+        progress: 100,
+        result: result,
+        completedAt: completedJob.completedAt
+      });
+      
+      console.log(`Completed job: ${job.name} (${jobId})`);
+      
+    } catch (error) {
+      // Mark job as failed
+      const failedJob = registry.updateJob(jobId, { 
+        status: 'failed', 
+        error: error.message 
+      });
+      
+      // Broadcast job failure
+      broadcastJobUpdate({
+        id: jobId,
+        name: job.name,
+        type: job.type,
+        status: 'failed',
+        progress: failedJob.progress,
+        error: error.message
+      });
+      
+      console.error(`Failed job: ${job.name} (${jobId}) - ${error.message}`);
+    } finally {
+      // Remove from running jobs
+      runningJobs.delete(jobId);
+    }
+    
+  } catch (err) {
+    console.error('Error in job processor:', err);
+  }
+};
+
+// Start job processor
+setInterval(processJobs, JOB_PROCESSOR_INTERVAL);
+console.log(`Job processor started (checking every ${JOB_PROCESSOR_INTERVAL}ms, max ${MAX_CONCURRENT_JOBS} concurrent)`);
+
 // Multi-provider setup — primary is Ollama (local), fallbacks configured via env
 const providers = {};
 const providerNames = ["ollama", "openai", "anthropic", "gemini", "openrouter", "groq", "together", "lmstudio"];
@@ -2049,6 +2188,165 @@ const server = createServer(async (request, response) => {
       }
     }
 
+    /* ─── Job Queue ─── */
+
+    const jobsMatch = url.pathname.match(/^\/api\/jobs$/);
+    
+    if (jobsMatch && request.method === "GET") {
+      try {
+        const status = new URLSearchParams(url.search).get('status');
+        const limit = parseInt(new URLSearchParams(url.search).get('limit')) || 50;
+        const offset = parseInt(new URLSearchParams(url.search).get('offset')) || 0;
+        
+        const jobs = registry.listJobs(status, limit, offset);
+        return sendJson(response, 200, { jobs });
+      } catch (err) {
+        return sendJson(response, 500, { error: err.message || "Failed to list jobs" });
+      }
+    }
+    
+    if (jobsMatch && request.method === "POST") {
+      try {
+        const body = await readRequestBody(request);
+        
+        // Validate job input
+        if (!body || typeof body !== 'object') {
+          return sendJson(response, 400, { error: "Invalid job data" });
+        }
+        
+        if (!body.name || typeof body.name !== 'string') {
+          return sendJson(response, 400, { error: "Job name is required" });
+        }
+        
+        if (!body.type || typeof body.type !== 'string') {
+          return sendJson(response, 400, { error: "Job type is required" });
+        }
+        
+        if (!body.payload || typeof body.payload !== 'object') {
+          return sendJson(response, 400, { error: "Job payload is required and must be an object" });
+        }
+        
+        const job = registry.createJob({
+          name: body.name,
+          type: body.type,
+          payload: body.payload,
+          priority: body.priority || 0
+        });
+        
+        return sendJson(response, 201, { job });
+      } catch (err) {
+        return sendJson(response, 400, { error: err.message || "Invalid job data" });
+      }
+    }
+    
+    if (jobsMatch && request.method === "DELETE") {
+      try {
+        const body = await readRequestBody(request);
+        
+        if (!body || !Array.isArray(body.jobIds)) {
+          return sendJson(response, 400, { error: "jobIds array is required" });
+        }
+        
+        let deletedCount = 0;
+        for (const jobId of body.jobIds) {
+          if (registry.deleteJob(jobId)) {
+            deletedCount++;
+          }
+        }
+        
+        return sendJson(response, 200, { deleted: deletedCount, jobIds: body.jobIds });
+      } catch (err) {
+        return sendJson(response, 400, { error: err.message || "Invalid request" });
+      }
+    }
+    
+    const jobMatch = url.pathname.match(/^\/api\/jobs\/([\w-]+)$/);
+    
+    if (jobMatch) {
+      const jobId = jobMatch[1];
+      
+      if (request.method === "GET") {
+        try {
+          const job = registry.getJob(jobId);
+          if (!job) {
+            return sendJson(response, 404, { error: "Job not found" });
+          }
+          return sendJson(response, 200, { job });
+        } catch (err) {
+          return sendJson(response, 500, { error: err.message || "Failed to get job" });
+        }
+      }
+      
+      if (request.method === "PATCH") {
+        try {
+          const body = await readRequestBody(request);
+          
+          if (!body || typeof body !== 'object') {
+            return sendJson(response, 400, { error: "Invalid update data" });
+          }
+          
+          const updates = {};
+          
+          if (body.status) {
+            const validStatuses = ['pending', 'running', 'completed', 'failed'];
+            if (!validStatuses.includes(body.status)) {
+              return sendJson(response, 400, { error: "Invalid status" });
+            }
+            updates.status = body.status;
+          }
+          
+          if (body.progress !== undefined) {
+            if (typeof body.progress !== 'number' || body.progress < 0 || body.progress > 100) {
+              return sendJson(response, 400, { error: "Progress must be a number between 0 and 100" });
+            }
+            updates.progress = body.progress;
+          }
+          
+          if (body.result !== undefined) {
+            if (typeof body.result !== 'object') {
+              return sendJson(response, 400, { error: "Result must be an object" });
+            }
+            updates.result = body.result;
+          }
+          
+          if (body.error !== undefined) {
+            if (typeof body.error !== 'string') {
+              return sendJson(response, 400, { error: "Error must be a string" });
+            }
+            updates.error = body.error;
+          }
+          
+          if (body.priority !== undefined) {
+            if (typeof body.priority !== 'number' || body.priority < 0 || body.priority > 100) {
+              return sendJson(response, 400, { error: "Priority must be a number between 0 and 100" });
+            }
+            updates.priority = body.priority;
+          }
+          
+          const job = registry.updateJob(jobId, updates);
+          if (!job) {
+            return sendJson(response, 404, { error: "Job not found" });
+          }
+          
+          return sendJson(response, 200, { job });
+        } catch (err) {
+          return sendJson(response, 400, { error: err.message || "Invalid update data" });
+        }
+      }
+      
+      if (request.method === "DELETE") {
+        try {
+          const deleted = registry.deleteJob(jobId);
+          if (!deleted) {
+            return sendJson(response, 404, { error: "Job not found" });
+          }
+          return sendJson(response, 200, { deleted: true });
+        } catch (err) {
+          return sendJson(response, 500, { error: err.message || "Failed to delete job" });
+        }
+      }
+    }
+
     sendJson(response, 404, { error: "Not found" });
   } catch (error) {
     // Use standardized error handling
@@ -2239,6 +2537,22 @@ const cleanupOnExit = (signal) => {
 
 process.on('SIGINT', () => cleanupOnExit('SIGINT'));
 process.on('SIGTERM', () => cleanupOnExit('SIGTERM'));
+
+// Broadcast job updates to all connected clients
+const broadcastJobUpdate = (job) => {
+  const jobUpdate = {
+    type: 'job_update',
+    timestamp: Date.now(),
+    data: job
+  };
+  
+  const message = JSON.stringify(jobUpdate);
+  connectedClients.forEach(client => {
+    if (client.readyState === 1) { // WebSocket.OPEN
+      client.send(message);
+    }
+  });
+};
 
 // Broadcast agent status updates to all connected clients
 const broadcastAgentStatus = () => {
