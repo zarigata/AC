@@ -215,7 +215,7 @@ export class AgentRegistry {
       purpose: "Break work into tasks, supervise runs, and route model usage.",
       provider: "openai",
       model: "gpt-5.4",
-      isolationMode: "strict",
+      isolationMode: "isolated",
       maxConcurrentTasks: 8,
       peerAccess: false,
     });
@@ -225,7 +225,7 @@ export class AgentRegistry {
       purpose: "Research and summarize the web",
       provider: "openai",
       model: "gpt-5.4",
-      isolationMode: "strict",
+      isolationMode: "isolated",
       maxConcurrentTasks: 8,
       peerAccess: false,
     });

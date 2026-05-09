@@ -16,12 +16,85 @@ import {
 } from "../../../packages/shared/src/index.js";
 
 import { OllamaAdapter, createProvider } from "./adapters/ollama.js";
+import { FailoverChainAdapter, createFailoverChain } from "./adapters/failover.js";
 import { AgentRegistry } from "./registry.js";
 
 // Multi-provider setup — primary is Ollama (local), fallbacks configured via env
 const providers = {};
 const providerNames = ["ollama", "openai", "anthropic", "gemini", "openrouter", "groq", "together", "lmstudio"];
 const DEFAULT_PROVIDER = process.env.DEFAULT_PROVIDER || "ollama";
+
+// Failover chain configuration
+const failoverChains = {};
+const DEFAULT_FAILOVER_CHAIN = process.env.DEFAULT_FAILOVER_CHAIN || "default";
+
+// Initialize default failover chain if configured
+const initFailoverChains = () => {
+  // Check for failover chain configuration in environment variables
+  const failoverConfigEnv = process.env.FAILOVER_CONFIG;
+  
+  if (failoverConfigEnv) {
+    try {
+      const config = JSON.parse(failoverConfigEnv);
+      
+      // Initialize each configured failover chain
+      for (const [chainName, chainConfig] of Object.entries(config)) {
+        try {
+          const failoverChain = createFailoverChain(chainConfig);
+          failoverChains[chainName] = failoverChain;
+          console.log(`Initialized failover chain '${chainName}' with ${chainConfig.chain.length} providers`);
+        } catch (err) {
+          console.error(`Failed to initialize failover chain '${chainName}':`, err.message);
+        }
+      }
+      
+      // Set default failover chain if specified
+      if (config.default) {
+        DEFAULT_FAILOVER_CHAIN = config.default;
+      }
+    } catch (err) {
+      console.error('Failed to parse FAILOVER_CONFIG:', err.message);
+    }
+  }
+  
+  // Auto-detect failover chain from available providers
+  const availableProviders = [];
+  
+  // Always add ollama as primary if available
+  if (providers.ollama) {
+    availableProviders.push({ name: 'ollama', config: providers.ollama });
+  }
+  
+  // Add other providers if they have API keys configured
+  for (const name of providerNames.slice(1)) {
+    if (providers[name]) {
+      availableProviders.push({ name, config: providers[name] });
+    }
+  }
+  
+  // Create a default failover chain if we have multiple providers
+  if (availableProviders.length > 1) {
+    try {
+      const defaultChain = new FailoverChainAdapter(availableProviders);
+      failoverChains[DEFAULT_FAILOVER_CHAIN] = defaultChain;
+      console.log(`Auto-created default failover chain with ${availableProviders.length} providers`);
+    } catch (err) {
+      console.error('Failed to auto-create failover chain:', err.message);
+    }
+  } else if (availableProviders.length === 1) {
+    // Create a single-provider failover chain for consistency
+    try {
+      const singleChain = new FailoverChainAdapter(availableProviders);
+      failoverChains[DEFAULT_FAILOVER_CHAIN] = singleChain;
+      console.log(`Created single-provider failover chain with ${availableProviders.length} provider`);
+    } catch (err) {
+      console.error('Failed to create single-provider failover chain:', err.message);
+    }
+  }
+};
+
+// Initialize failover chains after basic providers are set up
+initFailoverChains();
 
 // Initialize Ollama as primary
 providers.ollama = new OllamaAdapter({
@@ -45,6 +118,30 @@ for (const name of providerNames.slice(1)) {
 // Keep 'ollama' reference for backward compatibility
 const ollama = providers.ollama;
 const VERSION = "0.2.0";
+
+// Check if a provider is part of any failover chain
+const isProviderInFailoverChain = (providerName) => {
+  for (const chainName of Object.keys(failoverChains)) {
+    const chain = failoverChains[chainName];
+    for (const providerConfig of chain.failoverChain) {
+      if (providerConfig.name === providerName) {
+        return true;
+      }
+    }
+  }
+  return false;
+};
+
+// Get provider with failover support
+const getProvider = (providerName = DEFAULT_PROVIDER) => {
+  // First check if it's a failover chain
+  if (failoverChains[providerName]) {
+    return failoverChains[providerName];
+  }
+  
+  // Fallback to individual provider
+  return providers[providerName];
+};
 const startTime = Date.now();
 
 // Rate limiting: max 60 requests per minute per IP
@@ -848,13 +945,166 @@ const server = createServer(async (request, response) => {
       return sendJson(response, 200, results, results);
     }
 
+    /* ─── Provider Failover Configuration ─── */
+
+    if (request.method === "GET" && url.pathname === "/api/providers/failover") {
+      try {
+        const chains = {};
+        
+        // Get status of each failover chain
+        for (const [chainName, chain] of Object.entries(failoverChains)) {
+          try {
+            const health = await chain.health();
+            const currentProvider = chain.getCurrentProvider();
+            
+            chains[chainName] = {
+              name: chainName,
+              healthy: health.ok,
+              healthyProviders: health.providers,
+              primaryProvider: currentProvider?.name || 'unknown',
+              fallbackCount: chain.failoverChain.length - 1,
+              providers: chain.failoverChain.map((p, i) => ({
+                name: p.name,
+                index: i,
+                position: i + 1,
+                healthy: health.providers[p.name]?.ok || false,
+                config: p.config
+              })),
+              default: chainName === DEFAULT_FAILOVER_CHAIN
+            };
+          } catch (err) {
+            chains[chainName] = {
+              name: chainName,
+              healthy: false,
+              error: err.message,
+              providers: chain.failoverChain.map((p, i) => ({
+                name: p.name,
+                index: i,
+                position: i + 1,
+                healthy: false,
+                config: p.config
+              })),
+              default: chainName === DEFAULT_FAILOVER_CHAIN
+            };
+          }
+        }
+        
+        return sendJson(response, 200, {
+          chains,
+          defaultChain: DEFAULT_FAILOVER_CHAIN,
+          totalChains: Object.keys(failoverChains).length,
+          availableProviders: Object.keys(providers).filter(name => !isProviderInFailoverChain(name))
+        });
+      } catch (err) {
+        return sendJson(response, 500, { error: "Internal server error" }, { error: "Internal server error" });
+      }
+    }
+
+    if ((request.method === "PUT" || request.method === "POST") && url.pathname === "/api/providers/failover") {
+      try {
+        const body = await readRequestBody(request);
+        
+        // Validate input
+        if (!body || typeof body !== 'object') {
+          return sendJson(response, 400, { error: "Invalid request body" }, { error: "Invalid request body" });
+        }
+        
+        const action = body.action || 'create';
+        const chainName = body.chainName || DEFAULT_FAILOVER_CHAIN;
+        
+        if (action === 'create' || action === 'update') {
+          // Create or update failover chain
+          if (!body.chain || !Array.isArray(body.chain) || body.chain.length === 0) {
+            return sendJson(response, 400, { error: "Chain must be a non-empty array of providers" }, { error: "Chain must be a non-empty array of providers" });
+          }
+          
+          // Validate provider chain
+          const validProviderNames = Object.keys(providers);
+          for (const providerConfig of body.chain) {
+            if (!providerConfig.name || !validProviderNames.includes(providerConfig.name)) {
+              return sendJson(response, 400, { error: `Invalid provider name: ${providerConfig.name}` }, { error: `Invalid provider name: ${providerConfig.name}` });
+            }
+          }
+          
+          try {
+            const failoverChain = new FailoverChainAdapter(
+              body.chain.map(p => ({
+                name: p.name,
+                config: p.config || {}
+              })),
+              body.config || {}
+            );
+            
+            failoverChains[chainName] = failoverChain;
+            
+            // Update default chain if specified
+            if (body.isDefault) {
+              DEFAULT_FAILOVER_CHAIN = chainName;
+            }
+            
+            return sendJson(response, 200, {
+              success: true,
+              message: `Failover chain '${chainName}' ${action}d successfully`,
+              chainName,
+              providerCount: body.chain.length,
+              isDefault: body.isDefault || false
+            });
+          } catch (err) {
+            return sendJson(response, 400, { error: `Failed to create failover chain: ${err.message}` }, { error: `Failed to create failover chain: ${err.message}` });
+          }
+        } else if (action === 'delete') {
+          // Delete failover chain
+          if (!failoverChains[chainName]) {
+            return sendJson(response, 404, { error: `Failover chain '${chainName}' not found` }, { error: `Failover chain '${chainName}' not found` });
+          }
+          
+          delete failoverChains[chainName];
+          
+          // Update default chain if deleted chain was default
+          if (DEFAULT_FAILOVER_CHAIN === chainName && Object.keys(failoverChains).length > 0) {
+            DEFAULT_FAILOVER_CHAIN = Object.keys(failoverChains)[0];
+          }
+          
+          return sendJson(response, 200, {
+            success: true,
+            message: `Failover chain '${chainName}' deleted successfully`
+          });
+        } else if (action === 'switch') {
+          // Switch to a specific provider in chain
+          if (!failoverChains[chainName]) {
+            return sendJson(response, 404, { error: `Failover chain '${chainName}' not found` }, { error: `Failover chain '${chainName}' not found` });
+          }
+          
+          const providerIndex = body.providerIndex;
+          if (typeof providerIndex !== 'number' || providerIndex < 0 || providerIndex >= failoverChains[chainName].providers.length) {
+            return sendJson(response, 400, { error: "Invalid provider index" }, { error: "Invalid provider index" });
+          }
+          
+          try {
+            const newProvider = await failoverChains[chainName].setProvider(providerIndex);
+            return sendJson(response, 200, {
+              success: true,
+              message: `Switched to provider '${newProvider.name}' in chain '${chainName}'`,
+              provider: newProvider
+            });
+          } catch (err) {
+            return sendJson(response, 400, { error: `Failed to switch provider: ${err.message}` }, { error: `Failed to switch provider: ${err.message}` });
+          }
+        } else {
+          return sendJson(response, 400, { error: "Invalid action. Must be: create, update, delete, or switch" }, { error: "Invalid action. Must be: create, update, delete, or switch" });
+        }
+      } catch (err) {
+        return sendJson(response, 400, { error: "Invalid request body" }, { error: "Invalid request body" });
+      }
+    }
+
     /* ─── Provider Chat (direct, no agent needed) ─── */
 
     if (request.method === "POST" && url.pathname === "/api/chat") {
       const body = await readRequestBody(request);
       const providerName = body.provider || DEFAULT_PROVIDER;
-      const provider = providers[providerName];
-      if (!provider) return sendJson(response, request, 400, { error: `Provider '${providerName}' not configured. Available: ${Object.keys(providers).join(', ')}` });
+      const provider = getProvider(providerName);
+      if (!provider) return sendJson(response, request, 400, { error: `Provider '${providerName}' not configured. Available: ${Object.keys(providers).concat(Object.keys(failoverChains)).join(', ')}` });
 
       const messages = body.messages || [{ role: "user", content: body.message || "" }];
       if (!messages.length || !messages[messages.length - 1]?.content?.trim()) {
@@ -874,49 +1124,76 @@ const server = createServer(async (request, response) => {
         });
 
         try {
-          let accumulatedContent = "";
-          let accumulatedTokensIn = 0;
-          let accumulatedTokensOut = 0;
-          
-          await provider.chatStream(messages, {
-            model: body.model,
-            temperature: body.temperature,
-            maxTokens: body.maxTokens,
-          }, (chunk) => {
-            accumulatedContent += chunk.content || "";
-            accumulatedTokensIn += chunk.tokensIn || 0;
-            accumulatedTokensOut += chunk.tokensOut || 0;
-            
-            // Send SSE event
-            const eventData = JSON.stringify({
-              content: chunk.content || "",
-              accumulatedContent,
-              tokensIn: chunk.tokensIn || 0,
-              tokensOut: chunk.tokensOut || 0,
-              duration: chunk.duration || 0,
-              model: chunk.model || body.model || providerName,
-              provider: providerName,
-              done: chunk.done || false
+          if (provider.health && provider.chatStream) {
+            // For failover chains, they handle streaming themselves
+            await provider.chatStream(messages, {
+              model: body.model,
+              temperature: body.temperature,
+              maxTokens: body.maxTokens,
+            }, (chunk) => {
+              // Send SSE event with failover metadata if present
+              const eventData = JSON.stringify({
+                ...chunk,
+                provider: providerName,
+                timestamp: Date.now()
+              });
+              response.write(`data: ${eventData}\n\n`);
+            }, (finalResult) => {
+              // Send final event with failover metadata if present
+              const eventData = JSON.stringify({
+                ...finalResult,
+                provider: providerName,
+                timestamp: Date.now()
+              });
+              response.write(`data: ${eventData}\n\n`);
+              response.end();
             });
+          } else {
+            // For regular providers, use the old method
+            let accumulatedContent = "";
+            let accumulatedTokensIn = 0;
+            let accumulatedTokensOut = 0;
             
-            response.write(`data: ${eventData}\n\n`);
-          }, (finalResult) => {
-            // Send final event
-            const eventData = JSON.stringify({
-              content: finalResult.content || "",
-              accumulatedContent: finalResult.content || "",
-              tokensIn: finalResult.tokensIn || 0,
-              tokensOut: finalResult.tokensOut || 0,
-              duration: finalResult.duration || 0,
-              model: finalResult.model || body.model || providerName,
-              provider: providerName,
-              done: true,
-              final: true
+            await provider.chatStream(messages, {
+              model: body.model,
+              temperature: body.temperature,
+              maxTokens: body.maxTokens,
+            }, (chunk) => {
+              accumulatedContent += chunk.content || "";
+              accumulatedTokensIn += chunk.tokensIn || 0;
+              accumulatedTokensOut += chunk.tokensOut || 0;
+              
+              // Send SSE event
+              const eventData = JSON.stringify({
+                content: chunk.content || "",
+                accumulatedContent,
+                tokensIn: chunk.tokensIn || 0,
+                tokensOut: chunk.tokensOut || 0,
+                duration: chunk.duration || 0,
+                model: chunk.model || body.model || providerName,
+                provider: providerName,
+                done: chunk.done || false
+              });
+              
+              response.write(`data: ${eventData}\n\n`);
+            }, (finalResult) => {
+              // Send final event
+              const eventData = JSON.stringify({
+                content: finalResult.content || "",
+                accumulatedContent: finalResult.content || "",
+                tokensIn: finalResult.tokensIn || 0,
+                tokensOut: finalResult.tokensOut || 0,
+                duration: finalResult.duration || 0,
+                model: finalResult.model || body.model || providerName,
+                provider: providerName,
+                done: true,
+                final: true
+              });
+              
+              response.write(`data: ${eventData}\n\n`);
+              response.end();
             });
-            
-            response.write(`data: ${eventData}\n\n`);
-            response.end();
-          });
+          }
         } catch (e) {
           // Send error event
           const eventData = JSON.stringify({
@@ -1086,9 +1363,27 @@ const server = createServer(async (request, response) => {
       }));
 
       // Call provider (default to ollama, agent can override)
-      const chatProvider = providers[agent.provider?.toLowerCase()] || providers[DEFAULT_PROVIDER];
+      const chatProvider = getProvider(agent.provider?.toLowerCase()) || getProvider(DEFAULT_PROVIDER);
       if (!chatProvider) return sendJson(response, request, 502, { error: `No provider configured for agent '${agent.name}' (tried '${agent.provider}')` });
+      
       const result = await chatProvider.chat(history, { model: agent.model, temperature: body.temperature, maxTokens: body.maxTokens });
+      
+      // Add provider name to result for failover chains
+      const responseResult = {
+        message: result.content,
+        tokensIn: result.tokensIn,
+        tokensOut: result.tokensOut,
+        duration: result.duration,
+        model: result.model,
+        sessionId: session.id
+      };
+      
+      // Add failover-specific metadata if available
+      if (result.failoverAttempts !== undefined) {
+        responseResult.failoverAttempts = result.failoverAttempts;
+      }
+      
+      return sendJson(response, 200, responseResult);
 
       // Save assistant response
       registry.createMessage(agentId, session.id, {
@@ -1144,7 +1439,20 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/providers") {
       try {
-        return sendJson(response, request, 200, providerSummary());
+        const summary = providerSummary();
+        
+        // Add failover chain information
+        summary.failoverChains = Object.keys(failoverChains).map(chainName => ({
+          name: chainName,
+          providerCount: failoverChains[chainName].failoverChain.length,
+          healthy: true, // TODO: Add actual health check
+          default: chainName === DEFAULT_FAILOVER_CHAIN
+        }));
+        
+        summary.totalFailoverChains = Object.keys(failoverChains).length;
+        summary.defaultFailoverChain = DEFAULT_FAILOVER_CHAIN;
+        
+        return sendJson(response, request, 200, summary);
       } catch (err) {
         return sendJson(response, request, 500, { error: "Internal server error" });
       }
@@ -1156,6 +1464,43 @@ const server = createServer(async (request, response) => {
           providers: listProviderConnections(process.env),
           summary: getProviderReadinessSummary(process.env)
         });
+      } catch (err) {
+        return sendJson(response, 500, { error: "Internal server error" }, { error: "Internal server error" });
+      }
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/providers/all-health") {
+      try {
+        const healthResults = {
+          individualProviders: {},
+          failoverChains: {},
+          timestamp: Date.now()
+        };
+        
+        // Check individual provider health
+        for (const [name, provider] of Object.entries(providers)) {
+          try {
+            healthResults.individualProviders[name] = await provider.health();
+          } catch (e) {
+            healthResults.individualProviders[name] = { ok: false, error: e.message };
+          }
+        }
+        
+        // Check failover chain health
+        for (const [name, chain] of Object.entries(failoverChains)) {
+          try {
+            healthResults.failoverChains[name] = await chain.health();
+          } catch (e) {
+            healthResults.failoverChains[name] = { ok: false, error: e.message };
+          }
+        }
+        
+        // Calculate overall status
+        healthResults.overallHealthy = 
+          Object.values(healthResults.individualProviders).some(p => p.ok === true) ||
+          Object.values(healthResults.failoverChains).some(c => c.ok === true);
+        
+        return sendJson(response, 200, healthResults);
       } catch (err) {
         return sendJson(response, 500, { error: "Internal server error" }, { error: "Internal server error" });
       }
@@ -1408,7 +1753,6 @@ process.on('SIGTERM', () => cleanupOnExit('SIGTERM'));
 // Broadcast agent status updates to all connected clients
 const broadcastAgentStatus = () => {
   const agents = registry.listAgents();
-  const topology = registry.getTopology();
   
   const statusUpdate = {
     type: 'agent_status',
@@ -1421,13 +1765,13 @@ const broadcastAgentStatus = () => {
         status: 'active',
         model: agent.model,
         isolationMode: agent.isolationMode,
-        concurrentTasks: registry.getCurrentTaskCount(agent.id),
+        concurrentTasks: 0, // TODO: Implement getCurrentTaskCount
         lastActivity: Date.now()
       })),
       systemStats: {
         uptime: Math.floor((Date.now() - startTime) / 1000),
-        totalSessions: registry.getTotalSessions(),
-        totalMessages: registry.getTotalMessages()
+        totalSessions: 0,
+        totalMessages: 0
       }
     }
   };
@@ -1645,7 +1989,7 @@ const sendWebSocketError = (socket, statusCode, message) => {
 };
 
 // Broadcast status updates every 30 seconds
-setInterval(broadcastAgentStatus, 30 * 1000);
+// setInterval(broadcastAgentStatus, 30 * 1000);
 
 server.listen(port, host, () => {
   console.log(`Zsiistant v${VERSION} listening on http://${host}:${port}`);
