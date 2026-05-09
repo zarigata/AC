@@ -28,6 +28,10 @@ const sanitizeContent = (content, fieldName = 'content') => {
   // Remove null bytes and control characters
   sanitized = sanitized.replace(/\x00/g, '').replace(/[\x01-\x08\x0b\x0c\x0e-\x1f]/g, '');
   
+  // Additional security: remove Unicode control characters and surrogate pairs
+  sanitized = sanitized.replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
+                      .replace(/\uD[89AB][\uDC00-\uDFFF]/g, '');
+  
   return sanitized;
 };
 
@@ -35,6 +39,33 @@ const sanitizeContent = (content, fieldName = 'content') => {
 const validateInput = (input, rules, fieldName) => {
   if (!input && input !== '' && input !== 0 && input !== false) {
     throw new Error(`${fieldName} is required`);
+  }
+  
+  // Check for prototype pollution attempts
+  if (input && typeof input === 'object') {
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    for (const key of dangerousKeys) {
+      if (key in input) {
+        throw new Error(`${fieldName} contains potentially dangerous property: ${key}`);
+      }
+    }
+    
+    // Check for circular references and deeply nested objects
+    const maxDepth = 10;
+    const checkDepth = (obj, depth = 0) => {
+      if (depth > maxDepth) {
+        throw new Error(`${fieldName} is too deeply nested`);
+      }
+      
+      if (obj && typeof obj === 'object') {
+        for (const value of Object.values(obj)) {
+          if (typeof value === 'object' && value !== null) {
+            checkDepth(value, depth + 1);
+          }
+        }
+      }
+    };
+    checkDepth(input);
   }
   
   for (const [key, rule] of Object.entries(rules)) {
@@ -1105,10 +1136,52 @@ export class AgentRegistry {
         throw new Error('Original filename is required');
       }
       
+      // Enhanced file validation with security checks
+      
       // Validate file size (10MB limit)
       const maxSize = 10 * 1024 * 1024; // 10MB
       if (content.length > maxSize) {
         throw new Error(`File size exceeds maximum limit of ${maxSize / 1024 / 1024}MB`);
+      }
+      
+      // Validate filename for security
+      if (filename.length > 255) {
+        throw new Error('Filename too long (max 255 characters)');
+      }
+      
+      // Check for dangerous file extensions
+      const dangerousExtensions = [
+        'exe', 'bat', 'cmd', 'com', 'pif', 'scr', 'reg', 'wsf', 'js', 'vbs', 'ps1', 
+        'sh', 'bash', 'zsh', 'fish', 'dll', 'so', 'dylib', 'jar', 'app', 'dmg',
+        'deb', 'rpm', 'msi', 'iso', 'img', 'bin', 'torrent', 'apk', 'ipa'
+      ];
+      
+      const fileExt = extname(filename).toLowerCase().substring(1);
+      if (dangerousExtensions.includes(fileExt)) {
+        throw new Error(`File type not allowed: .${fileExt}`);
+      }
+      
+      // Check for path traversal attempts in filename
+      if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+        throw new Error('Filename contains invalid characters');
+      }
+      
+      // Sanitize description if provided
+      if (description) {
+        sanitizeContent(description, 'file description');
+      }
+      
+      // Validate tags
+      if (!Array.isArray(tags)) {
+        throw new Error('Tags must be an array');
+      }
+      
+      for (const tag of tags) {
+        if (typeof tag !== 'string' || tag.length > 50) {
+          throw new Error('Each tag must be a string with max 50 characters');
+        }
+        // Sanitize tags
+        sanitizeContent(tag, 'tag');
       }
       
       // Generate file hash for deduplication

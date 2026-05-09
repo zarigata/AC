@@ -366,6 +366,58 @@ const isOriginAllowed = (origin) => {
   return ALLOWED_ORIGINS.includes(origin);
 };
 
+// Enhanced SQL injection protection for agent ID validation
+const validateAgentId = (agentId, fieldName = 'agent ID') => {
+  if (!agentId || typeof agentId !== 'string' || agentId.length > 64 || agentId.length < 1) {
+    throw new Error(`Invalid ${fieldName}: must be 1-64 characters`);
+  }
+  
+  // Check for SQL injection patterns
+  const sqlPatterns = [
+    /;\s*--/g,
+    /'/g,
+    /"/g,
+    /`/g,
+    /\\/g,
+    /SELECT\s+/gi,
+    /INSERT\s+/gi,
+    /UPDATE\s+/gi,
+    /DELETE\s+/gi,
+    /DROP\s+/gi,
+    /CREATE\s+/gi,
+    /ALTER\s+/gi,
+    /UNION\s+/gi,
+    /EXEC\s+/gi,
+    /EXECUTE\s+/gi,
+    /script/gi,
+    /javascript/gi,
+    /iframe/gi,
+    /object/gi,
+    /embed/gi
+  ];
+  
+  // Additional reserved names check
+  const reservedNames = ['admin', 'system', 'root', 'database', 'sql', 'delete', 'drop', 'create', 'alter'];
+  const lowerAgentId = agentId.toLowerCase();
+  
+  if (reservedNames.some(name => lowerAgentId.includes(name))) {
+    throw new Error(`Invalid ${fieldName}: contains reserved name`);
+  }
+  
+  for (const pattern of sqlPatterns) {
+    if (pattern.test(agentId)) {
+      throw new Error(`Invalid ${fieldName}: contains potentially malicious content`);
+    }
+  }
+  
+  // Check for dangerous characters
+  if (/[\x00-\x1F\x7F-\x9F]/.test(agentId)) {
+    throw new Error(`Invalid ${fieldName}: contains control characters`);
+  }
+  
+  return agentId;
+};
+
 // Sanitize JSON payload to prevent injection
 const sanitizeJsonPayload = (payload) => {
   try {

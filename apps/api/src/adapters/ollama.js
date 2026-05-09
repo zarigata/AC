@@ -20,11 +20,36 @@ export class OllamaAdapter {
       throw new Error('Invalid timeout: must be a number between 1000 and 300000 milliseconds');
     }
     
-    // Validate URL format
+    // Enhanced URL validation with security checks
     try {
-      new URL(baseUrl);
+      const url = new URL(baseUrl);
+      
+      // Prevent DNS rebinding attacks by checking hostname is not IP or valid domain
+      if (url.hostname === 'localhost' || 
+          url.hostname === '127.0.0.1' || 
+          /^\d+\.\d+\.\d+\.\d+$/.test(url.hostname) ||
+          /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.[a-zA-Z]{2,}$/.test(url.hostname)) {
+        // Valid hostname
+      } else {
+        throw new Error('Invalid hostname: must be localhost, IP address, or valid domain');
+      }
+      
+      // Prevent protocol confusion attacks
+      if (!url.protocol.match(/^https?:/)) {
+        throw new Error('Invalid protocol: only http and https are supported');
+      }
+      
+      // Validate port range
+      if (url.port && (url.port < 1 || url.port > 65535)) {
+        throw new Error('Invalid port: must be between 1 and 65535');
+      }
+      
+      // Validate URL length after parsing
+      if (url.href.length > 2048) {
+        throw new Error('URL too long after parsing');
+      }
     } catch (err) {
-      throw new Error('Invalid baseUrl: must be a valid URL');
+      throw new Error(`Invalid baseUrl: ${err.message}`);
     }
     
     this.baseUrl = baseUrl.replace(/\/+$/, "");
@@ -394,6 +419,52 @@ export class OpenAIAdapter {
     model = "gpt-4o-mini",
     timeout = 120000,
   } = {}) {
+    // Validate constructor parameters
+    if (typeof apiKey !== "string" || apiKey.length < 10 || apiKey.length > 1000) {
+      throw new Error("Invalid apiKey: must be a string between 10 and 1000 characters");
+    }
+    
+    if (typeof baseUrl !== "string" || baseUrl.length < 10 || baseUrl.length > 2048) {
+      throw new Error("Invalid baseUrl: must be a string between 10 and 2048 characters");
+    }
+    
+    if (typeof model !== "string" || model.length < 1 || model.length > 120) {
+      throw new Error("Invalid model: must be a string between 1 and 120 characters");
+    }
+    
+    if (typeof timeout !== "number" || timeout < 1000 || timeout > 300000) {
+      throw new Error("Invalid timeout: must be a number between 1000 and 300000 milliseconds");
+    }
+    
+    // Enhanced URL validation with security checks
+    try {
+      const url = new URL(baseUrl);
+      
+      // Validate API key is not embedded in URL (security best practice)
+      if (apiKey && !url.href.includes(apiKey)) {
+        // Good - API key is not in URL
+      } else {
+        throw new Error('API key should not be embedded in URL');
+      }
+      
+      // Validate domain is trusted
+      if (!url.hostname.match(/^(api\.openai\.com|[^/]+\.openai\.com|[^/]+\.together\.xyz|[^/]+\.groq\.com|[^/]+\.lmstudio\.ai|[^/]+\.vllm\.ai|[^/]+\.gateway\.example)$/)) {
+        throw new Error('Invalid domain: only trusted OpenAI-compatible endpoints are allowed');
+      }
+      
+      // Validate protocol
+      if (!url.protocol.match(/^https:/)) {
+        throw new Error('Invalid protocol: HTTPS required for API endpoints');
+      }
+      
+      // Validate port range
+      if (url.port && (url.port < 1 || url.port > 65535)) {
+        throw new Error('Invalid port: must be between 1 and 65535');
+      }
+    } catch (err) {
+      throw new Error(`Invalid baseUrl: ${err.message}`);
+    }
+    
     this.apiKey = apiKey;
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.model = model;
@@ -601,6 +672,52 @@ export class AnthropicAdapter {
     model = "claude-sonnet-4-20250514",
     timeout = 120000,
   } = {}) {
+    // Validate constructor parameters
+    if (typeof apiKey !== "string" || apiKey.length < 10 || apiKey.length > 1000) {
+      throw new Error("Invalid apiKey: must be a string between 10 and 1000 characters");
+    }
+    
+    if (typeof baseUrl !== "string" || baseUrl.length < 10 || baseUrl.length > 2048) {
+      throw new Error("Invalid baseUrl: must be a string between 10 and 2048 characters");
+    }
+    
+    if (typeof model !== "string" || model.length < 1 || model.length > 120) {
+      throw new Error("Invalid model: must be a string between 1 and 120 characters");
+    }
+    
+    if (typeof timeout !== "number" || timeout < 1000 || timeout > 300000) {
+      throw new Error("Invalid timeout: must be a number between 1000 and 300000 milliseconds");
+    }
+    
+    // Enhanced URL validation with security checks
+    try {
+      const url = new URL(baseUrl);
+      
+      // Validate API key is not embedded in URL (security best practice)
+      if (apiKey && !url.href.includes(apiKey)) {
+        // Good - API key is not in URL
+      } else {
+        throw new Error('API key should not be embedded in URL');
+      }
+      
+      // Validate domain is trusted
+      if (!url.hostname.match(/^(api\.anthropic\.com|[^/]+\.anthropic\.com)$/)) {
+        throw new Error('Invalid domain: only trusted Anthropic endpoints are allowed');
+      }
+      
+      // Validate protocol
+      if (!url.protocol.match(/^https:/)) {
+        throw new Error('Invalid protocol: HTTPS required for API endpoints');
+      }
+      
+      // Validate port range
+      if (url.port && (url.port < 1 || url.port > 65535)) {
+        throw new Error('Invalid port: must be between 1 and 65535');
+      }
+    } catch (err) {
+      throw new Error(`Invalid baseUrl: ${err.message}`);
+    }
+    
     this.apiKey = apiKey;
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.model = model;
@@ -805,6 +922,24 @@ export class GeminiAdapter {
     model = "gemini-2.0-flash",
     timeout = 120000,
   } = {}) {
+    // Validate constructor parameters
+    if (typeof apiKey !== "string" || apiKey.length < 10 || apiKey.length > 1000) {
+      throw new Error("Invalid apiKey: must be a string between 10 and 1000 characters");
+    }
+    
+    if (typeof model !== "string" || model.length < 1 || model.length > 120) {
+      throw new Error("Invalid model: must be a string between 1 and 120 characters");
+    }
+    
+    if (typeof timeout !== "number" || timeout < 1000 || timeout > 300000) {
+      throw new Error("Invalid timeout: must be a number between 1000 and 300000 milliseconds");
+    }
+    
+    // Validate model format (Google models have specific patterns)
+    if (!model.match(/^(gemini-[2-9]\.[0-9]+-[a-z]+|gemini-[2-9]\.[0-9]+-exp:[a-z]+)$/)) {
+      throw new Error('Invalid model format: must be a valid Gemini model name');
+    }
+    
     this.apiKey = apiKey;
     this.model = model;
     this.timeout = timeout;

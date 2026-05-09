@@ -128,7 +128,22 @@ const ensureString = (value, field, min, max) => {
     /window\./gi,
     /global\./gi,
     /\x00/g, // Null bytes
-    /[\x01-\x08\x0b\x0c\x0e-\x1f]/g // Control characters
+    /[\x01-\x08\x0b\x0c\x0e-\x1f]/g, // Control characters
+    /;\s*--/g, // SQL comment
+    /'/g, // Single quote
+    /"/g, // Double quote
+    /`/g, // Backtick
+    /\\/g, // Escape character
+    /SELECT\s+/gi,
+    /INSERT\s+/gi,
+    /UPDATE\s+/gi,
+    /DELETE\s+/gi,
+    /DROP\s+/gi,
+    /CREATE\s+/gi,
+    /ALTER\s+/gi,
+    /UNION\s+/gi,
+    /EXEC\s+/gi,
+    /EXECUTE\s+/gi
   ];
   
   for (const pattern of dangerousPatterns) {
@@ -140,6 +155,11 @@ const ensureString = (value, field, min, max) => {
   // Additional security: check for Unicode control characters
   if (normalized.normalize('NFKC') !== normalized) {
     throw new Error(`${field} contains potentially dangerous Unicode characters.`);
+  }
+  
+  // Final validation: check for any remaining control characters
+  if (/[\u0000-\u001F\u007F-\u009F]/.test(normalized)) {
+    throw new Error(`${field} contains control characters.`);
   }
   
   return normalized;
