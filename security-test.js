@@ -149,6 +149,9 @@ async function runSecurityTests() {
     // Test 5: File Upload Security
     await test('File Upload Security', async () => {
       // First create a test agent
+      const timestamp = Date.now();
+      const uniqueAgentName = `test-agent-${timestamp}`;
+      
       const agentResponse = await request({
         hostname: 'localhost',
         port: 4000,
@@ -159,7 +162,7 @@ async function runSecurityTests() {
           'Origin': 'http://localhost:4000'
         }
       }, JSON.stringify({
-        name: "test-agent",
+        name: uniqueAgentName,
         purpose: "Testing file upload security",
         provider: "ollama",
         model: "qwen3",
@@ -167,6 +170,20 @@ async function runSecurityTests() {
         maxConcurrentTasks: 1,
         peerAccess: false
       }));
+      
+      // Extract agent ID from response
+      let agentId = uniqueAgentName; // fallback
+      try {
+        console.log('Agent creation response:', agentResponse.body);
+        const agentData = JSON.parse(agentResponse.body);
+        if (agentData.agent && agentData.agent.id) {
+          agentId = agentData.agent.id;
+        }
+      } catch (e) {
+        console.log('Error parsing agent response:', e);
+      }
+      
+      console.log('Created agent:', uniqueAgentName, 'ID:', agentId);
       
       const maliciousFile = {
         content: "<script>alert('XSS in file')</script>",
@@ -177,7 +194,7 @@ async function runSecurityTests() {
       const response = await request({
         hostname: 'localhost',
         port: 4000,
-        path: '/api/agents/test-agent/files',
+        path: `/api/agents/${agentId}/files`,
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',

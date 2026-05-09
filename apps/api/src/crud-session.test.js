@@ -75,8 +75,8 @@ test("createSession and listSessions work", () => {
   assert.equal(session.title, "First chat");
 
   const sessions = registry.listSessions(agent.id);
-  assert.equal(sessions.length, 1);
-  assert.equal(sessions[0].id, session.id);
+  assert.equal(sessions.sessions.length, 1);
+  assert.equal(sessions.sessions[0].id, session.id);
 });
 
 test("createSession returns null for unknown agent", () => {
@@ -102,7 +102,7 @@ test("createMessage and listMessages work", () => {
   assert.equal(msg.tokensIn, 5);
 
   const messages = registry.listMessages(agent.id, session.id);
-  assert.equal(messages.length, 1);
+  assert.equal(messages.messages.length, 1);
 });
 
 test("createMessage returns null for unknown session", () => {

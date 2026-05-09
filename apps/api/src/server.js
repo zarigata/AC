@@ -2415,22 +2415,14 @@ const applyRateLimit = (request, response) => {
     
     // Validate client IP format with enhanced security
     if (!clientIP || typeof clientIP !== 'string') {
-      response.writeHead(400, { 
-        'Content-Type': 'application/json; charset=utf-8',
-        'X-Content-Type-Options': 'nosniff'
-      });
-      response.end(JSON.stringify({ error: 'Invalid client IP' }));
+      sendError(response, 400, 'Invalid Client IP', 'Invalid client IP address');
       return false;
     }
     
     // Validate IP address format (prevent IP spoofing)
     const ipRegex = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$|^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$/;
     if (!ipRegex.test(clientIP.toString())) {
-      response.writeHead(400, { 
-        'Content-Type': 'application/json; charset=utf-8',
-        'X-Content-Type-Options': 'nosniff'
-      });
-      response.end(JSON.stringify({ error: 'Invalid IP address format' }));
+      sendError(response, 400, 'Invalid IP Format', 'Invalid IP address format');
       return false;
     }
     
@@ -2444,20 +2436,10 @@ const applyRateLimit = (request, response) => {
     if (rateLimit.has(rateLimitKey)) {
       const data = rateLimit.get(rateLimitKey);
       if (timestamp - data.timestamp < RATE_LIMIT_WINDOW && data.count >= MAX_REQUESTS_PER_MINUTE) {
-        response.writeHead(429, {
-          'Content-Type': 'application/json; charset=utf-8',
-          'X-RateLimit-Limit': MAX_REQUESTS_PER_MINUTE,
-          'X-RateLimit-Remaining': 0,
-          'Retry-After': Math.ceil((RATE_LIMIT_WINDOW - (timestamp - data.timestamp)) / 1000),
-          'X-Content-Type-Options': 'nosniff',
-          'X-RateLimit-Reset': Math.ceil((timestamp + RATE_LIMIT_WINDOW) / 1000)
-        });
-        response.end(JSON.stringify({ 
-          error: "Rate limit exceeded",
-          message: `Max ${MAX_REQUESTS_PER_MINUTE} requests per minute per client allowed`,
+        sendError(response, 429, 'Rate Limit Exceeded', `Max ${MAX_REQUESTS_PER_MINUTE} requests per minute per client allowed`, {
           retryAfter: Math.ceil((RATE_LIMIT_WINDOW - (timestamp - data.timestamp)) / 1000),
           timestamp: timestamp
-        }));
+        });
         return false;
       }
       
@@ -2475,11 +2457,7 @@ const applyRateLimit = (request, response) => {
   } catch (err) {
     console.error('Rate limit error:', err);
     // Don't expose error details to client for security
-    response.writeHead(500, { 
-      'Content-Type': 'application/json; charset=utf-8',
-      'X-Content-Type-Options': 'nosniff'
-    });
-    response.end(JSON.stringify({ error: 'Internal server error' }));
+    sendError(response, 500, 'Internal Server Error', 'Rate limiting service temporarily unavailable');
     return false;
   }
 };

@@ -43,9 +43,10 @@ const validateInput = (input, rules, fieldName) => {
   
   // Check for prototype pollution attempts
   if (input && typeof input === 'object') {
+    // Check for prototype pollution attempts - only check own properties
     const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
     for (const key of dangerousKeys) {
-      if (key in input) {
+      if (Object.prototype.hasOwnProperty.call(input, key)) {
         throw new Error(`${fieldName} contains potentially dangerous property: ${key}`);
       }
     }
@@ -830,8 +831,7 @@ export class AgentRegistry {
       // Verify session belongs to agent
       const session = this.db.prepare("SELECT * FROM sessions WHERE id = ? AND agentId = ?").get(sessionId, agentId);
       if (!session) {
-        console.error('Session not found:', { agentId, sessionId });
-        throw new Error('Session not found');
+        return null;
       }
 
       const id = crypto.randomUUID();
@@ -1197,8 +1197,8 @@ export class AgentRegistry {
       }
       
       // Determine file type
-      const fileExt = extname(filename).toLowerCase().substring(1);
-      const fileType = fileExt || 'unknown';
+      const fileExt2 = extname(filename).toLowerCase().substring(1);
+      const fileType = fileExt2 || 'unknown';
       
       // Create file record
       const fileId = crypto.randomUUID();
