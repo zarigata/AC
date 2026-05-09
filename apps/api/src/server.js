@@ -215,6 +215,14 @@ const sendJson = (response, statusCode, payload) => {
   // Simple sendJson that only handles 3-parameter calls
   const origin = response.getHeader('origin');
   
+  // Debug logging
+  console.log('DEBUG sendJson:', {
+    statusCode: typeof statusCode,
+    statusCodeValue: statusCode,
+    payload: typeof payload,
+    payloadPreview: typeof payload === 'object' ? JSON.stringify(payload).substring(0, 100) : payload
+  });
+  
   const headers = {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
@@ -495,7 +503,7 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/health") {
-      return sendJson(response, request, 200, {
+      return sendJson(response, 200, {
         ok: true,
         service: "zsiistant-api",
         version: VERSION,
@@ -683,11 +691,11 @@ const server = createServer(async (request, response) => {
           const tokensOut = body.tokensOut || 0;
           
           if (!Number.isInteger(tokensIn) || tokensIn < 0 || tokensIn > 1000000) {
-            return sendJson(response, { error: "Invalid tokensIn value: must be a positive integer less than 1, 000,000" });
+            return sendJson(response, 400, { error: "Invalid tokensIn value: must be a positive integer less than 1, 000,000" });
           }
           
           if (!Number.isInteger(tokensOut) || tokensOut < 0 || tokensOut > 1000000) {
-            return sendJson(response, { error: "Invalid tokensOut value: must be a positive integer less than 1, 000,000" });
+            return sendJson(response, 400, { error: "Invalid tokensOut value: must be a positive integer less than 1, 000,000" });
           }
           
           // Create message with validated data
@@ -738,7 +746,7 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/settings") {
       // Return current settings
-      return sendJson(response, request, 200, {
+      return sendJson(response, 200, {
         ...settings,
         providers: listProviders().length // Update providers count dynamically
       });
@@ -841,7 +849,7 @@ const server = createServer(async (request, response) => {
           newSettings: { ...settings }
         });
         
-        return sendJson(response, request, 200, {
+        return sendJson(response, 200, {
           settings: { ...settings },
           updated: Object.keys(updates),
           timestamp: Date.now()
@@ -858,7 +866,7 @@ const server = createServer(async (request, response) => {
     if (usageMatch && request.method === "GET") {
       const usage = registry.getAgentUsage(usageMatch[1]);
       if (!usage) return sendJson(response, 404, { error: "Agent not found" });
-      return sendJson(response, usage, usage);
+      return sendJson(response, 200, usage);
     }
 
     /* ─── Global Usage Stats ─── */
@@ -874,7 +882,7 @@ const server = createServer(async (request, response) => {
         }
         
         const usage = registry.getUsageStats(period);
-        return sendJson(response, usage, usage);
+        return sendJson(response, 200, usage);
       } catch (err) {
         return sendJson(response, 500, { error: "Internal server error" });
       }
@@ -933,7 +941,7 @@ const server = createServer(async (request, response) => {
           results[name] = { ok: false, error: e.message };
         }
       }
-      return sendJson(response, results, results);
+      return sendJson(response, 200, results);
     }
 
     /* ─── Provider Failover Configuration ─── */
@@ -1082,7 +1090,7 @@ const server = createServer(async (request, response) => {
             return sendJson(response, 400, { error: `Failed to switch provider: ${err.message}` });
           }
         } else {
-          return sendJson(response, { error: "Invalid action. Must be: create, update, delete, or switch" });
+          return sendJson(response, 400, { error: "Invalid action. Must be: create, update, delete, or switch" });
         }
       } catch (err) {
         return sendJson(response, 400, { error: "Invalid request body" });
@@ -1565,13 +1573,10 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/agents") {
       try {
-        console.log('DEBUG: /api/agents called');
         const agents = registry.listAgents();
-        console.log('DEBUG: Found agents:', agents.length);
         
         // Limit response size to prevent DoS
         if (agents.length > 1000) {
-          console.log('DEBUG: Truncating agents response');
           response.writeHead(200, {
             "Content-Type": "application/json; charset=utf-8",
             "Access-Control-Allow-Origin": "http://localhost:4000"
@@ -1582,14 +1587,12 @@ const server = createServer(async (request, response) => {
           }));
         }
         
-        console.log('DEBUG: Sending agents response:', JSON.stringify({ agents }).substring(0, 100));
         response.writeHead(200, {
           "Content-Type": "application/json; charset=utf-8",
           "Access-Control-Allow-Origin": "http://localhost:4000"
         });
         return response.end(JSON.stringify({ agents }));
       } catch (err) {
-        console.error('DEBUG: Error in /api/agents:', err);
         response.writeHead(500, {
           "Content-Type": "application/json; charset=utf-8",
           "Access-Control-Allow-Origin": "http://localhost:4000"
