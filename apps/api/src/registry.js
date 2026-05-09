@@ -4,15 +4,78 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { inspect } from "node:util";
 
-const sanitizeContent = (content) => {
-  if (typeof content !== 'string') return content;
+const sanitizeContent = (content, fieldName = 'content') => {
+  if (typeof content !== 'string') {
+    if (content === null || content === undefined) {
+      return '';
+    }
+    throw new Error(`${fieldName} must be a string`);
+  }
   
   // Remove potentially dangerous HTML/JS content
-  return content
+  let sanitized = content
     .replace(/<script[^>]*>.*?<\/script>/gi, '')
     .replace(/javascript:/gi, '')
     .replace(/data:/gi, '')
-    .replace(/<iframe[^>]*>.*?<\/iframe>/gi, '');
+    .replace(/<iframe[^>]*>.*?<\/iframe>/gi, '')
+    .replace(/<object[^>]*>.*?<\/object>/gi, '')
+    .replace(/<embed[^>]*>.*?<\/embed>/gi, '')
+    .replace(/<style[^>]*>.*?<\/style>/gi, '')
+    .replace(/<meta[^>]*>.*?<\/meta>/gi, '')
+    .replace(/<link[^>]*>.*?<\/link>/gi, '')
+    .replace(/on\w+\s*=/gi, '');
+  
+  // Remove null bytes and control characters
+  sanitized = sanitized.replace(/\x00/g, '').replace(/[\x01-\x08\x0b\x0c\x0e-\x1f]/g, '');
+  
+  return sanitized;
+};
+
+// Comprehensive input validation
+const validateInput = (input, rules, fieldName) => {
+  if (!input && input !== '' && input !== 0 && input !== false) {
+    throw new Error(`${fieldName} is required`);
+  }
+  
+  for (const [key, rule] of Object.entries(rules)) {
+    const value = input[key];
+    
+    if (rule.required && (value === undefined || value === null || value === '')) {
+      throw new Error(`${fieldName}.${key} is required`);
+    }
+    
+    if (value !== undefined && value !== null) {
+      if (rule.type && typeof value !== rule.type) {
+        throw new Error(`${fieldName}.${key} must be a ${rule.type}`);
+      }
+      
+      if (rule.minLength && value.length < rule.minLength) {
+        throw new Error(`${fieldName}.${key} must be at least ${rule.minLength} characters`);
+      }
+      
+      if (rule.maxLength && value.length > rule.maxLength) {
+        throw new Error(`${fieldName}.${key} must be no more than ${rule.maxLength} characters`);
+      }
+      
+      if (rule.min !== undefined && Number(value) < rule.min) {
+        throw new Error(`${fieldName}.${key} must be at least ${rule.min}`);
+      }
+      
+      if (rule.max !== undefined && Number(value) > rule.max) {
+        throw new Error(`${fieldName}.${key} must be no more than ${rule.max}`);
+      }
+      
+      if (rule.enum && !rule.enum.includes(value)) {
+        throw new Error(`${fieldName}.${key} must be one of: ${rule.enum.join(', ')}`);
+      }
+      
+      if (rule.pattern && !rule.pattern.test(value)) {
+        throw new Error(`${fieldName}.${key} format is invalid`);
+      }
+    }
+  }
+  
+  return true;
 };
 
 import {
@@ -176,19 +239,36 @@ export class AgentRegistry {
 
   createAgent(input) {
     try {
-      // Validate input structure
+      // Validate input structure with comprehensive rules
       if (!input || typeof input !== 'object') {
         throw new Error('Invalid input: must be an object');
       }
       
-      const parsed = parseCreateAgentInput(input);
+      // Use comprehensive input validation
+      validateInput(input, {
+        name: { required: true, type: 'string', minLength: 2, maxLength: 80 },
+        purpose: { required: true, type: 'string', minLength: 10, maxLength: 240 },
+        provider: { required: true, type: 'string', minLength: 2, maxLength: 80 },
+        model: { required: true, type: 'string', minLength: 2, maxLength: 120 },
+        isolationMode: { required: true, type: 'string', enum: ['isolated', 'selective', 'mesh'] },
+        maxConcurrentTasks: { required: true, type: 'number', min: 1, max: 32 },
+        peerAccess: { required: true, type: 'boolean' }
+      }, 'Agent input');
 
+      // Check for reserved names
+      if (input.name.toLowerCase().includes('admin') || 
+          input.name.toLowerCase().includes('system') || 
+          input.name.toLowerCase().includes('root')) {
+        throw new Error('Invalid agent name: reserved name not allowed');
+      }
+      
       // Check agent limit with error handling
       const currentAgents = this.listAgents();
       if (currentAgents.length >= 100) {
         throw new Error("This machine already has 100 registered agents.");
       }
 
+      const parsed = parseCreateAgentInput(input);
       const id = crypto.randomUUID();
       const timestamp = now();
       const agent = {
@@ -199,18 +279,9 @@ export class AgentRegistry {
         ...parsed
       };
 
-      // Validate agent data before insertion with additional checks
-      if (!agent.name || typeof agent.name !== 'string' || agent.name.length > 80 || agent.name.length < 2) {
-        throw new Error('Invalid agent name: must be 2-80 characters');
-      }
-      
-      if (!agent.purpose || typeof agent.purpose !== 'string' || agent.purpose.length > 240 || agent.purpose.length < 10) {
-        throw new Error('Invalid agent purpose: must be 10-240 characters');
-      }
-      
       // Sanitize inputs
-      agent.name = agent.name.trim();
-      agent.purpose = agent.purpose.trim();
+      agent.name = sanitizeContent(agent.name, 'agent name').trim();
+      agent.purpose = sanitizeContent(agent.purpose, 'agent purpose').trim();
       
       // Begin transaction for data consistency
       this.db.exec('BEGIN TRANSACTION');
@@ -588,19 +659,41 @@ export class AgentRegistry {
     }
   }
 
-  listSessions(agentId) {
+  listSessions(agentId, options = {}) {
     try {
       // Validate agent ID format
       if (!agentId || typeof agentId !== 'string' || agentId.length > 64) {
         return [];
       }
       
-      return this.db
-        .prepare("SELECT * FROM sessions WHERE agentId = ? ORDER BY createdAt DESC LIMIT 1000")
-        .all(agentId);
+      // Apply pagination with defaults
+      const page = Math.max(1, options.page || 1);
+      const limit = Math.min(Math.max(options.limit || 50, 1), 100); // Max 100 per page
+      const offset = (page - 1) * limit;
+      
+      // Get total count for pagination metadata
+      const countResult = this.db.prepare("SELECT COUNT(*) as total FROM sessions WHERE agentId = ?").get(agentId);
+      const total = countResult.total;
+      
+      // Get paginated results
+      const sessions = this.db
+        .prepare("SELECT * FROM sessions WHERE agentId = ? ORDER BY createdAt DESC LIMIT ? OFFSET ?")
+        .all(agentId, limit, offset);
+      
+      return {
+        sessions,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+          hasNext: page * limit < total,
+          hasPrev: page > 1
+        }
+      };
     } catch (err) {
       console.error('Error listing sessions:', err);
-      return [];
+      return { sessions: [], pagination: { page: 1, limit: 50, total: 0, totalPages: 0, hasNext: false, hasPrev: false } };
     }
   }
 
@@ -625,68 +718,59 @@ export class AgentRegistry {
     try {
       // Validate agent and session ID formats with additional checks
       if (!agentId || typeof agentId !== 'string' || agentId.length > 64 || agentId.length < 1) {
-        return null;
+        throw new Error('Invalid agent ID');
       }
       
       if (!sessionId || typeof sessionId !== 'string' || sessionId.length > 64 || sessionId.length < 1) {
-        return null;
+        throw new Error('Invalid session ID');
       }
       
+      // Verify session belongs to agent
       const session = this.db.prepare("SELECT * FROM sessions WHERE id = ? AND agentId = ?").get(sessionId, agentId);
       if (!session) {
         console.error('Session not found:', { agentId, sessionId });
-        return null;
+        throw new Error('Session not found');
       }
 
       const id = crypto.randomUUID();
       const timestamp = now();
       
-      // Validate and sanitize message input with comprehensive checks
-      if (!input || typeof input !== 'object') {
-        throw new Error('Invalid message input: must be an object');
-      }
+      // Validate message input with comprehensive rules
+      validateInput(input, {
+        role: { required: true, type: 'string', enum: ['user', 'assistant', 'system'] },
+        content: { required: true, type: 'string', minLength: 1, maxLength: 50000 },
+        tokensIn: { required: false, type: 'number', min: 0, max: 1000000 },
+        tokensOut: { required: false, type: 'number', min: 0, max: 1000000 },
+        model: { required: false, type: 'string', maxLength: 120 }
+      }, 'Message input');
       
-      // Validate role
-      if (!input.role || !['user', 'assistant', 'system'].includes(input.role)) {
-        throw new Error('Invalid message role: must be user, assistant, or system');
-      }
+      // Sanitize content with enhanced security
+      const content = sanitizeContent(input.content, 'message content');
       
-      // Validate and sanitize content
-      let content = input.content || "";
-      if (typeof content !== 'string') {
-        throw new Error('Message content must be a string');
-      }
-      
-      // Enhanced content sanitization
-      content = sanitizeContent(content);
-      
-      // Additional security checks
-      if (content.length > 50000) {
-        throw new Error('Message content too long (max 50000 characters)');
-      }
-      
-      if (content.trim().length === 0) {
-        throw new Error('Message content cannot be empty');
+      // Additional security validation
+      if (content.length === 0) {
+        throw new Error('Message content cannot be empty after sanitization');
       }
       
       // Check for potential injection attacks
       const dangerousPatterns = [
-        /<script[^>]*>/gi,
-        /javascript:/gi,
-        /data:/gi,
-        /on\w+\s*=/gi,
-        /<iframe[^>]*>/gi,
-        /<object[^>]*>/gi,
-        /<embed[^>]*>/gi
+        /eval\(/gi,
+        /exec\(/gi,
+        /Function\(/gi,
+        /setTimeout\s*\(/gi,
+        /setInterval\s*\(/gi,
+        /document\./gi,
+        /window\./gi,
+        /global\./gi
       ];
       
       for (const pattern of dangerousPatterns) {
         if (pattern.test(content)) {
-          throw new Error('Message contains invalid content');
+          throw new Error('Message contains potentially dangerous content');
         }
       }
       
-      // Validate token counts with bounds checking
+      // Use provided token counts or defaults with validation
       const tokensIn = input.tokensIn || 0;
       const tokensOut = input.tokensOut || 0;
       
@@ -748,26 +832,45 @@ export class AgentRegistry {
     }
   }
 
-  listMessages(agentId, sessionId, limit = 100) {
+  listMessages(agentId, sessionId, options = {}) {
     try {
       // Validate agent and session ID formats
       if (!agentId || typeof agentId !== 'string' || agentId.length > 64) {
-        return [];
+        return { messages: [], pagination: { page: 1, limit: 50, total: 0, totalPages: 0, hasNext: false, hasPrev: false } };
       }
       
       if (!sessionId || typeof sessionId !== 'string' || sessionId.length > 64) {
-        return [];
+        return { messages: [], pagination: { page: 1, limit: 50, total: 0, totalPages: 0, hasNext: false, hasPrev: false } };
       }
       
-      // Enforce reasonable limit
-      const safeLimit = Math.min(Math.max(Number(limit), 1), 1000);
+      // Apply pagination with defaults
+      const page = Math.max(1, options.page || 1);
+      const limit = Math.min(Math.max(options.limit || 50, 1), 200); // Max 200 per page for messages
+      const offset = (page - 1) * limit;
       
-      return this.db
-        .prepare("SELECT * FROM messages WHERE sessionId = ? AND sessionId IN (SELECT id FROM sessions WHERE agentId = ?) ORDER BY createdAt ASC LIMIT ?")
-        .all(sessionId, agentId, String(safeLimit));
+      // Get total count for pagination metadata
+      const countResult = this.db.prepare("SELECT COUNT(*) as total FROM messages WHERE sessionId = ? AND sessionId IN (SELECT id FROM sessions WHERE agentId = ?)").get(sessionId, agentId);
+      const total = countResult.total;
+      
+      // Get paginated results
+      const messages = this.db
+        .prepare("SELECT * FROM messages WHERE sessionId = ? AND sessionId IN (SELECT id FROM sessions WHERE agentId = ?) ORDER BY createdAt ASC LIMIT ? OFFSET ?")
+        .all(sessionId, agentId, limit, offset);
+      
+      return {
+        messages,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+          hasNext: page * limit < total,
+          hasPrev: page > 1
+        }
+      };
     } catch (err) {
       console.error('Error listing messages:', err);
-      return [];
+      return { messages: [], pagination: { page: 1, limit: 50, total: 0, totalPages: 0, hasNext: false, hasPrev: false } };
     }
   }
 

@@ -107,13 +107,35 @@ const ensureString = (value, field, min, max) => {
     throw new Error(`${field} must be between ${min} and ${max} characters.`);
   }
 
-  // Basic sanitization to prevent injection attacks
-  if (normalized.includes('<script>') || normalized.includes('javascript:') || 
-      normalized.includes('data:') || normalized.includes('<iframe>')) {
-    throw new Error(`${field} contains invalid characters.`);
+  // Enhanced sanitization to prevent injection attacks
+  const dangerousPatterns = [
+    /<script[^>]*>/gi,
+    /javascript:/gi,
+    /data:/gi,
+    /<iframe[^>]*>/gi,
+    /<object[^>]*>/gi,
+    /<embed[^>]*>/gi,
+    /<style[^>]*>/gi,
+    /<meta[^>]*>/gi,
+    /<link[^>]*>/gi,
+    /on\w+\s*=/gi,
+    /eval\(/gi,
+    /exec\(/gi,
+    /Function\(/gi,
+    /setTimeout\s*\(/gi,
+    /setInterval\s*\(/gi
+  ];
+  
+  for (const pattern of dangerousPatterns) {
+    if (pattern.test(normalized)) {
+      throw new Error(`${field} contains invalid or potentially dangerous content.`);
+    }
   }
-
-  return normalized;
+  
+  // Remove null bytes and control characters
+  const sanitized = normalized.replace(/\x00/g, '').replace(/[\x01-\x08\x0b\x0c\x0e-\x1f]/g, '');
+  
+  return sanitized;
 };
 
 const ensureBoolean = (value, field) => {
@@ -129,9 +151,17 @@ const ensureInteger = (value, field, min, max) => {
     throw new Error(`${field} must be an integer between ${min} and ${max}.`);
   }
 
-  // Ensure it's not a dangerous value
-  if (field === 'maxConcurrentTasks' && value > 100) {
-    throw new Error(`${field} cannot exceed 100 for security reasons.`);
+  // Security checks for dangerous values
+  const dangerousFields = ['maxConcurrentTasks', 'maxTokens', 'timeout', 'limit'];
+  if (dangerousFields.includes(field)) {
+    if (value > 10000) { // Reasonable upper limit
+      throw new Error(`${field} cannot exceed 10000 for security reasons.`);
+    }
+    
+    // Prevent extremely small values that could cause issues
+    if (value < 1 && field !== 'timeout') {
+      throw new Error(`${field} must be at least 1 for security reasons.`);
+    }
   }
 
   return value;

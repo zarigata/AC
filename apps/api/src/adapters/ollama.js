@@ -7,6 +7,26 @@ import { request as httpsRequest } from "node:https";
  */
 export class OllamaAdapter {
   constructor({ baseUrl = "http://127.0.0.1:11434", model = "qwen3:1.7b", timeout = 120000 } = {}) {
+    // Validate constructor parameters
+    if (typeof baseUrl !== 'string' || baseUrl.length === 0 || baseUrl.length > 2048) {
+      throw new Error('Invalid baseUrl: must be a string between 1 and 2048 characters');
+    }
+    
+    if (typeof model !== 'string' || model.length === 0 || model.length > 120) {
+      throw new Error('Invalid model: must be a string between 1 and 120 characters');
+    }
+    
+    if (typeof timeout !== 'number' || timeout < 1000 || timeout > 300000) {
+      throw new Error('Invalid timeout: must be a number between 1000 and 300000 milliseconds');
+    }
+    
+    // Validate URL format
+    try {
+      new URL(baseUrl);
+    } catch (err) {
+      throw new Error('Invalid baseUrl: must be a valid URL');
+    }
+    
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.model = model;
     this.timeout = timeout;
@@ -19,24 +39,55 @@ export class OllamaAdapter {
         throw new Error('Messages array is required and cannot be empty');
       }
       
-      // Validate messages structure
-      for (const msg of messages) {
-        if (!msg.role || !msg.content) {
-          throw new Error('Each message must have role and content properties');
+      // Validate messages with comprehensive checks
+      if (messages.length > 100) {
+        throw new Error('Messages array cannot exceed 100 messages');
+      }
+      
+      for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i];
+        if (!msg || typeof msg !== 'object') {
+          throw new Error(`Message ${i} must be an object`);
         }
+        
+        if (!msg.role || typeof msg.role !== 'string') {
+          throw new Error(`Message ${i} role is required and must be a string`);
+        }
+        
         if (!['user', 'assistant', 'system'].includes(msg.role)) {
-          throw new Error(`Invalid role: ${msg.role}`);
+          throw new Error(`Invalid role in message ${i}: ${msg.role}`);
         }
-        if (typeof msg.content !== 'string' || msg.content.trim().length === 0) {
-          throw new Error('Message content must be a non-empty string');
+        
+        if (!msg.content || typeof msg.content !== 'string') {
+          throw new Error(`Message ${i} content is required and must be a string`);
+        }
+        
+        if (msg.content.trim().length === 0) {
+          throw new Error(`Message ${i} content cannot be empty`);
+        }
+        
+        if (msg.content.length > 50000) {
+          throw new Error(`Message ${i} content is too long (max 50000 characters)`);
         }
       }
       
       const model = options.model || this.model;
       
       // Validate model
-      if (!model || typeof model !== 'string' || model.trim().length === 0) {
-        throw new Error('Model name is required');
+      if (!model || typeof model !== 'string' || model.trim().length === 0 || model.length > 120) {
+        throw new Error('Model name is required and must be 1-120 characters');
+      }
+      
+      // Validate options
+      const temperature = options.temperature ?? 0.3;
+      const maxTokens = options.maxTokens ?? 512;
+      
+      if (typeof temperature !== 'number' || temperature < 0 || temperature > 2) {
+        throw new Error('Temperature must be a number between 0 and 2');
+      }
+      
+      if (typeof maxTokens !== 'number' || maxTokens < 1 || maxTokens > 32000) {
+        throw new Error('maxTokens must be a number between 1 and 32000');
       }
       
       const body = JSON.stringify({
@@ -45,12 +96,17 @@ export class OllamaAdapter {
         stream: false,
         think: false,
         options: {
-          temperature: Math.max(0, Math.min(2, options.temperature ?? 0.3)),
-          num_predict: Math.max(1, Math.min(32000, options.maxTokens ?? 512))
+          temperature: temperature,
+          num_predict: Math.max(1, Math.min(32000, maxTokens))
         }
       });
 
-      const url = new URL("/api/chat", this.baseUrl);
+      // Validate URL before making request
+      try {
+        const url = new URL("/api/chat", this.baseUrl);
+      } catch (err) {
+        throw new Error('Invalid URL construction for chat endpoint');
+      }
 
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
