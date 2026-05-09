@@ -322,7 +322,7 @@ const databasePath = process.env.ZSIISTANT_DB_PATH ?? new URL("../data/zsiistant
 const webRoot = fileURLToPath(new URL("../../web/", import.meta.url));
 
 const registry = new AgentRegistry({ databasePath });
-registry.seed();
+try { registry.seed(); } catch (seedErr) { console.error("Seed error (non-fatal):", seedErr.message); }
 
 const ALLOWED_ORIGINS = [
   "http://localhost:3000",
@@ -924,7 +924,8 @@ const server = createServer(async (request, response) => {
         }
         
         if (request.method === "GET") {
-          const messages = registry.listMessages(agentId, sessionId);
+          const messagesResult = registry.listMessages(agentId, sessionId);
+          const messages = messagesResult.messages || [];
           return sendJson(response, 200, { messages });
         }
 
@@ -1201,8 +1202,8 @@ const server = createServer(async (request, response) => {
         model: session.model,
         createdAt: session.createdAt,
         updatedAt: session.updatedAt,
-        messageCount: registry.listMessages(agentId, session.id).length,
-        recentMessages: registry.listMessages(agentId, session.id).slice(-5) // Last 5 messages
+        messageCount: (registry.listMessages(agentId, session.id).messages || []).length,
+        recentMessages: (registry.listMessages(agentId, session.id).messages || []).slice(-5) // Last 5 messages
       })).slice(0, 10); // Limit to 10 most recent sessions
 
       // Get usage stats
@@ -1549,7 +1550,7 @@ const server = createServer(async (request, response) => {
         });
 
         // Build message history for provider
-        const history = registry.listMessages(agentId, session.id).map((m) => ({
+        const history = (registry.listMessages(agentId, session.id).messages || []).map((m) => ({
           role: m.role,
           content: m.content
         }));
@@ -1652,7 +1653,7 @@ const server = createServer(async (request, response) => {
       });
 
       // Build message history for provider
-      const history = registry.listMessages(agentId, session.id).map((m) => ({
+      const history = (registry.listMessages(agentId, session.id).messages || []).map((m) => ({
         role: m.role,
         content: m.content
       }));

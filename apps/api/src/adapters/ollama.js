@@ -24,13 +24,9 @@ export class OllamaAdapter {
     try {
       const url = new URL(baseUrl);
       
-      // Prevent DNS rebinding attacks by checking hostname is not IP or valid domain
-      if (url.hostname === 'localhost' || 
-          url.hostname === '127.0.0.1' || 
-          /^\d+\.\d+\.\d+\.\d+$/.test(url.hostname) ||
-          /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.[a-zA-Z]{2,}$/.test(url.hostname)) {
-        // Valid hostname
-      } else {
+      // Validate hostname: localhost, IP, or dotted hostname
+      const hostnameRe = /^(localhost|127\.0\.0\.1|\d+\.\d+\.\d+\.\d+|[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,})$/;
+      if (!hostnameRe.test(url.hostname)) {
         throw new Error('Invalid hostname: must be localhost, IP address, or valid domain');
       }
       
@@ -159,12 +155,8 @@ export class OllamaAdapter {
         }
       });
 
-      // Validate URL before making request
-      try {
-        const url = new URL("/api/chat", this.baseUrl);
-      } catch (err) {
-        throw new Error('Invalid URL construction for chat endpoint');
-      }
+      // Build URL for chat endpoint
+      const chatUrl = new URL("/api/chat", this.baseUrl);
 
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
@@ -174,7 +166,7 @@ export class OllamaAdapter {
 
         let req;
         try {
-          req = request(url, {
+          req = request(chatUrl, {
             method: "POST",
             headers: { 
               "Content-Type": "application/json",
