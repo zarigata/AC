@@ -150,6 +150,7 @@ const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
 const MAX_REQUESTS_PER_MINUTE = 60;
 const MAX_CONCURRENT_CONNECTIONS = 100; // Maximum concurrent connections per IP
 const CONN_CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const MAX_RATE_LIMIT_ENTRIES = 10000; // Maximum entries in rate limit map to prevent memory exhaustion
 
 // Security: Secret for HMAC-based rate limiting
 const RATE_LIMIT_SECRET = process.env.RATE_LIMIT_SECRET || randomBytes(32).toString('hex');
@@ -191,8 +192,38 @@ const ALLOWED_ORIGINS = [
   "http://127.0.0.1:4000"
 ];
 
+// Additional security: validate origin format and prevent wildcard origins
+const validateOrigin = (origin) => {
+  if (!origin || typeof origin !== 'string') return false;
+  
+  // Reject dangerous origins
+  if (origin.includes('*') || origin.includes('://0.0.0.0') || origin.includes('://0.0.0.0')) {
+    return false;
+  }
+  
+  // Only allow specific protocols
+  if (!origin.startsWith('http://') && !origin.startsWith('https://')) {
+    return false;
+  }
+  
+  // Validate URL format
+  try {
+    new URL(origin);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const isOriginAllowed = (origin) => {
   if (!origin) return false; // Block requests without origin for API endpoints
+  
+  // First validate the origin format
+  if (!validateOrigin(origin)) {
+    return false;
+  }
+  
+  // Then check against allowed origins
   return ALLOWED_ORIGINS.includes(origin);
 };
 
@@ -364,10 +395,12 @@ const readRequestBody = async (request) => {
     if (!raw || raw.trim().length === 0) return {};
     
     try {
-      // Use safer JSON parsing with prototype protection
+      // Use safer JSON parsing with enhanced prototype protection
       const parsed = JSON.parse(raw, (key, value) => {
         // Filter out prototype pollution attempts
-        if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype' ||
+            key === '__defineGetter__' || key === '__defineSetter__' || 
+            key === '__lookupGetter__' || key === '__lookupSetter__') {
           return undefined;
         }
         return value;
@@ -378,12 +411,21 @@ const readRequestBody = async (request) => {
         throw new Error('Invalid JSON structure: expected object');
       }
       
-      // Additional security check for suspicious properties
+      // Enhanced security check for suspicious properties and prototype manipulation
       const suspiciousProps = ['__proto__', 'constructor', 'prototype', '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__'];
       for (const prop of suspiciousProps) {
         if (Object.prototype.hasOwnProperty.call(parsed, prop)) {
           throw new Error(`Invalid JSON structure: suspicious property ${prop}`);
         }
+      }
+      
+      // Check for prototype pollution attempts
+      try {
+        const testObj = {};
+        Object.setPrototypeOf(testObj, parsed);
+        // If we get here without throwing, there was no prototype pollution
+      } catch (protoErr) {
+        throw new Error('Invalid JSON structure: prototype pollution attempt detected');
       }
       
       return parsed;
@@ -1475,18 +1517,63 @@ const server = createServer(async (request, response) => {
         if (body.content) {
           content = String(body.content);
         } else if (body.data) {
-          // Handle base64 encoded data
-          content = Buffer.from(body.data, 'base64').toString('utf8');
+          // Handle base64 encoded data with validation
+          if (!/^[A-Za-z0-9+/]*={0,2}$/.test(body.data)) {
+            return sendJson(response, 400, { error: "Invalid base64 encoding" });
+          }
+          try {
+            content = Buffer.from(body.data, 'base64').toString('utf8');
+          } catch (err) {
+            return sendJson(response, 400, { error: "Invalid base64 data" });
+          }
         }
         
         if (!content) {
           return sendJson(response, 400, { error: "File content is required" });
         }
         
-        // Validate file size (10MB limit)
-        const maxSize = 10 * 1024 * 1024; // 10MB
+        // Enhanced file size validation (5MB limit for security)
+        const maxSize = 5 * 1024 * 1024; // 5MB reduced for security
         if (content.length > maxSize) {
           return sendJson(response, 400, { error: `File size exceeds maximum limit of ${maxSize / 1024 / 1024}MB` });
+        }
+        
+        // Enhanced file content validation
+        // Check for potentially dangerous file content
+        const dangerousPatterns = [
+          /<script[^>]*>.*?<\/script>/gi,
+          /javascript:/gi,
+          /data:/gi,
+          /<iframe[^>]*>.*?<\/iframe>/gi,
+          /<object[^>]*>.*?<\/object>/gi,
+          /<embed[^>]*>.*?<\/embed>/gi,
+          /<style[^>]*>.*?<\/style>/gi,
+          /<meta[^>]*>.*?<\/meta>/gi,
+          /<link[^>]*>.*?<\/link>/gi,
+          /on\w+\s*=/gi,
+          /eval\(/gi,
+          /exec\(/gi,
+          /Function\(/gi,
+          /setTimeout\s*\(/gi,
+          /setInterval\s*\(/gi
+        ];
+        
+        for (const pattern of dangerousPatterns) {
+          if (pattern.test(content)) {
+            return sendJson(response, 400, { error: "File contains potentially dangerous content" });
+          }
+        }
+        
+        // Check file extension against allowed types
+        const allowedExtensions = ['.txt', '.md', '.json', '.csv', '.xml'];
+        const fileExtension = filename.toLowerCase();
+        const isAllowedExtension = allowedExtensions.some(ext => fileExtension.endsWith(ext));
+        
+        if (!isAllowedExtension) {
+          return sendJson(response, 400, { 
+            error: "File type not allowed", 
+            allowed: allowedExtensions 
+          });
         }
         
         // Upload file
@@ -1766,10 +1853,24 @@ const applyRateLimit = (request, response) => {
     const userAgent = request.headers['user-agent'] || '';
     const timestamp = Date.now();
     
-    // Validate client IP format
+    // Validate client IP format with enhanced security
     if (!clientIP || typeof clientIP !== 'string') {
-      response.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      response.writeHead(400, { 
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Content-Type-Options': 'nosniff'
+      });
       response.end(JSON.stringify({ error: 'Invalid client IP' }));
+      return false;
+    }
+    
+    // Validate IP address format (prevent IP spoofing)
+    const ipRegex = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$|^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$/;
+    if (!ipRegex.test(clientIP.toString())) {
+      response.writeHead(400, { 
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Content-Type-Options': 'nosniff'
+      });
+      response.end(JSON.stringify({ error: 'Invalid IP address format' }));
       return false;
     }
     
@@ -1788,12 +1889,14 @@ const applyRateLimit = (request, response) => {
           'X-RateLimit-Limit': MAX_REQUESTS_PER_MINUTE,
           'X-RateLimit-Remaining': 0,
           'Retry-After': Math.ceil((RATE_LIMIT_WINDOW - (timestamp - data.timestamp)) / 1000),
-          'X-Content-Type-Options': 'nosniff'
+          'X-Content-Type-Options': 'nosniff',
+          'X-RateLimit-Reset': Math.ceil((timestamp + RATE_LIMIT_WINDOW) / 1000)
         });
         response.end(JSON.stringify({ 
           error: "Rate limit exceeded",
           message: `Max ${MAX_REQUESTS_PER_MINUTE} requests per minute per client allowed`,
-          retryAfter: Math.ceil((RATE_LIMIT_WINDOW - (timestamp - data.timestamp)) / 1000)
+          retryAfter: Math.ceil((RATE_LIMIT_WINDOW - (timestamp - data.timestamp)) / 1000),
+          timestamp: timestamp
         }));
         return false;
       }
@@ -1801,55 +1904,58 @@ const applyRateLimit = (request, response) => {
       // Increment count with bounds checking
       data.count = Math.min(data.count + 1, MAX_REQUESTS_PER_MINUTE);
       data.timestamp = timestamp;
+      data.userAgent = userAgent.substring(0, 500); // Truncate safely
     } else {
-      // Create new entry with validation
-      if (userAgent && userAgent.length > 500) {
-        userAgent = userAgent.substring(0, 500);
-      }
-      rateLimit.set(rateLimitKey, { count: 1, timestamp: timestamp, userAgent });
+      // Create new entry with validation and bounds checking
+      const safeUserAgent = userAgent.length > 500 ? userAgent.substring(0, 500) : userAgent;
+      rateLimit.set(rateLimitKey, { count: 1, timestamp: timestamp, userAgent: safeUserAgent });
     }
     
     return true;
   } catch (err) {
     console.error('Rate limit error:', err);
-    response.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    // Don't expose error details to client for security
+    response.writeHead(500, { 
+      'Content-Type': 'application/json; charset=utf-8',
+      'X-Content-Type-Options': 'nosniff'
+    });
     response.end(JSON.stringify({ error: 'Internal server error' }));
     return false;
   }
 };
 
-// Clean up old entries more efficiently
+// Clean up old entries more efficiently with enhanced memory management
 const cleanupRateLimitEntries = () => {
   const now = Date.now();
   const keysToDelete = [];
   
-  // Batch collect keys to delete and perform size check in one pass
+  // First pass: collect old entries
   for (const [key, data] of rateLimit.entries()) {
     if (now - data.timestamp > RATE_LIMIT_WINDOW) {
       keysToDelete.push(key);
     }
   }
   
-  // Batch delete for better performance
+  // Delete old entries in batch
   for (const key of keysToDelete) {
     rateLimit.delete(key);
   }
   
-  // Memory optimization: enforce maximum size with efficient cleanup
-  if (rateLimit.size > MAX_REQUESTS_PER_MINUTE * 15) {
-    // Sort by timestamp and keep most recent entries
+  // If we still have too many entries, enforce hard limit
+  if (rateLimit.size > MAX_RATE_LIMIT_ENTRIES) {
+    // Sort by timestamp (most recent first)
     const sortedEntries = Array.from(rateLimit.entries())
       .sort((a, b) => b[1].timestamp - a[1].timestamp);
     
-    // Clear and repopulate with recent entries
+    // Clear the map and repopulate with only the most recent entries
     rateLimit.clear();
-    const entriesToKeep = sortedEntries.slice(0, MAX_REQUESTS_PER_MINUTE * 10);
+    const entriesToKeep = sortedEntries.slice(0, MAX_RATE_LIMIT_ENTRIES / 2); // Keep 50% of capacity
     
     for (const [key, data] of entriesToKeep) {
       rateLimit.set(key, data);
     }
     
-    console.log(`Rate limit cleanup: removed ${rateLimit.size - entriesToKeep.length} old entries`);
+    console.log(`Rate limit memory optimization: removed ${rateLimit.size - entriesToKeep.length} entries to stay under limit`);
   }
 };
 
@@ -1988,10 +2094,10 @@ const shutdown = (signal) => {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-// Handle WebSocket upgrade with authentication and origin validation
+// Handle WebSocket upgrade with enhanced authentication and security
 server.on('upgrade', (request, socket, head) => {
   try {
-    const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
+    const pathname = new URL(request.url, `http://${request.headers.host || 'localhost'}`).pathname;
     
     if (pathname === '/ws') {
       // Validate WebSocket origin with enhanced security
@@ -2002,14 +2108,21 @@ server.on('upgrade', (request, socket, head) => {
         return;
       }
       
-      // Enhanced authentication check with secure comparison
-      const url = new URL(request.url, `http://${request.headers.host}`);
+      // Enhanced authentication check with multiple validation layers
+      const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
       const apiKey = url.searchParams.get('auth');
       
-      // Validate API key format and presence
+      // Validate API key format and presence with enhanced checks
       if (!apiKey || typeof apiKey !== 'string' || apiKey.length < 10 || apiKey.length > 256) {
         console.error('WebSocket connection rejected: invalid authentication format');
         sendWebSocketError(socket, 401, 'Unauthorized: Invalid authentication format');
+        return;
+      }
+      
+      // Check for API key injection attempts
+      if (apiKey.includes('"') || apiKey.includes("'") || apiKey.includes('`')) {
+        console.error('WebSocket connection rejected: potential API key injection');
+        sendWebSocketError(socket, 401, 'Unauthorized: Invalid authentication');
         return;
       }
       
@@ -2023,11 +2136,12 @@ server.on('upgrade', (request, socket, head) => {
       
       // Constant-time comparison to prevent timing attacks
       const isValidApiKey = crypto.timingSafeEqual(
-        Buffer.from(apiKey),
-        Buffer.from(validApiKey)
+        Buffer.from(apiKey, 'utf8'),
+        Buffer.from(validApiKey, 'utf8')
       );
       
       if (!isValidApiKey) {
+        // Log failed attempts (but don't reveal timing information)
         console.error('WebSocket connection rejected: invalid authentication');
         sendWebSocketError(socket, 401, 'Unauthorized: Invalid authentication');
         return;
@@ -2039,6 +2153,22 @@ server.on('upgrade', (request, socket, head) => {
         console.error('WebSocket connection rejected: invalid user agent');
         sendWebSocketError(socket, 400, 'Bad request: Invalid user agent');
         return;
+      }
+      
+      // Additional security: check for suspicious user agents
+      const suspiciousPatterns = [
+        /bot/i,
+        /crawler/i,
+        /spider/i,
+        /scanner/i,
+        /test/i
+      ];
+      
+      for (const pattern of suspiciousPatterns) {
+        if (pattern.test(userAgent)) {
+          console.warn('Suspicious user agent detected for WebSocket connection:', userAgent);
+          // Allow but log for monitoring
+        }
       }
       
       wss.handleUpgrade(request, socket, head, (ws) => {

@@ -39,7 +39,7 @@ export class OllamaAdapter {
         throw new Error('Messages array is required and cannot be empty');
       }
       
-      // Validate messages with comprehensive checks
+      // Validate messages with comprehensive security checks
       if (messages.length > 100) {
         throw new Error('Messages array cannot exceed 100 messages');
       }
@@ -68,6 +68,39 @@ export class OllamaAdapter {
         
         if (msg.content.length > 50000) {
           throw new Error(`Message ${i} content is too long (max 50000 characters)`);
+        }
+        
+        // Enhanced security: check for injection attempts
+        const dangerousPatterns = [
+          /<script[^>]*>.*?<\/script>/gi,
+          /javascript:/gi,
+          /data:/gi,
+          /<iframe[^>]*>.*?<\/iframe>/gi,
+          /<object[^>]*>.*?<\/object>/gi,
+          /<embed[^>]*>.*?<\/embed>/gi,
+          /<style[^>]*>.*?<\/style>/gi,
+          /<meta[^>]*>.*?<\/meta>/gi,
+          /<link[^>]*>.*?<\/link>/gi,
+          /on\w+\s*=/gi,
+          /eval\(/gi,
+          /exec\(/gi,
+          /Function\(/gi,
+          /setTimeout\s*\(/gi,
+          /setInterval\s*\(/gi,
+          /document\./gi,
+          /window\./gi,
+          /global\./gi
+        ];
+        
+        for (const pattern of dangerousPatterns) {
+          if (pattern.test(msg.content)) {
+            throw new Error(`Message ${i} contains potentially dangerous content`);
+          }
+        }
+        
+        // Check for extremely long lines that might cause issues
+        if (msg.content.includes('\n') && msg.content.split('\n').some(line => line.length > 2000)) {
+          throw new Error(`Message ${i} contains lines that are too long`);
         }
       }
       

@@ -67,23 +67,48 @@ export class FailoverChainAdapter {
         return false;
       }
       
-      // Perform health check with timeout
+      // Perform health check with timeout and enhanced error handling
       const healthPromise = provider.health();
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => reject(new Error('Health check timeout')), 5000);
       });
       
-      const healthResult = await Promise.race([healthPromise, timeoutPromise]);
-      const isHealthy = healthResult && healthResult.ok === true;
+      let healthResult;
+      try {
+        healthResult = await Promise.race([healthPromise, timeoutPromise]);
+      } catch (raceError) {
+        // Health check failed due to timeout or error
+        console.warn(`Health check failed for provider at index ${providerIndex}:`, raceError.message);
+        this.healthCache.set(cacheKey, {
+          isHealthy: false,
+          timestamp: now
+        });
+        return false;
+      }
       
-      // Cache result
+      // Validate health result structure
+      if (!healthResult || typeof healthResult !== 'object') {
+        this.healthCache.set(cacheKey, {
+          isHealthy: false,
+          timestamp: now
+        });
+        return false;
+      }
+      
+      const isHealthy = healthResult.ok === true;
+      
+      // Cache result with additional metadata
       this.healthCache.set(cacheKey, {
         isHealthy,
-        timestamp: now
+        timestamp: now,
+        error: !isHealthy ? healthResult.error : undefined
       });
       
       return isHealthy;
     } catch (error) {
+      // Log error for debugging but don't expose details
+      console.warn(`Error checking health for provider at index ${providerIndex}:`, error.message);
+      
       // Mark as unhealthy and cache result
       this.healthCache.set(cacheKey, {
         isHealthy: false,

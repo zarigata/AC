@@ -123,7 +123,12 @@ const ensureString = (value, field, min, max) => {
     /exec\(/gi,
     /Function\(/gi,
     /setTimeout\s*\(/gi,
-    /setInterval\s*\(/gi
+    /setInterval\s*\(/gi,
+    /document\./gi,
+    /window\./gi,
+    /global\./gi,
+    /\x00/g, // Null bytes
+    /[\x01-\x08\x0b\x0c\x0e-\x1f]/g // Control characters
   ];
   
   for (const pattern of dangerousPatterns) {
@@ -132,10 +137,12 @@ const ensureString = (value, field, min, max) => {
     }
   }
   
-  // Remove null bytes and control characters
-  const sanitized = normalized.replace(/\x00/g, '').replace(/[\x01-\x08\x0b\x0c\x0e-\x1f]/g, '');
+  // Additional security: check for Unicode control characters
+  if (normalized.normalize('NFKC') !== normalized) {
+    throw new Error(`${field} contains potentially dangerous Unicode characters.`);
+  }
   
-  return sanitized;
+  return normalized;
 };
 
 const ensureBoolean = (value, field) => {
@@ -147,21 +154,39 @@ const ensureBoolean = (value, field) => {
 };
 
 const ensureInteger = (value, field, min, max) => {
-  if (!Number.isInteger(value) || value < min || value > max) {
-    throw new Error(`${field} must be an integer between ${min} and ${max}.`);
+  // Check if value is actually an integer and within bounds
+  if (!Number.isInteger(value)) {
+    throw new Error(`${field} must be an integer.`);
+  }
+  
+  // Check bounds with safety margins for security
+  const safeMin = Math.max(min, 0); // Ensure minimum is not negative
+  const safeMax = Math.min(max, 100000); // Reasonable upper limit for security
+  
+  if (value < safeMin || value > safeMax) {
+    throw new Error(`${field} must be an integer between ${safeMin} and ${safeMax}.`);
   }
 
-  // Security checks for dangerous values
-  const dangerousFields = ['maxConcurrentTasks', 'maxTokens', 'timeout', 'limit'];
-  if (dangerousFields.includes(field)) {
-    if (value > 10000) { // Reasonable upper limit
-      throw new Error(`${field} cannot exceed 10000 for security reasons.`);
-    }
+  // Enhanced security checks for specific fields
+  const securityFields = ['maxConcurrentTasks', 'maxTokens', 'timeout', 'limit'];
+  if (securityFields.includes(field)) {
+    // More restrictive limits for security-sensitive fields
+    const securityLimits = {
+      'maxConcurrentTasks': { min: 1, max: 32 },
+      'maxTokens': { min: 1, max: 32000 },
+      'timeout': { min: 1000, max: 300000 },
+      'limit': { min: 1, max: 10000 }
+    };
     
-    // Prevent extremely small values that could cause issues
-    if (value < 1 && field !== 'timeout') {
-      throw new Error(`${field} must be at least 1 for security reasons.`);
+    const securityLimit = securityLimits[field];
+    if (value < securityLimit.min || value > securityLimit.max) {
+      throw new Error(`${field} must be between ${securityLimit.min} and ${securityLimit.max} for security reasons.`);
     }
+  }
+
+  // Check for potentially problematic values
+  if (value <= 0 && field !== 'timeout') {
+    throw new Error(`${field} must be a positive integer for security reasons.`);
   }
 
   return value;

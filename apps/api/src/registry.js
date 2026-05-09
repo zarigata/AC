@@ -310,7 +310,7 @@ export class AgentRegistry {
       agent.name = sanitizeContent(agent.name, 'agent name').trim();
       agent.purpose = sanitizeContent(agent.purpose, 'agent purpose').trim();
       
-      // Begin transaction for data consistency
+      // Begin transaction for data consistency with enhanced error handling
       this.db.exec('BEGIN TRANSACTION');
       try {
         const insertStmt = this.db.prepare(
@@ -340,12 +340,30 @@ export class AgentRegistry {
           throw new Error('Failed to create agent');
         }
         
+        // Verify insertion was successful
+        const verifyStmt = this.db.prepare('SELECT id FROM agents WHERE id = ?');
+        const verification = verifyStmt.get(agent.id);
+        if (!verification) {
+          throw new Error('Agent creation verification failed');
+        }
+        
         this.db.exec('COMMIT');
         return agent;
       } catch (dbErr) {
-        this.db.exec('ROLLBACK');
+        // Ensure transaction is rolled back even if commit fails
+        try {
+          this.db.exec('ROLLBACK');
+        } catch (rollbackErr) {
+          console.error('Error during rollback:', rollbackErr);
+        }
+        
+        // Provide more detailed error information for debugging
+        const errorMessage = dbErr.message.includes('UNIQUE constraint') 
+          ? 'Agent ID already exists' 
+          : 'Database operation failed';
+        
         console.error('Database error creating agent:', dbErr);
-        throw new Error('Database operation failed');
+        throw new Error(errorMessage);
       }
     } catch (err) {
       console.error('Error creating agent:', err);
