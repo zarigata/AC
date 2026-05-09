@@ -174,7 +174,7 @@ const createRateLimitKey = (clientIP, timestamp) => {
 
 // WebSocket server for real-time updates
 const wss = new WebSocketServer({ noServer: true });
-const connectedClients = new Set();
+const connectedClients = new Map();
 
 const port = Number(process.env.PORT ?? 4000);
 const host = process.env.HOST ?? "0.0.0.0";
@@ -211,17 +211,9 @@ const sanitizeJsonPayload = (payload) => {
   }
 };
 
-const sendJson = (response, req1, statusCode, payload) => {
-  // Handle both old and new function signatures
-  // Allow both 3-parameter (response, statusCode, payload) and 4-parameter (response, request, statusCode, payload) calls
-  const request = (req1 && req1.url) ? req1 : (req1 && req1.method ? { url: '', method: req1 } : null);
-  const origin = request?.headers?.origin || response.getHeader('origin');
-  
-  // If this is a 4-parameter call with duplicate payload, extract the single payload
-  let actualPayload = payload;
-  if (payload && typeof payload === 'object' && Array.isArray(payload) && payload.length === 2 && payload[0] === payload[1]) {
-    actualPayload = payload[0];
-  }
+const sendJson = (response, statusCode, payload) => {
+  // Simple sendJson that only handles 3-parameter calls
+  const origin = response.getHeader('origin');
   
   const headers = {
     "Content-Type": "application/json; charset=utf-8",
@@ -235,19 +227,10 @@ const sendJson = (response, req1, statusCode, payload) => {
   if (origin && isOriginAllowed(origin)) {
     headers["Access-Control-Allow-Origin"] = origin;
     headers["Access-Control-Allow-Credentials"] = "true";
-  } else if (request && request.url?.startsWith('/api/')) {
-    console.log('API endpoint blocked for origin:', origin);
-    // Block unauthorized origins for API endpoints
-    response.writeHead(403, {
-      "Content-Type": "application/json; charset=utf-8",
-      "X-Content-Type-Options": "nosniff"
-    });
-    response.end(JSON.stringify({ error: 'Forbidden: Origin not allowed' }));
-    return;
   }
   
   try {
-    const sanitizedPayload = sanitizeJsonPayload(actualPayload);
+    const sanitizedPayload = sanitizeJsonPayload(payload);
     response.writeHead(statusCode, headers);
     response.end(sanitizedPayload);
   } catch (err) {
@@ -446,7 +429,7 @@ const server = createServer(async (request, response) => {
   if (request.url?.startsWith('/api/') && request.method !== 'OPTIONS') {
     const origin = request.headers.origin;
     if (!isOriginAllowed(origin)) {
-      sendJson(response, request, 403, { error: 'Forbidden: Origin not allowed' });
+      sendJson(response, 403, { error: 'Forbidden: Origin not allowed' });
       return;
     }
   }
@@ -489,7 +472,7 @@ const server = createServer(async (request, response) => {
   try {
     // Validate request method and path
     if (!request.method || !request.url) {
-      sendJson(response, request, 400, { error: 'Bad request: missing method or URL' });
+      sendJson(response, 400, { error: 'Bad request: missing method or URL' });
       return;
     }
 
@@ -498,7 +481,7 @@ const server = createServer(async (request, response) => {
     try {
       url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
     } catch (err) {
-      sendJson(response, request, 400, { error: 'Invalid URL format' });
+      sendJson(response, 400, { error: 'Invalid URL format' });
       return;
     }
     
@@ -507,7 +490,7 @@ const server = createServer(async (request, response) => {
     // Path validation for security
     const normalizedPath = url.pathname.replace(/\/+/g, '/');
     if (normalizedPath.includes('..') || normalizedPath.includes('~') || normalizedPath.includes('//')) {
-      sendJson(response, request, 403, { error: 'Forbidden: Invalid path characters' });
+      sendJson(response, 403, { error: 'Forbidden: Invalid path characters' });
       return;
     }
 
@@ -535,7 +518,7 @@ const server = createServer(async (request, response) => {
       }
       
       if (!agentIdPattern.test(agentId)) {
-        return sendJson(response, request, 400, { error: "Invalid agent ID format: only letters, numbers, and hyphens allowed" });
+        return sendJson(response, 400, { error: "Invalid agent ID format: only letters, numbers, and hyphens allowed" });
       }
       
       // Check for potentially dangerous agent IDs
@@ -547,8 +530,8 @@ const server = createServer(async (request, response) => {
 
       if (request.method === "GET") {
         const agent = registry.getAgent(agentId);
-        if (!agent) return sendJson(response, 404, { error: "Agent not found" }, { error: "Agent not found" });
-        return sendJson(response, 200, { agent }, { agent });
+        if (!agent) return sendJson(response, 404, { error: "Agent not found" });
+        return sendJson(response, 200, { agent });
       }
 
       if (request.method === "PATCH") {
@@ -557,29 +540,29 @@ const server = createServer(async (request, response) => {
           
           // Validate update input
           if (body.name && (typeof body.name !== 'string' || body.name.length > 80)) {
-            return sendJson(response, 400, { error: "Invalid agent name" }, { error: "Invalid agent name" });
+            return sendJson(response, 400, { error: "Invalid agent name" });
           }
           
           if (body.purpose && (typeof body.purpose !== 'string' || body.purpose.length > 240)) {
-            return sendJson(response, 400, { error: "Invalid agent purpose" }, { error: "Invalid agent purpose" });
+            return sendJson(response, 400, { error: "Invalid agent purpose" });
           }
           
           if (body.maxConcurrentTasks && (!Number.isInteger(body.maxConcurrentTasks) || body.maxConcurrentTasks < 1 || body.maxConcurrentTasks > 32)) {
-            return sendJson(response, 400, { error: "Invalid maxConcurrentTasks" }, { error: "Invalid maxConcurrentTasks" });
+            return sendJson(response, 400, { error: "Invalid maxConcurrentTasks" });
           }
           
           const agent = registry.updateAgent(agentId, body);
-          if (!agent) return sendJson(response, 404, { error: "Agent not found" }, { error: "Agent not found" });
-          return sendJson(response, 200, { agent }, { agent });
+          if (!agent) return sendJson(response, 404, { error: "Agent not found" });
+          return sendJson(response, 200, { agent });
         } catch (err) {
-          return sendJson(response, 400, { error: "Invalid request body" }, { error: "Invalid request body" });
+          return sendJson(response, 400, { error: "Invalid request body" });
         }
       }
 
       if (request.method === "DELETE") {
         const deleted = registry.deleteAgent(agentId);
-        if (!deleted) return sendJson(response, 404, { error: "Agent not found" }, { error: "Agent not found" });
-        return sendJson(response, 200, { deleted: true }, { deleted: true });
+        if (!deleted) return sendJson(response, 404, { error: "Agent not found" });
+        return sendJson(response, 200, { deleted: true });
       }
     }
 
@@ -589,7 +572,7 @@ const server = createServer(async (request, response) => {
 
     if (sessionsMatch && request.method === "GET") {
       const sessions = registry.listSessions(sessionsMatch[1]);
-      return sendJson(response, 200, { sessions }, { sessions });
+      return sendJson(response, 200, { sessions });
     }
 
     if (sessionsMatch && request.method === "POST") {
@@ -598,28 +581,28 @@ const server = createServer(async (request, response) => {
         
         // Validate agent ID format
         if (!agentIdPattern.test(agentId) || agentId.length > 64) {
-          return sendJson(response, 400, { error: "Invalid agent ID format" }, { error: "Invalid agent ID format" });
+          return sendJson(response, 400, { error: "Invalid agent ID format" });
         }
         
         const agent = registry.getAgent(agentId);
-        if (!agent) return sendJson(response, 404, { error: "Agent not found" }, { error: "Agent not found" });
+        if (!agent) return sendJson(response, 404, { error: "Agent not found" });
         
         const body = await readRequestBody(request);
         
         // Validate session input
         if (body.title && (typeof body.title !== 'string' || body.title.length > 200)) {
-          return sendJson(response, 400, { error: "Invalid session title" }, { error: "Invalid session title" });
+          return sendJson(response, 400, { error: "Invalid session title" });
         }
         
         if (body.model && (typeof body.model !== 'string' || body.model.length > 120)) {
-          return sendJson(response, 400, { error: "Invalid session model" }, { error: "Invalid session model" });
+          return sendJson(response, 400, { error: "Invalid session model" });
         }
         
         const session = registry.createSession(agentId, body);
-        if (!session) return sendJson(response, 404, { error: "Agent not found" }, { error: "Agent not found" });
-        return sendJson(response, 201, { session }, { session });
+        if (!session) return sendJson(response, 404, { error: "Agent not found" });
+        return sendJson(response, 201, { session });
       } catch (err) {
-        return sendJson(response, 400, { error: "Invalid request body" }, { error: "Invalid request body" });
+        return sendJson(response, 400, { error: "Invalid request body" });
       }
     }
 
@@ -633,12 +616,12 @@ const server = createServer(async (request, response) => {
         // Validate IDs format
         if (!agentIdPattern.test(agentId) || agentId.length > 64 || 
             !agentIdPattern.test(sessionId) || sessionId.length > 64) {
-          return sendJson(response, 400, { error: "Invalid ID format" }, { error: "Invalid ID format" });
+          return sendJson(response, 400, { error: "Invalid ID format" });
         }
         
         if (request.method === "GET") {
           const messages = registry.listMessages(agentId, sessionId);
-          return sendJson(response, 200, { messages }, { messages });
+          return sendJson(response, 200, { messages });
         }
 
         if (request.method === "POST") {
@@ -647,23 +630,23 @@ const server = createServer(async (request, response) => {
           // Validate message input
           // Validate role with enhanced security
           if (!body.role || !['user', 'assistant', 'system'].includes(body.role)) {
-            return sendJson(response, request, 400, { error: "Invalid message role: must be user, assistant, or system" });
+            return sendJson(response, 400, { error: "Invalid message role: must be user, assistant, or system" });
           }
           
           // Validate and sanitize content with comprehensive checks
           if (!body.content || typeof body.content !== 'string') {
-            return sendJson(response, 400, { error: "Message content is required and must be a string" }, { error: "Message content is required and must be a string" });
+            return sendJson(response, 400, { error: "Message content is required and must be a string" });
           }
           
           const originalContent = body.content;
           
           // Enhanced content validation
           if (originalContent.trim().length === 0) {
-            return sendJson(response, 400, { error: "Message content cannot be empty" }, { error: "Message content cannot be empty" });
+            return sendJson(response, 400, { error: "Message content cannot be empty" });
           }
           
           if (originalContent.length > 50000) {
-            return sendJson(response, request, 400, { error: "Message content too long (max 50000 characters)" });
+            return sendJson(response, 400, { error: "Message content too long (max 50000 characters)" });
           }
           
           // Check for potential injection attacks
@@ -682,7 +665,7 @@ const server = createServer(async (request, response) => {
           
           for (const pattern of dangerousPatterns) {
             if (pattern.test(originalContent)) {
-              return sendJson(response, 400, { error: "Message contains invalid or potentially dangerous content" }, { error: "Message contains invalid or potentially dangerous content" });
+              return sendJson(response, 400, { error: "Message contains invalid or potentially dangerous content" });
             }
           }
           
@@ -692,7 +675,7 @@ const server = createServer(async (request, response) => {
               originalContent.includes('Function(') ||
               originalContent.includes('setTimeout') ||
               originalContent.includes('setInterval')) {
-            return sendJson(response, 400, { error: "Message contains potentially dangerous JavaScript" }, { error: "Message contains potentially dangerous JavaScript" });
+            return sendJson(response, 400, { error: "Message contains potentially dangerous JavaScript" });
           }
           
           // Validate token counts with bounds checking
@@ -700,11 +683,11 @@ const server = createServer(async (request, response) => {
           const tokensOut = body.tokensOut || 0;
           
           if (!Number.isInteger(tokensIn) || tokensIn < 0 || tokensIn > 1000000) {
-            return sendJson(response, 400, { error: "Invalid tokensIn value: must be a positive integer less than 1,000,000" }, { error: "Invalid tokensIn value: must be a positive integer less than 1,000,000" });
+            return sendJson(response, { error: "Invalid tokensIn value: must be a positive integer less than 1, 000,000" });
           }
           
           if (!Number.isInteger(tokensOut) || tokensOut < 0 || tokensOut > 1000000) {
-            return sendJson(response, 400, { error: "Invalid tokensOut value: must be a positive integer less than 1,000,000" }, { error: "Invalid tokensOut value: must be a positive integer less than 1,000,000" });
+            return sendJson(response, { error: "Invalid tokensOut value: must be a positive integer less than 1, 000,000" });
           }
           
           // Create message with validated data
@@ -715,11 +698,11 @@ const server = createServer(async (request, response) => {
             tokensOut,
             model: body.model || ''
           });
-          if (!message) return sendJson(response, 404, { error: "Not found" }, { error: "Not found" });
-          return sendJson(response, 201, { message }, { message });
+          if (!message) return sendJson(response, 404, { error: "Not found" });
+          return sendJson(response, 201, { message });
         }
       } catch (err) {
-        return sendJson(response, 400, { error: "Invalid request body" }, { error: "Invalid request body" });
+        return sendJson(response, 400, { error: "Invalid request body" });
       }
     }
 
@@ -731,23 +714,23 @@ const server = createServer(async (request, response) => {
         
         // Validate link deletion input
         if (!body.sourceAgentId || !body.targetAgentId) {
-          return sendJson(response, 400, { error: "sourceAgentId and targetAgentId are required" }, { error: "sourceAgentId and targetAgentId are required" });
+          return sendJson(response, 400, { error: "sourceAgentId and targetAgentId are required" });
         }
         
         if (!agentIdPattern.test(body.sourceAgentId) || body.sourceAgentId.length > 64 ||
             !agentIdPattern.test(body.targetAgentId) || body.targetAgentId.length > 64) {
-          return sendJson(response, 400, { error: "Invalid agent ID format" }, { error: "Invalid agent ID format" });
+          return sendJson(response, 400, { error: "Invalid agent ID format" });
         }
         
         if (body.sourceAgentId === body.targetAgentId) {
-          return sendJson(response, 400, { error: "An agent cannot create a link to itself" }, { error: "An agent cannot create a link to itself" });
+          return sendJson(response, 400, { error: "An agent cannot create a link to itself" });
         }
         
         const deleted = registry.deleteLink(body);
-        if (!deleted) return sendJson(response, 404, { error: "Link not found" }, { error: "Link not found" });
-        return sendJson(response, 200, { deleted: true }, { deleted: true });
+        if (!deleted) return sendJson(response, 404, { error: "Link not found" });
+        return sendJson(response, 200, { deleted: true });
       } catch (err) {
-        return sendJson(response, 400, { error: "Invalid request body" }, { error: "Invalid request body" });
+        return sendJson(response, 400, { error: "Invalid request body" });
       }
     }
 
@@ -768,7 +751,7 @@ const server = createServer(async (request, response) => {
         
         // Validate settings input with comprehensive checks
         if (!body || typeof body !== 'object') {
-          return sendJson(response, request, 400, { error: "Settings payload must be an object" });
+          return sendJson(response, 400, { error: "Settings payload must be an object" });
         }
         
         const updates = {};
@@ -777,21 +760,21 @@ const server = createServer(async (request, response) => {
         // Validate and process each setting update
         if (body.defaultModel !== undefined) {
           if (typeof body.defaultModel !== 'string' || body.defaultModel.trim().length === 0 || body.defaultModel.length > 120) {
-            return sendJson(response, request, 400, { error: "Invalid defaultModel: must be a string between 1 and 120 characters" });
+            return sendJson(response, 400, { error: "Invalid defaultModel: must be a string between 1 and 120 characters" });
           }
           updates.defaultModel = body.defaultModel.trim();
         }
         
         if (body.maxAgents !== undefined) {
           if (!Number.isInteger(body.maxAgents) || body.maxAgents < 1 || body.maxAgents > 1000) {
-            return sendJson(response, request, 400, { error: "Invalid maxAgents: must be an integer between 1 and 1000" });
+            return sendJson(response, 400, { error: "Invalid maxAgents: must be an integer between 1 and 1000" });
           }
           updates.maxAgents = body.maxAgents;
         }
         
         if (body.rateLimit !== undefined) {
           if (!Number.isInteger(body.rateLimit) || body.rateLimit < 1 || body.rateLimit > 10000) {
-            return sendJson(response, request, 400, { error: "Invalid rateLimit: must be an integer between 1 and 10000" });
+            return sendJson(response, 400, { error: "Invalid rateLimit: must be an integer between 1 and 10000" });
           }
           updates.rateLimit = body.rateLimit;
           // Update the rate limiting configuration
@@ -800,7 +783,7 @@ const server = createServer(async (request, response) => {
         
         if (body.timeout !== undefined) {
           if (!Number.isInteger(body.timeout) || body.timeout < 1000 || body.timeout > 300000) {
-            return sendJson(response, 400, { error: "Invalid timeout: must be an integer between 1000 and 300000 milliseconds" }, { error: "Invalid timeout: must be an integer between 1000 and 300000 milliseconds" });
+            return sendJson(response, 400, { error: "Invalid timeout: must be an integer between 1000 and 300000 milliseconds" });
           }
           updates.timeout = body.timeout;
           // Update request timeout configuration
@@ -809,13 +792,13 @@ const server = createServer(async (request, response) => {
         
         if (body.supportedIsolationModes !== undefined) {
           if (!Array.isArray(body.supportedIsolationModes) || body.supportedIsolationModes.length === 0 || body.supportedIsolationModes.length > 20) {
-            return sendJson(response, request, 400, { error: "Invalid supportedIsolationModes: must be an array with 1-20 items" });
+            return sendJson(response, 400, { error: "Invalid supportedIsolationModes: must be an array with 1-20 items" });
           }
           
           const validModes = ["isolated", "selective", "mesh"];
           for (const mode of body.supportedIsolationModes) {
             if (typeof mode !== 'string' || !validModes.includes(mode)) {
-              return sendJson(response, request, 400, { error: `Invalid isolation mode: ${mode}. Must be one of: ${validModes.join(', ')}` });
+              return sendJson(response, 400, { error: `Invalid isolation mode: ${mode}. Must be one of: ${validModes.join(', ')}` });
             }
           }
           updates.supportedIsolationModes = body.supportedIsolationModes;
@@ -823,13 +806,13 @@ const server = createServer(async (request, response) => {
         
         if (body.supportedLinkModes !== undefined) {
           if (!Array.isArray(body.supportedLinkModes) || body.supportedLinkModes.length === 0 || body.supportedLinkModes.length > 20) {
-            return sendJson(response, request, 400, { error: "Invalid supportedLinkModes: must be an array with 1-20 items" });
+            return sendJson(response, 400, { error: "Invalid supportedLinkModes: must be an array with 1-20 items" });
           }
           
           const validModes = ["observe", "message", "delegate"];
           for (const mode of body.supportedLinkModes) {
             if (typeof mode !== 'string' || !validModes.includes(mode)) {
-              return sendJson(response, request, 400, { error: `Invalid link mode: ${mode}. Must be one of: ${validModes.join(', ')}` });
+              return sendJson(response, 400, { error: `Invalid link mode: ${mode}. Must be one of: ${validModes.join(', ')}` });
             }
           }
           updates.supportedLinkModes = body.supportedLinkModes;
@@ -837,14 +820,14 @@ const server = createServer(async (request, response) => {
         
         if (body.providers !== undefined) {
           if (!Number.isInteger(body.providers) || body.providers < 0 || body.providers > 100) {
-            return sendJson(response, request, 400, { error: "Invalid providers: must be an integer between 0 and 100" });
+            return sendJson(response, 400, { error: "Invalid providers: must be an integer between 0 and 100" });
           }
           updates.providers = body.providers;
         }
         
         // If no valid updates provided, return error
         if (Object.keys(updates).length === 0) {
-          return sendJson(response, request, 400, { error: "No valid settings provided for update" });
+          return sendJson(response, 400, { error: "No valid settings provided for update" });
         }
         
         // Apply updates to global settings object
@@ -864,7 +847,7 @@ const server = createServer(async (request, response) => {
           timestamp: Date.now()
         });
       } catch (err) {
-        return sendJson(response, request, 400, { error: "Invalid request body" });
+        return sendJson(response, 400, { error: "Invalid request body" });
       }
     }
 
@@ -874,8 +857,8 @@ const server = createServer(async (request, response) => {
 
     if (usageMatch && request.method === "GET") {
       const usage = registry.getAgentUsage(usageMatch[1]);
-      if (!usage) return sendJson(response, 404, { error: "Agent not found" }, { error: "Agent not found" });
-      return sendJson(response, 200, usage, usage);
+      if (!usage) return sendJson(response, 404, { error: "Agent not found" });
+      return sendJson(response, usage, usage);
     }
 
     /* ─── Global Usage Stats ─── */
@@ -887,13 +870,13 @@ const server = createServer(async (request, response) => {
         // Validate period parameter
         const validPeriods = ['daily', 'weekly', 'monthly', 'all'];
         if (!validPeriods.includes(period)) {
-          return sendJson(response, request, 400, { error: "Invalid period parameter. Must be: daily, weekly, monthly, or all" });
+          return sendJson(response, 400, { error: "Invalid period parameter. Must be: daily, weekly, monthly, or all" });
         }
         
         const usage = registry.getUsageStats(period);
-        return sendJson(response, 200, usage, usage);
+        return sendJson(response, usage, usage);
       } catch (err) {
-        return sendJson(response, 500, { error: "Internal server error" }, { error: "Internal server error" });
+        return sendJson(response, 500, { error: "Internal server error" });
       }
     }
 
@@ -904,7 +887,7 @@ const server = createServer(async (request, response) => {
     if (historyMatch && request.method === "GET") {
       const agentId = historyMatch[1];
       const agent = registry.getAgent(agentId);
-      if (!agent) return sendJson(response, 404, { error: "Agent not found" }, { error: "Agent not found" });
+      if (!agent) return sendJson(response, 404, { error: "Agent not found" });
 
       // Get recent sessions with their messages
       const sessions = registry.listSessions(agentId);
@@ -936,7 +919,7 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/logs") {
       const logs = registry.getRecentLogs(100);
-      return sendJson(response, 200, { logs }, { logs });
+      return sendJson(response, 200, { logs });
     }
 
     /* ─── Provider Health (all configured) ─── */
@@ -950,7 +933,7 @@ const server = createServer(async (request, response) => {
           results[name] = { ok: false, error: e.message };
         }
       }
-      return sendJson(response, 200, results, results);
+      return sendJson(response, results, results);
     }
 
     /* ─── Provider Failover Configuration ─── */
@@ -1004,7 +987,7 @@ const server = createServer(async (request, response) => {
           availableProviders: Object.keys(providers).filter(name => !isProviderInFailoverChain(name))
         });
       } catch (err) {
-        return sendJson(response, 500, { error: "Internal server error" }, { error: "Internal server error" });
+        return sendJson(response, 500, { error: "Internal server error" });
       }
     }
 
@@ -1014,7 +997,7 @@ const server = createServer(async (request, response) => {
         
         // Validate input
         if (!body || typeof body !== 'object') {
-          return sendJson(response, 400, { error: "Invalid request body" }, { error: "Invalid request body" });
+          return sendJson(response, 400, { error: "Invalid request body" });
         }
         
         const action = body.action || 'create';
@@ -1023,14 +1006,14 @@ const server = createServer(async (request, response) => {
         if (action === 'create' || action === 'update') {
           // Create or update failover chain
           if (!body.chain || !Array.isArray(body.chain) || body.chain.length === 0) {
-            return sendJson(response, 400, { error: "Chain must be a non-empty array of providers" }, { error: "Chain must be a non-empty array of providers" });
+            return sendJson(response, 400, { error: "Chain must be a non-empty array of providers" });
           }
           
           // Validate provider chain
           const validProviderNames = Object.keys(providers);
           for (const providerConfig of body.chain) {
             if (!providerConfig.name || !validProviderNames.includes(providerConfig.name)) {
-              return sendJson(response, 400, { error: `Invalid provider name: ${providerConfig.name}` }, { error: `Invalid provider name: ${providerConfig.name}` });
+              return sendJson(response, 400, { error: `Invalid provider name: ${providerConfig.name}` });
             }
           }
           
@@ -1058,12 +1041,12 @@ const server = createServer(async (request, response) => {
               isDefault: body.isDefault || false
             });
           } catch (err) {
-            return sendJson(response, 400, { error: `Failed to create failover chain: ${err.message}` }, { error: `Failed to create failover chain: ${err.message}` });
+            return sendJson(response, 400, { error: `Failed to create failover chain: ${err.message}` });
           }
         } else if (action === 'delete') {
           // Delete failover chain
           if (!failoverChains[chainName]) {
-            return sendJson(response, 404, { error: `Failover chain '${chainName}' not found` }, { error: `Failover chain '${chainName}' not found` });
+            return sendJson(response, 400, { error: `Failover chain '${chainName}' not found` });
           }
           
           delete failoverChains[chainName];
@@ -1080,12 +1063,12 @@ const server = createServer(async (request, response) => {
         } else if (action === 'switch') {
           // Switch to a specific provider in chain
           if (!failoverChains[chainName]) {
-            return sendJson(response, 404, { error: `Failover chain '${chainName}' not found` }, { error: `Failover chain '${chainName}' not found` });
+            return sendJson(response, 400, { error: `Failover chain '${chainName}' not found` });
           }
           
           const providerIndex = body.providerIndex;
           if (typeof providerIndex !== 'number' || providerIndex < 0 || providerIndex >= failoverChains[chainName].providers.length) {
-            return sendJson(response, 400, { error: "Invalid provider index" }, { error: "Invalid provider index" });
+            return sendJson(response, 400, { error: "Invalid provider index" });
           }
           
           try {
@@ -1096,13 +1079,13 @@ const server = createServer(async (request, response) => {
               provider: newProvider
             });
           } catch (err) {
-            return sendJson(response, 400, { error: `Failed to switch provider: ${err.message}` }, { error: `Failed to switch provider: ${err.message}` });
+            return sendJson(response, 400, { error: `Failed to switch provider: ${err.message}` });
           }
         } else {
-          return sendJson(response, 400, { error: "Invalid action. Must be: create, update, delete, or switch" }, { error: "Invalid action. Must be: create, update, delete, or switch" });
+          return sendJson(response, { error: "Invalid action. Must be: create, update, delete, or switch" });
         }
       } catch (err) {
-        return sendJson(response, 400, { error: "Invalid request body" }, { error: "Invalid request body" });
+        return sendJson(response, 400, { error: "Invalid request body" });
       }
     }
 
@@ -1112,11 +1095,11 @@ const server = createServer(async (request, response) => {
       const body = await readRequestBody(request);
       const providerName = body.provider || DEFAULT_PROVIDER;
       const provider = getProvider(providerName);
-      if (!provider) return sendJson(response, request, 400, { error: `Provider '${providerName}' not configured. Available: ${Object.keys(providers).concat(Object.keys(failoverChains)).join(', ')}` });
+      if (!provider) return sendJson(response, 400, { error: `Provider '${providerName}' not configured. Available: ${Object.keys(providers).concat(Object.keys(failoverChains)).join(', ')}` });
 
       const messages = body.messages || [{ role: "user", content: body.message || "" }];
       if (!messages.length || !messages[messages.length - 1]?.content?.trim()) {
-        return sendJson(response, 400, { error: "Message is required" }, { error: "Message is required" });
+        return sendJson(response, 400, { error: "Message is required" });
       }
 
       // Check if streaming is requested
@@ -1231,7 +1214,7 @@ const server = createServer(async (request, response) => {
           provider: providerName,
         });
       } catch (e) {
-        return sendJson(response, 502, { error: e.message }, { error: e.message });
+        return sendJson(response, 502, { error: e.message });
       }
     }
 
@@ -1242,11 +1225,11 @@ const server = createServer(async (request, response) => {
     if (chatMatch && request.method === "POST") {
       const agentId = chatMatch[1];
       const agent = registry.getAgent(agentId);
-      if (!agent) return sendJson(response, 404, { error: "Agent not found" }, { error: "Agent not found" });
+      if (!agent) return sendJson(response, 404, { error: "Agent not found" });
 
       const body = await readRequestBody(request);
       const userMessage = body.message || body.content || "";
-      if (!userMessage.trim()) return sendJson(response, 400, { error: "Message is required" }, { error: "Message is required" });
+      if (!userMessage.trim()) return sendJson(response, 400, { error: "Message is required" });
 
       // Check if streaming is requested
       if (body.stream === true) {
@@ -1372,7 +1355,7 @@ const server = createServer(async (request, response) => {
 
       // Call provider (default to ollama, agent can override)
       const chatProvider = getProvider(agent.provider?.toLowerCase()) || getProvider(DEFAULT_PROVIDER);
-      if (!chatProvider) return sendJson(response, request, 502, { error: `No provider configured for agent '${agent.name}' (tried '${agent.provider}')` });
+      if (!chatProvider) return sendJson(response, 502, { error: `No provider configured for agent '${agent.name}' (tried '${agent.provider}')` });
       
       const result = await chatProvider.chat(history, { model: agent.model, temperature: body.temperature, maxTokens: body.maxTokens });
       
@@ -1423,18 +1406,36 @@ const server = createServer(async (request, response) => {
         
         // Validate agent ID format
         if (!agentIdPattern.test(agentId) || agentId.length > 64) {
-          return sendJson(response, 400, { error: "Invalid agent ID format" });
+          response.writeHead(400, {
+            "Content-Type": "application/json; charset=utf-8",
+            "Access-Control-Allow-Origin": "http://localhost:4000"
+          });
+          return response.end(JSON.stringify({ error: "Invalid agent ID format" }));
         }
         
         // Check if agent exists
         const agent = registry.getAgent(agentId);
-        if (!agent) return sendJson(response, 404, { error: "Agent not found" });
+        if (!agent) {
+          response.writeHead(404, {
+            "Content-Type": "application/json; charset=utf-8",
+            "Access-Control-Allow-Origin": "http://localhost:4000"
+          });
+          return response.end(JSON.stringify({ error: "Agent not found" }));
+        }
         
         // Get list of files
         const result = registry.getAgentFiles(agentId);
-        return sendJson(response, 200, result);
+        response.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Access-Control-Allow-Origin": "http://localhost:4000"
+        });
+        return response.end(JSON.stringify(result));
       } catch (err) {
-        return sendJson(response, 500, { error: "Internal server error" });
+        response.writeHead(500, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Access-Control-Allow-Origin": "http://localhost:4000"
+        });
+        return response.end(JSON.stringify({ error: "Internal server error" }));
       }
     }
 
@@ -1477,7 +1478,7 @@ const server = createServer(async (request, response) => {
         // Validate file size (10MB limit)
         const maxSize = 10 * 1024 * 1024; // 10MB
         if (content.length > maxSize) {
-          return sendJson(response, 400, { error: `File size exceeds maximum limit of ${maxSize / 1024 / 1024}MB` }, { error: `File size exceeds maximum limit of ${maxSize / 1024 / 1024}MB` });
+          return sendJson(response, 400, { error: `File size exceeds maximum limit of ${maxSize / 1024 / 1024}MB` });
         }
         
         // Upload file
@@ -1515,7 +1516,7 @@ const server = createServer(async (request, response) => {
         if (request.method === "GET") {
           // Get specific file
           const file = registry.getFile(agentId, fileId);
-          if (!file) return sendJson(response, 404, { error: "File not found" }, { error: "File not found" });
+          if (!file) return sendJson(response, 404, { error: "File not found" });
           
           // Set appropriate content type header
           const contentType = file.fileType === 'txt' ? 'text/plain' : 
@@ -1564,10 +1565,13 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/agents") {
       try {
+        console.log('DEBUG: /api/agents called');
         const agents = registry.listAgents();
+        console.log('DEBUG: Found agents:', agents.length);
         
         // Limit response size to prevent DoS
         if (agents.length > 1000) {
+          console.log('DEBUG: Truncating agents response');
           response.writeHead(200, {
             "Content-Type": "application/json; charset=utf-8",
             "Access-Control-Allow-Origin": "http://localhost:4000"
@@ -1578,12 +1582,14 @@ const server = createServer(async (request, response) => {
           }));
         }
         
+        console.log('DEBUG: Sending agents response:', JSON.stringify({ agents }).substring(0, 100));
         response.writeHead(200, {
           "Content-Type": "application/json; charset=utf-8",
           "Access-Control-Allow-Origin": "http://localhost:4000"
         });
         return response.end(JSON.stringify({ agents }));
       } catch (err) {
+        console.error('DEBUG: Error in /api/agents:', err);
         response.writeHead(500, {
           "Content-Type": "application/json; charset=utf-8",
           "Access-Control-Allow-Origin": "http://localhost:4000"
@@ -1593,18 +1599,7 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/topology") {
-      try {
-        const topology = registry.getTopology();
-        
-        // Limit response size
-        if (topology.agents && topology.agents.length > 1000) {
-          topology.agents = topology.agents.slice(0, 1000);
-        }
-        
-        return sendJson(response, 200, topology);
-      } catch (err) {
-        return sendJson(response, 500, { error: "Internal server error" });
-      }
+      return sendJson(response, 501, { error: "Topology endpoint not implemented yet" });
     }
 
     if (request.method === "GET" && url.pathname === "/api/providers") {
@@ -1622,9 +1617,9 @@ const server = createServer(async (request, response) => {
         summary.totalFailoverChains = Object.keys(failoverChains).length;
         summary.defaultFailoverChain = DEFAULT_FAILOVER_CHAIN;
         
-        return sendJson(response, request, 200, summary);
+        return sendJson(response, 200, summary);
       } catch (err) {
-        return sendJson(response, request, 500, { error: "Internal server error" });
+        return sendJson(response, 500, { error: "Internal server error" });
       }
     }
 
@@ -1635,7 +1630,7 @@ const server = createServer(async (request, response) => {
           summary: getProviderReadinessSummary(process.env)
         });
       } catch (err) {
-        return sendJson(response, 500, { error: "Internal server error" }, { error: "Internal server error" });
+        return sendJson(response, 500, { error: "Internal server error" });
       }
     }
 
@@ -1672,7 +1667,7 @@ const server = createServer(async (request, response) => {
         
         return sendJson(response, 200, healthResults);
       } catch (err) {
-        return sendJson(response, 500, { error: "Internal server error" }, { error: "Internal server error" });
+        return sendJson(response, 500, { error: "Internal server error" });
       }
     }
 
@@ -1681,9 +1676,9 @@ const server = createServer(async (request, response) => {
         const body = await readRequestBody(request);
         const payload = parseCreateAgentInput(body);
         const agent = registry.createAgent(payload);
-        return sendJson(response, 201, { agent }, { agent });
+        return sendJson(response, 201, { agent });
       } catch (err) {
-        return sendJson(response, 400, { error: err.message || "Invalid request body" }, { error: err.message || "Invalid request body" });
+        return sendJson(response, 400, { error: err.message || "Invalid request body" });
       }
     }
 
@@ -1692,9 +1687,9 @@ const server = createServer(async (request, response) => {
         const body = await readRequestBody(request);
         const payload = parseCreateLinkInput(body);
         const link = registry.createLink(payload);
-        return sendJson(response, 201, { link }, { link });
+        return sendJson(response, 201, { link });
       } catch (err) {
-        return sendJson(response, 400, { error: err.message || "Invalid request body" }, { error: err.message || "Invalid request body" });
+        return sendJson(response, 400, { error: err.message || "Invalid request body" });
       }
     }
 
@@ -1709,14 +1704,14 @@ const server = createServer(async (request, response) => {
             filePath.includes('..') || filePath.includes('~') || 
             filePath.includes('//') || filePath.includes('\0') ||
             !filePath || filePath.length > 1024) {
-          return sendJson(response, 403, { error: "Forbidden: Invalid path" }, { error: "Forbidden: Invalid path" });
+          return sendJson(response, 403, { error: "Forbidden: Invalid path" });
         }
         
         // Check file exists and is readable
         try {
           const stats = await readFile(filePath, { throwIfNoEntry: false });
           if (!stats) {
-            return sendJson(response, 404, { error: "File not found" }, { error: "File not found" });
+            return sendJson(response, 404, { error: "File not found" });
           }
           
           // Security: Don't serve sensitive files or directories
@@ -1726,13 +1721,13 @@ const server = createServer(async (request, response) => {
           
           // Check for sensitive file names
           if (sensitiveFiles.some(sensitive => fileName.includes(sensitive))) {
-            return sendJson(response, 403, { error: "Forbidden: Cannot access this file" }, { error: "Forbidden: Cannot access this file" });
+            return sendJson(response, 403, { error: "Forbidden: Cannot access this file" });
           }
           
           // Check for sensitive file extensions
           const fileExtension = extname(filePath).toLowerCase();
           if (sensitiveExtensions.includes(fileExtension)) {
-            return sendJson(response, 403, { error: "Forbidden: Cannot access this file type" }, { error: "Forbidden: Cannot access this file type" });
+            return sendJson(response, 403, { error: "Forbidden: Cannot access this file type" });
           }
           
           // Security headers for static files
@@ -1746,15 +1741,15 @@ const server = createServer(async (request, response) => {
           return;
         } catch (fileErr) {
           console.error('File access error:', fileErr);
-          return sendJson(response, 404, { error: "File not found" }, { error: "File not found" });
+          return sendJson(response, 404, { error: "File not found" });
         }
       } catch (err) {
         console.error('File serving error:', err);
-        return sendJson(response, 500, { error: "Internal server error" }, { error: "Internal server error" });
+        return sendJson(response, 500, { error: "Internal server error" });
       }
     }
 
-    sendJson(response, 404, { error: "Not found" }, { error: "Not found" });
+    sendJson(response, 404, { error: "Not found" });
   } catch (error) {
     // Use standardized error handling
     handleError(error, request, response);
