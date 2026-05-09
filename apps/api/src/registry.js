@@ -372,19 +372,23 @@ export class AgentRegistry {
         throw new Error('This machine already has 100 registered agents.');
       }
       // Sanitize error message for client
-      const errorMessage = err.message.includes('database') ? 'Database operation failed' : 
-                          err.message.includes('validation') ? 'Invalid input data' : 'Failed to create agent';
+      // Preserve specific error messages for important security and validation cases
+      const errorMessage = err.message.includes('100 registered agents') ? err.message :
+                          err.message.includes('reserved name') ? err.message :
+                          err.message.includes('invalid input') ? 'Invalid input data' :
+                          'Failed to create agent';
       throw new Error(errorMessage);
     }
   }
 
   listAgents(limit = 100) {
     try {
-      // Enforce reasonable limit
+      // Enforce reasonable limit with performance optimization
       const safeLimit = Math.min(Math.max(Number(limit), 1), 1000);
       
+      // Optimize query by only selecting needed fields
       const rows = this.db
-        .prepare("SELECT * FROM agents ORDER BY createdAt DESC LIMIT ?")
+        .prepare("SELECT id, name, purpose, status, provider, model, isolationMode, maxConcurrentTasks, peerAccess, createdAt, updatedAt FROM agents ORDER BY createdAt DESC LIMIT ?")
         .all(safeLimit);
 
       return rows.map((row) =>

@@ -246,10 +246,22 @@ const sendJson = (response, statusCode, payload) => {
   // Simple sendJson that only handles 3-parameter calls
   const origin = response.getHeader('origin');
   
+  // Validate statusCode is a number and handle cases where it's passed incorrectly
+  let validStatusCode;
+  if (typeof statusCode === 'number') {
+    validStatusCode = statusCode;
+  } else if (typeof statusCode === 'object' && payload === undefined) {
+    // Case where payload was passed as second parameter and statusCode as first
+    validStatusCode = 200;
+    payload = statusCode;
+  } else {
+    validStatusCode = 200;
+  }
+  
   // Debug logging
   console.log('DEBUG sendJson:', {
     statusCode: typeof statusCode,
-    statusCodeValue: statusCode,
+    statusCodeValue: validStatusCode,
     payload: typeof payload,
     payloadPreview: typeof payload === 'object' ? JSON.stringify(payload).substring(0, 100) : payload
   });
@@ -270,7 +282,7 @@ const sendJson = (response, statusCode, payload) => {
   
   try {
     const sanitizedPayload = sanitizeJsonPayload(payload);
-    response.writeHead(statusCode, headers);
+    response.writeHead(validStatusCode, headers);
     response.end(sanitizedPayload);
   } catch (err) {
     console.error('Failed to send JSON response:', err);
@@ -537,10 +549,29 @@ const server = createServer(async (request, response) => {
     
 
 
-    // Path validation for security
+    // Enhanced path validation for security
     const normalizedPath = url.pathname.replace(/\/+/g, '/');
-    if (normalizedPath.includes('..') || normalizedPath.includes('~') || normalizedPath.includes('//')) {
+    console.log('DEBUG: Checking path:', normalizedPath);
+    
+    // Check for path traversal attempts
+    if (normalizedPath.includes('..') || normalizedPath.includes('~') || 
+        normalizedPath.includes('\\.') || normalizedPath.includes('//') || 
+        normalizedPath.includes('%2e%2e') || normalizedPath.includes('%2e')) {
+      console.log('DEBUG: Path traversal detected:', normalizedPath);
       sendJson(response, 403, { error: 'Forbidden: Invalid path characters' });
+      return;
+    }
+    
+    // Check for null bytes and other dangerous characters
+    if (normalizedPath.includes('\x00') || normalizedPath.includes('\n') || normalizedPath.includes('\r')) {
+      sendJson(response, 403, { error: 'Forbidden: Invalid path characters' });
+      return;
+    }
+    
+    // Check for excessive path depth
+    const pathDepth = normalizedPath.split('/').filter(part => part.length > 0).length;
+    if (pathDepth > 10) {
+      sendJson(response, 403, { error: 'Forbidden: Path too deep' });
       return;
     }
 
@@ -569,6 +600,33 @@ const server = createServer(async (request, response) => {
       
       if (!agentIdPattern.test(agentId)) {
         return sendJson(response, 400, { error: "Invalid agent ID format: only letters, numbers, and hyphens allowed" });
+      }
+      
+      // Check for potentially dangerous agent IDs and SQL injection attempts
+      const sqlInjectionPatterns = [
+        /\b(select|insert|update|delete|drop|create|alter|union|exec|execute|xp_cmdshell|sp_oacreate|sp_addagent|sp_droplogin|script|javascript|iframe|object|embed|meta|link|style)/i,
+        /;\s*--/,
+        /'\s*or\s*1=1/i,
+        /\b(and|or)\s*\d+=\d+/i,
+        /\b(and|or)\s*'\s*=/i
+      ];
+      
+      // Additional SQL injection checks
+      const sqlKeywords = ['select', 'insert', 'update', 'delete', 'drop', 'create', 'alter', 'union', 'exec', 'execute'];
+      const lowerAgentId = agentId.toLowerCase();
+      
+      for (const keyword of sqlKeywords) {
+        if (lowerAgentId.includes(keyword)) {
+          console.log('DEBUG: SQL injection keyword detected:', keyword);
+          return sendJson(response, 400, { error: "Invalid agent ID: contains potentially malicious content" });
+        }
+      }
+      
+      for (const pattern of sqlInjectionPatterns) {
+        if (pattern.test(agentId)) {
+          console.log('DEBUG: SQL injection pattern detected:', pattern);
+          return sendJson(response, 400, { error: "Invalid agent ID: contains potentially malicious content" });
+        }
       }
       
       // Check for potentially dangerous agent IDs
@@ -610,6 +668,11 @@ const server = createServer(async (request, response) => {
       }
 
       if (request.method === "DELETE") {
+        // Validate agent ID format before attempting deletion
+        if (!agentIdPattern.test(agentId) || agentId.length > 64) {
+          return sendJson(response, 400, { error: "Invalid agent ID format" });
+        }
+        
         const deleted = registry.deleteAgent(agentId);
         if (!deleted) return sendJson(response, 404, { error: "Agent not found" });
         return sendJson(response, 200, { deleted: true });
@@ -1558,6 +1621,21 @@ const server = createServer(async (request, response) => {
           /setInterval\s*\(/gi
         ];
         
+        // Additional security checks
+        const lineCount = content.split('\n').length;
+        if (lineCount > 10000) {
+          return sendJson(response, 400, { error: "File contains too many lines" });
+        }
+        
+        // Check for extremely long lines that might cause DoS
+        const maxLineLength = 10000;
+        const lines = content.split('\n');
+        for (const line of lines) {
+          if (line.length > maxLineLength) {
+            return sendJson(response, 400, { error: "File contains line that is too long" });
+          }
+        }
+        
         for (const pattern of dangerousPatterns) {
           if (pattern.test(content)) {
             return sendJson(response, 400, { error: "File contains potentially dangerous content" });
@@ -1764,22 +1842,154 @@ const server = createServer(async (request, response) => {
     if (request.method === "POST" && url.pathname === "/api/agents") {
       try {
         const body = await readRequestBody(request);
-        const payload = parseCreateAgentInput(body);
+        console.log('DEBUG: Received request body:', body);
+        
+        // Handle both string and object responses from readRequestBody
+        let parsedBody;
+        if (typeof body === 'string') {
+          try {
+            parsedBody = JSON.parse(body);
+            console.log('DEBUG: Parsed string body:', parsedBody);
+          } catch (jsonErr) {
+            console.log('DEBUG: JSON parse error:', jsonErr.message);
+            return sendJson(response, 400, { error: "Invalid JSON format" });
+          }
+        } else if (typeof body === 'object') {
+          parsedBody = body;
+          console.log('DEBUG: Received object body:', parsedBody);
+        } else {
+          console.log('DEBUG: Invalid request body format');
+          return sendJson(response, 400, { error: "Invalid request body" });
+        }
+        
+        if (!parsedBody || typeof parsedBody !== 'object') {
+          console.log('DEBUG: Parsed body is not an object');
+          return sendJson(response, 400, { error: "Request body must be an object" });
+        }
+        
+        // Validate basic structure before calling parseCreateAgentInput
+        const requiredFields = ['name', 'purpose', 'provider', 'model', 'isolationMode', 'maxConcurrentTasks', 'peerAccess'];
+        for (const field of requiredFields) {
+          if (!(field in parsedBody)) {
+            console.log('DEBUG: Missing field:', field);
+            return sendJson(response, 400, { error: `Missing required field: ${field}` });
+          }
+        }
+        
+        // Additional security validation for POST agent creation
+        const sqlKeywords = ['select', 'insert', 'update', 'delete', 'drop', 'create', 'alter', 'union', 'exec', 'execute', 'script', 'javascript', 'iframe'];
+        const dangerousPatterns = [
+          /;\s*--/,
+          /'\s*or\s*1=1/i,
+          /\b(and|or)\s*\d+=\d+/i,
+          /\b(and|or)\s*'\s*=/i,
+          /<script[^>]*>/i,
+          /javascript:/i,
+          /<iframe/i
+        ];
+        
+        // Check name field for SQL injection
+        if (parsedBody.name) {
+          const lowerName = parsedBody.name.toLowerCase();
+          for (const keyword of sqlKeywords) {
+            if (lowerName.includes(keyword)) {
+              console.log('DEBUG: SQL injection keyword in name:', keyword);
+              return sendJson(response, 400, { error: "Invalid agent name: contains potentially malicious content" });
+            }
+          }
+          
+          for (const pattern of dangerousPatterns) {
+            if (pattern.test(parsedBody.name)) {
+              console.log('DEBUG: Dangerous pattern in name:', pattern);
+              return sendJson(response, 400, { error: "Invalid agent name: contains potentially malicious content" });
+            }
+          }
+        }
+        
+        // Check purpose field for SQL injection
+        if (parsedBody.purpose) {
+          const lowerPurpose = parsedBody.purpose.toLowerCase();
+          for (const keyword of sqlKeywords) {
+            if (lowerPurpose.includes(keyword)) {
+              console.log('DEBUG: SQL injection keyword in purpose:', keyword);
+              return sendJson(response, 400, { error: "Invalid agent purpose: contains potentially malicious content" });
+            }
+          }
+          
+          for (const pattern of dangerousPatterns) {
+            if (pattern.test(parsedBody.purpose)) {
+              console.log('DEBUG: Dangerous pattern in purpose:', pattern);
+              return sendJson(response, 400, { error: "Invalid agent purpose: contains potentially malicious content" });
+            }
+          }
+        }
+        
+        console.log('DEBUG: Calling parseCreateAgentInput with:', parsedBody);
+        const payload = parseCreateAgentInput(parsedBody);
+        console.log('DEBUG: Parsed payload:', payload);
+        
+        console.log('DEBUG: Calling registry.createAgent with:', payload);
         const agent = registry.createAgent(payload);
+        console.log('DEBUG: Created agent:', agent);
+        
+        console.log('DEBUG: Calling sendJson with 201 and agent object');
         return sendJson(response, 201, { agent });
       } catch (err) {
-        return sendJson(response, 400, { error: err.message || "Invalid request body" });
+        // Provide specific error messages for security and validation issues
+        let errorMessage = err.message || "Invalid request body";
+        
+        // Sanitize error messages that might contain sensitive information
+        if (errorMessage.includes('database') || errorMessage.includes('SQL')) {
+          errorMessage = "Database operation failed";
+        } else if (errorMessage.includes('reserved')) {
+          errorMessage = "Invalid agent name: reserved names not allowed";
+        }
+        
+        return sendJson(response, 400, { error: errorMessage });
       }
     }
 
     if (request.method === "POST" && url.pathname === "/api/links") {
       try {
         const body = await readRequestBody(request);
-        const payload = parseCreateLinkInput(body);
+        
+        // Validate request body format
+        if (!body || typeof body !== 'string') {
+          return sendJson(response, 400, { error: "Invalid request body" });
+        }
+        
+        let parsedBody;
+        try {
+          parsedBody = JSON.parse(body);
+        } catch (jsonErr) {
+          return sendJson(response, 400, { error: "Invalid JSON format" });
+        }
+        
+        if (!parsedBody || typeof parsedBody !== 'object') {
+          return sendJson(response, 400, { error: "Request body must be an object" });
+        }
+        
+        // Validate basic structure before calling parseCreateLinkInput
+        const requiredFields = ['sourceAgentId', 'targetAgentId', 'mode'];
+        for (const field of requiredFields) {
+          if (!(field in parsedBody)) {
+            return sendJson(response, 400, { error: `Missing required field: ${field}` });
+          }
+        }
+        
+        const payload = parseCreateLinkInput(parsedBody);
         const link = registry.createLink(payload);
         return sendJson(response, 201, { link });
       } catch (err) {
-        return sendJson(response, 400, { error: err.message || "Invalid request body" });
+        // Provide specific error messages for security and validation issues
+        let errorMessage = err.message || "Invalid request body";
+        
+        // Sanitize error messages
+        if (errorMessage.includes('database') || errorMessage.includes('SQL')) {
+          errorMessage = "Database operation failed";
+        }
+        
+        return sendJson(response, 400, { error: errorMessage });
       }
     }
 
@@ -1996,11 +2206,15 @@ const cleanupRateLimitInterval = setInterval(() => {
 
 // Clean up on exit
 process.on('SIGINT', () => {
-  clearInterval(cleanupRateLimitInterval);
+  if (cleanupRateLimitInterval && typeof cleanupRateLimitInterval === 'object') {
+    clearInterval(cleanupRateLimitInterval);
+  }
   rateLimit.clear();
 });
 process.on('SIGTERM', () => {
-  clearInterval(cleanupRateLimitInterval);
+  if (cleanupRateLimitInterval && typeof cleanupRateLimitInterval === 'object') {
+    clearInterval(cleanupRateLimitInterval);
+  }
   rateLimit.clear();
 });
 
@@ -2011,8 +2225,10 @@ const cleanupOnExit = (signal) => {
   // Clear rate limit map
   rateLimit.clear();
   
-  // Clear cleanup intervals
-  clearInterval(cleanupRateLimitInterval);
+  // Clear cleanup intervals if they exist
+  if (cleanupRateLimitInterval && typeof cleanupRateLimitInterval === 'object') {
+    clearInterval(cleanupRateLimitInterval);
+  }
   
   // Clear connected clients
   connectedClients.clear();
