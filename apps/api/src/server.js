@@ -4,7 +4,7 @@ import { extname, join, normalize, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setInterval } from "node:timers";
 import { WebSocketServer } from "ws";
-import { createHash, createHmac } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { inspect } from "node:util";
 
 import {
@@ -55,12 +55,22 @@ const MAX_CONCURRENT_CONNECTIONS = 100; // Maximum concurrent connections per IP
 const CONN_CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
 // Security: Secret for HMAC-based rate limiting
-const RATE_LIMIT_SECRET = process.env.RATE_LIMIT_SECRET || crypto.randomBytes(32).toString('hex');
+const RATE_LIMIT_SECRET = process.env.RATE_LIMIT_SECRET || randomBytes(32).toString('hex');
+
+// Settings object that can be updated at runtime
+const settings = {
+  version: VERSION,
+  defaultModel: "qwen3",
+  maxAgents: 100,
+  supportedIsolationModes: ["isolated", "selective", "mesh"],
+  supportedLinkModes: ["observe", "message", "delegate"],
+  providers: listProviders().length
+};
 
 // Enhanced rate limiting with better security
 const createRateLimitKey = (clientIP, timestamp) => {
   // Hash the IP for better privacy and security
-  const ipHash = crypto.createHash('sha256').update(clientIP).digest('hex').substring(0, 16);
+  const ipHash = createHash('sha256').update(clientIP).digest('hex').substring(0, 16);
   const windowStart = Math.floor(timestamp / RATE_LIMIT_WINDOW) * RATE_LIMIT_WINDOW;
   return `${ipHash}:${windowStart}`;
 };
@@ -92,16 +102,22 @@ const isOriginAllowed = (origin) => {
 // Sanitize JSON payload to prevent injection
 const sanitizeJsonPayload = (payload) => {
   try {
+    if (payload === undefined || payload === null) {
+      return JSON.stringify({ error: 'No data provided' });
+    }
     const jsonString = JSON.stringify(payload);
     // Remove potentially dangerous characters that could break JSON parsing
     return jsonString.replace(/\u0000/g, '').replace(/\r\n/g, '\n');
   } catch (err) {
+    console.error('Sanitization error:', err, 'Payload:', payload);
     throw new Error('Failed to sanitize payload');
   }
 };
 
-const sendJson = (response, statusCode, payload) => {
-  const origin = response.getHeader('origin');
+const sendJson = (response, req1, statusCode, payload) => {
+  // Handle both old and new function signatures
+  const request = (req1 && req1.url) ? req1 : (req1 && req1.method ? { url: '', method: req1 } : null);
+  const origin = request?.headers?.origin || response.getHeader('origin');
   const headers = {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
@@ -114,7 +130,8 @@ const sendJson = (response, statusCode, payload) => {
   if (origin && isOriginAllowed(origin)) {
     headers["Access-Control-Allow-Origin"] = origin;
     headers["Access-Control-Allow-Credentials"] = "true";
-  } else if (request.url?.startsWith('/api/')) {
+  } else if (request && request.url?.startsWith('/api/')) {
+    console.log('API endpoint blocked for origin:', origin);
     // Block unauthorized origins for API endpoints
     response.writeHead(403, {
       "Content-Type": "application/json; charset=utf-8",
@@ -234,12 +251,20 @@ const readRequestBody = async (request) => {
             throw new Error(`Payload too large (max ${MAX_JSON_PAYLOAD_SIZE / 1024 / 1024}MB)`);
           }
           raw += chunk;
+        } else if (chunk && Buffer.isBuffer(chunk)) {
+          totalLength += chunk.length;
+          if (totalLength > MAX_JSON_PAYLOAD_SIZE) {
+            throw new Error(`Payload too large (max ${MAX_JSON_PAYLOAD_SIZE / 1024 / 1024}MB)`);
+          }
+          raw += chunk.toString('utf8');
         }
       }
     })();
     
     await Promise.race([readPromise, timeoutPromise]);
 
+
+    
     if (!raw || raw.trim().length === 0) return {};
     
     try {
@@ -316,7 +341,7 @@ const server = createServer(async (request, response) => {
   if (request.url?.startsWith('/api/') && request.method !== 'OPTIONS') {
     const origin = request.headers.origin;
     if (!isOriginAllowed(origin)) {
-      sendJson(response, 403, { error: 'Forbidden: Origin not allowed' });
+      sendJson(response, request, 403, { error: 'Forbidden: Origin not allowed' });
       return;
     }
   }
@@ -359,7 +384,7 @@ const server = createServer(async (request, response) => {
   try {
     // Validate request method and path
     if (!request.method || !request.url) {
-      sendJson(response, 400, { error: 'Bad request: missing method or URL' });
+      sendJson(response, request, 400, { error: 'Bad request: missing method or URL' });
       return;
     }
 
@@ -368,19 +393,21 @@ const server = createServer(async (request, response) => {
     try {
       url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
     } catch (err) {
-      sendJson(response, 400, { error: 'Invalid URL format' });
+      sendJson(response, request, 400, { error: 'Invalid URL format' });
       return;
     }
+    
+
 
     // Path validation for security
     const normalizedPath = url.pathname.replace(/\/+/g, '/');
     if (normalizedPath.includes('..') || normalizedPath.includes('~') || normalizedPath.includes('//')) {
-      sendJson(response, 403, { error: 'Forbidden: Invalid path characters' });
+      sendJson(response, request, 403, { error: 'Forbidden: Invalid path characters' });
       return;
     }
 
     if (request.method === "GET" && url.pathname === "/health") {
-      return sendJson(response, 200, {
+      return sendJson(response, request, 200, {
         ok: true,
         service: "zsiistant-api",
         version: VERSION,
@@ -399,24 +426,24 @@ const server = createServer(async (request, response) => {
       
       // Validate agent ID format with comprehensive checks
       if (!agentId || typeof agentId !== 'string' || agentId.length > 64 || agentId.length < 1) {
-        return sendJson(response, 400, { error: "Invalid agent ID format" });
+        return sendJson(response, 400, { error: "Invalid agent ID format" }, { error: "Invalid agent ID format" });
       }
       
       if (!agentIdPattern.test(agentId)) {
-        return sendJson(response, 400, { error: "Invalid agent ID format: only letters, numbers, and hyphens allowed" });
+        return sendJson(response, request, 400, { error: "Invalid agent ID format: only letters, numbers, and hyphens allowed" });
       }
       
       // Check for potentially dangerous agent IDs
       if (agentId.toLowerCase().includes('admin') || 
           agentId.toLowerCase().includes('system') || 
           agentId.toLowerCase().includes('root')) {
-        return sendJson(response, 400, { error: "Invalid agent ID: reserved name" });
+        return sendJson(response, 400, { error: "Invalid agent ID: reserved name" }, { error: "Invalid agent ID: reserved name" });
       }
 
       if (request.method === "GET") {
         const agent = registry.getAgent(agentId);
-        if (!agent) return sendJson(response, 404, { error: "Agent not found" });
-        return sendJson(response, 200, { agent });
+        if (!agent) return sendJson(response, 404, { error: "Agent not found" }, { error: "Agent not found" });
+        return sendJson(response, 200, { agent }, { agent });
       }
 
       if (request.method === "PATCH") {
@@ -425,29 +452,29 @@ const server = createServer(async (request, response) => {
           
           // Validate update input
           if (body.name && (typeof body.name !== 'string' || body.name.length > 80)) {
-            return sendJson(response, 400, { error: "Invalid agent name" });
+            return sendJson(response, 400, { error: "Invalid agent name" }, { error: "Invalid agent name" });
           }
           
           if (body.purpose && (typeof body.purpose !== 'string' || body.purpose.length > 240)) {
-            return sendJson(response, 400, { error: "Invalid agent purpose" });
+            return sendJson(response, 400, { error: "Invalid agent purpose" }, { error: "Invalid agent purpose" });
           }
           
           if (body.maxConcurrentTasks && (!Number.isInteger(body.maxConcurrentTasks) || body.maxConcurrentTasks < 1 || body.maxConcurrentTasks > 32)) {
-            return sendJson(response, 400, { error: "Invalid maxConcurrentTasks" });
+            return sendJson(response, 400, { error: "Invalid maxConcurrentTasks" }, { error: "Invalid maxConcurrentTasks" });
           }
           
           const agent = registry.updateAgent(agentId, body);
-          if (!agent) return sendJson(response, 404, { error: "Agent not found" });
-          return sendJson(response, 200, { agent });
+          if (!agent) return sendJson(response, 404, { error: "Agent not found" }, { error: "Agent not found" });
+          return sendJson(response, 200, { agent }, { agent });
         } catch (err) {
-          return sendJson(response, 400, { error: "Invalid request body" });
+          return sendJson(response, 400, { error: "Invalid request body" }, { error: "Invalid request body" });
         }
       }
 
       if (request.method === "DELETE") {
         const deleted = registry.deleteAgent(agentId);
-        if (!deleted) return sendJson(response, 404, { error: "Agent not found" });
-        return sendJson(response, 200, { deleted: true });
+        if (!deleted) return sendJson(response, 404, { error: "Agent not found" }, { error: "Agent not found" });
+        return sendJson(response, 200, { deleted: true }, { deleted: true });
       }
     }
 
@@ -457,7 +484,7 @@ const server = createServer(async (request, response) => {
 
     if (sessionsMatch && request.method === "GET") {
       const sessions = registry.listSessions(sessionsMatch[1]);
-      return sendJson(response, 200, { sessions });
+      return sendJson(response, 200, { sessions }, { sessions });
     }
 
     if (sessionsMatch && request.method === "POST") {
@@ -466,28 +493,28 @@ const server = createServer(async (request, response) => {
         
         // Validate agent ID format
         if (!agentIdPattern.test(agentId) || agentId.length > 64) {
-          return sendJson(response, 400, { error: "Invalid agent ID format" });
+          return sendJson(response, 400, { error: "Invalid agent ID format" }, { error: "Invalid agent ID format" });
         }
         
         const agent = registry.getAgent(agentId);
-        if (!agent) return sendJson(response, 404, { error: "Agent not found" });
+        if (!agent) return sendJson(response, 404, { error: "Agent not found" }, { error: "Agent not found" });
         
         const body = await readRequestBody(request);
         
         // Validate session input
         if (body.title && (typeof body.title !== 'string' || body.title.length > 200)) {
-          return sendJson(response, 400, { error: "Invalid session title" });
+          return sendJson(response, 400, { error: "Invalid session title" }, { error: "Invalid session title" });
         }
         
         if (body.model && (typeof body.model !== 'string' || body.model.length > 120)) {
-          return sendJson(response, 400, { error: "Invalid session model" });
+          return sendJson(response, 400, { error: "Invalid session model" }, { error: "Invalid session model" });
         }
         
         const session = registry.createSession(agentId, body);
-        if (!session) return sendJson(response, 404, { error: "Agent not found" });
-        return sendJson(response, 201, { session });
+        if (!session) return sendJson(response, 404, { error: "Agent not found" }, { error: "Agent not found" });
+        return sendJson(response, 201, { session }, { session });
       } catch (err) {
-        return sendJson(response, 400, { error: "Invalid request body" });
+        return sendJson(response, 400, { error: "Invalid request body" }, { error: "Invalid request body" });
       }
     }
 
@@ -501,12 +528,12 @@ const server = createServer(async (request, response) => {
         // Validate IDs format
         if (!agentIdPattern.test(agentId) || agentId.length > 64 || 
             !agentIdPattern.test(sessionId) || sessionId.length > 64) {
-          return sendJson(response, 400, { error: "Invalid ID format" });
+          return sendJson(response, 400, { error: "Invalid ID format" }, { error: "Invalid ID format" });
         }
         
         if (request.method === "GET") {
           const messages = registry.listMessages(agentId, sessionId);
-          return sendJson(response, 200, { messages });
+          return sendJson(response, 200, { messages }, { messages });
         }
 
         if (request.method === "POST") {
@@ -515,23 +542,23 @@ const server = createServer(async (request, response) => {
           // Validate message input
           // Validate role with enhanced security
           if (!body.role || !['user', 'assistant', 'system'].includes(body.role)) {
-            return sendJson(response, 400, { error: "Invalid message role: must be user, assistant, or system" });
+            return sendJson(response, request, 400, { error: "Invalid message role: must be user, assistant, or system" });
           }
           
           // Validate and sanitize content with comprehensive checks
           if (!body.content || typeof body.content !== 'string') {
-            return sendJson(response, 400, { error: "Message content is required and must be a string" });
+            return sendJson(response, 400, { error: "Message content is required and must be a string" }, { error: "Message content is required and must be a string" });
           }
           
           const originalContent = body.content;
           
           // Enhanced content validation
           if (originalContent.trim().length === 0) {
-            return sendJson(response, 400, { error: "Message content cannot be empty" });
+            return sendJson(response, 400, { error: "Message content cannot be empty" }, { error: "Message content cannot be empty" });
           }
           
           if (originalContent.length > 50000) {
-            return sendJson(response, 400, { error: "Message content too long (max 50000 characters)" });
+            return sendJson(response, request, 400, { error: "Message content too long (max 50000 characters)" });
           }
           
           // Check for potential injection attacks
@@ -550,7 +577,7 @@ const server = createServer(async (request, response) => {
           
           for (const pattern of dangerousPatterns) {
             if (pattern.test(originalContent)) {
-              return sendJson(response, 400, { error: "Message contains invalid or potentially dangerous content" });
+              return sendJson(response, 400, { error: "Message contains invalid or potentially dangerous content" }, { error: "Message contains invalid or potentially dangerous content" });
             }
           }
           
@@ -560,7 +587,7 @@ const server = createServer(async (request, response) => {
               originalContent.includes('Function(') ||
               originalContent.includes('setTimeout') ||
               originalContent.includes('setInterval')) {
-            return sendJson(response, 400, { error: "Message contains potentially dangerous JavaScript" });
+            return sendJson(response, 400, { error: "Message contains potentially dangerous JavaScript" }, { error: "Message contains potentially dangerous JavaScript" });
           }
           
           // Validate token counts with bounds checking
@@ -568,11 +595,11 @@ const server = createServer(async (request, response) => {
           const tokensOut = body.tokensOut || 0;
           
           if (!Number.isInteger(tokensIn) || tokensIn < 0 || tokensIn > 1000000) {
-            return sendJson(response, 400, { error: "Invalid tokensIn value: must be a positive integer less than 1,000,000" });
+            return sendJson(response, 400, { error: "Invalid tokensIn value: must be a positive integer less than 1,000,000" }, { error: "Invalid tokensIn value: must be a positive integer less than 1,000,000" });
           }
           
           if (!Number.isInteger(tokensOut) || tokensOut < 0 || tokensOut > 1000000) {
-            return sendJson(response, 400, { error: "Invalid tokensOut value: must be a positive integer less than 1,000,000" });
+            return sendJson(response, 400, { error: "Invalid tokensOut value: must be a positive integer less than 1,000,000" }, { error: "Invalid tokensOut value: must be a positive integer less than 1,000,000" });
           }
           
           // Create message with validated data
@@ -583,11 +610,11 @@ const server = createServer(async (request, response) => {
             tokensOut,
             model: body.model || ''
           });
-          if (!message) return sendJson(response, 404, { error: "Not found" });
-          return sendJson(response, 201, { message });
+          if (!message) return sendJson(response, 404, { error: "Not found" }, { error: "Not found" });
+          return sendJson(response, 201, { message }, { message });
         }
       } catch (err) {
-        return sendJson(response, 400, { error: "Invalid request body" });
+        return sendJson(response, 400, { error: "Invalid request body" }, { error: "Invalid request body" });
       }
     }
 
@@ -599,37 +626,141 @@ const server = createServer(async (request, response) => {
         
         // Validate link deletion input
         if (!body.sourceAgentId || !body.targetAgentId) {
-          return sendJson(response, 400, { error: "sourceAgentId and targetAgentId are required" });
+          return sendJson(response, 400, { error: "sourceAgentId and targetAgentId are required" }, { error: "sourceAgentId and targetAgentId are required" });
         }
         
         if (!agentIdPattern.test(body.sourceAgentId) || body.sourceAgentId.length > 64 ||
             !agentIdPattern.test(body.targetAgentId) || body.targetAgentId.length > 64) {
-          return sendJson(response, 400, { error: "Invalid agent ID format" });
+          return sendJson(response, 400, { error: "Invalid agent ID format" }, { error: "Invalid agent ID format" });
         }
         
         if (body.sourceAgentId === body.targetAgentId) {
-          return sendJson(response, 400, { error: "An agent cannot create a link to itself" });
+          return sendJson(response, 400, { error: "An agent cannot create a link to itself" }, { error: "An agent cannot create a link to itself" });
         }
         
         const deleted = registry.deleteLink(body);
-        if (!deleted) return sendJson(response, 404, { error: "Link not found" });
-        return sendJson(response, 200, { deleted: true });
+        if (!deleted) return sendJson(response, 404, { error: "Link not found" }, { error: "Link not found" });
+        return sendJson(response, 200, { deleted: true }, { deleted: true });
       } catch (err) {
-        return sendJson(response, 400, { error: "Invalid request body" });
+        return sendJson(response, 400, { error: "Invalid request body" }, { error: "Invalid request body" });
       }
     }
 
     /* ─── Settings ─── */
 
     if (request.method === "GET" && url.pathname === "/api/settings") {
-      return sendJson(response, 200, {
-        version: VERSION,
-        defaultModel: "qwen3",
-        maxAgents: 100,
-        supportedIsolationModes: ["isolated", "selective", "mesh"],
-        supportedLinkModes: ["observe", "message", "delegate"],
-        providers: listProviders().length
+      // Return current settings
+      return sendJson(response, request, 200, {
+        ...settings,
+        providers: listProviders().length // Update providers count dynamically
       });
+    }
+
+    if (request.method === "PATCH" && url.pathname === "/api/settings") {
+      try {
+        const body = await readRequestBody(request);
+
+        
+        // Validate settings input with comprehensive checks
+        if (!body || typeof body !== 'object') {
+          return sendJson(response, request, 400, { error: "Settings payload must be an object" });
+        }
+        
+        const updates = {};
+        const originalSettings = { ...settings, providers: listProviders().length };
+        
+        // Validate and process each setting update
+        if (body.defaultModel !== undefined) {
+          if (typeof body.defaultModel !== 'string' || body.defaultModel.trim().length === 0 || body.defaultModel.length > 120) {
+            return sendJson(response, request, 400, { error: "Invalid defaultModel: must be a string between 1 and 120 characters" });
+          }
+          updates.defaultModel = body.defaultModel.trim();
+        }
+        
+        if (body.maxAgents !== undefined) {
+          if (!Number.isInteger(body.maxAgents) || body.maxAgents < 1 || body.maxAgents > 1000) {
+            return sendJson(response, request, 400, { error: "Invalid maxAgents: must be an integer between 1 and 1000" });
+          }
+          updates.maxAgents = body.maxAgents;
+        }
+        
+        if (body.rateLimit !== undefined) {
+          if (!Number.isInteger(body.rateLimit) || body.rateLimit < 1 || body.rateLimit > 10000) {
+            return sendJson(response, request, 400, { error: "Invalid rateLimit: must be an integer between 1 and 10000" });
+          }
+          updates.rateLimit = body.rateLimit;
+          // Update the rate limiting configuration
+          MAX_REQUESTS_PER_MINUTE = body.rateLimit;
+        }
+        
+        if (body.timeout !== undefined) {
+          if (!Number.isInteger(body.timeout) || body.timeout < 1000 || body.timeout > 300000) {
+            return sendJson(response, 400, { error: "Invalid timeout: must be an integer between 1000 and 300000 milliseconds" }, { error: "Invalid timeout: must be an integer between 1000 and 300000 milliseconds" });
+          }
+          updates.timeout = body.timeout;
+          // Update request timeout configuration
+          MAX_REQUEST_TIMEOUT = body.timeout;
+        }
+        
+        if (body.supportedIsolationModes !== undefined) {
+          if (!Array.isArray(body.supportedIsolationModes) || body.supportedIsolationModes.length === 0 || body.supportedIsolationModes.length > 20) {
+            return sendJson(response, request, 400, { error: "Invalid supportedIsolationModes: must be an array with 1-20 items" });
+          }
+          
+          const validModes = ["isolated", "selective", "mesh"];
+          for (const mode of body.supportedIsolationModes) {
+            if (typeof mode !== 'string' || !validModes.includes(mode)) {
+              return sendJson(response, request, 400, { error: `Invalid isolation mode: ${mode}. Must be one of: ${validModes.join(', ')}` });
+            }
+          }
+          updates.supportedIsolationModes = body.supportedIsolationModes;
+        }
+        
+        if (body.supportedLinkModes !== undefined) {
+          if (!Array.isArray(body.supportedLinkModes) || body.supportedLinkModes.length === 0 || body.supportedLinkModes.length > 20) {
+            return sendJson(response, request, 400, { error: "Invalid supportedLinkModes: must be an array with 1-20 items" });
+          }
+          
+          const validModes = ["observe", "message", "delegate"];
+          for (const mode of body.supportedLinkModes) {
+            if (typeof mode !== 'string' || !validModes.includes(mode)) {
+              return sendJson(response, request, 400, { error: `Invalid link mode: ${mode}. Must be one of: ${validModes.join(', ')}` });
+            }
+          }
+          updates.supportedLinkModes = body.supportedLinkModes;
+        }
+        
+        if (body.providers !== undefined) {
+          if (!Number.isInteger(body.providers) || body.providers < 0 || body.providers > 100) {
+            return sendJson(response, request, 400, { error: "Invalid providers: must be an integer between 0 and 100" });
+          }
+          updates.providers = body.providers;
+        }
+        
+        // If no valid updates provided, return error
+        if (Object.keys(updates).length === 0) {
+          return sendJson(response, request, 400, { error: "No valid settings provided for update" });
+        }
+        
+        // Apply updates to global settings object
+        Object.assign(settings, updates);
+        
+        // Log the settings update for audit trail
+        console.log('Settings updated:', {
+          timestamp: Date.now(),
+          changedBy: request.headers['x-forwarded-for'] || request.socket.remoteAddress,
+          updates: updates,
+          newSettings: { ...settings }
+        });
+        
+        return sendJson(response, request, 200, {
+          settings: { ...settings },
+          updated: Object.keys(updates),
+          timestamp: Date.now()
+        });
+      } catch (err) {
+        return sendJson(response, request, 400, { error: "Invalid request body" });
+      }
     }
 
     /* ─── Usage Stats ─── */
@@ -638,8 +769,8 @@ const server = createServer(async (request, response) => {
 
     if (usageMatch && request.method === "GET") {
       const usage = registry.getAgentUsage(usageMatch[1]);
-      if (!usage) return sendJson(response, 404, { error: "Agent not found" });
-      return sendJson(response, 200, usage);
+      if (!usage) return sendJson(response, 404, { error: "Agent not found" }, { error: "Agent not found" });
+      return sendJson(response, 200, usage, usage);
     }
 
     /* ─── Global Usage Stats ─── */
@@ -651,13 +782,13 @@ const server = createServer(async (request, response) => {
         // Validate period parameter
         const validPeriods = ['daily', 'weekly', 'monthly', 'all'];
         if (!validPeriods.includes(period)) {
-          return sendJson(response, 400, { error: "Invalid period parameter. Must be: daily, weekly, monthly, or all" });
+          return sendJson(response, request, 400, { error: "Invalid period parameter. Must be: daily, weekly, monthly, or all" });
         }
         
         const usage = registry.getUsageStats(period);
-        return sendJson(response, 200, usage);
+        return sendJson(response, 200, usage, usage);
       } catch (err) {
-        return sendJson(response, 500, { error: "Internal server error" });
+        return sendJson(response, 500, { error: "Internal server error" }, { error: "Internal server error" });
       }
     }
 
@@ -668,7 +799,7 @@ const server = createServer(async (request, response) => {
     if (historyMatch && request.method === "GET") {
       const agentId = historyMatch[1];
       const agent = registry.getAgent(agentId);
-      if (!agent) return sendJson(response, 404, { error: "Agent not found" });
+      if (!agent) return sendJson(response, 404, { error: "Agent not found" }, { error: "Agent not found" });
 
       // Get recent sessions with their messages
       const sessions = registry.listSessions(agentId);
@@ -700,7 +831,7 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/logs") {
       const logs = registry.getRecentLogs(100);
-      return sendJson(response, 200, { logs });
+      return sendJson(response, 200, { logs }, { logs });
     }
 
     /* ─── Provider Health (all configured) ─── */
@@ -714,7 +845,7 @@ const server = createServer(async (request, response) => {
           results[name] = { ok: false, error: e.message };
         }
       }
-      return sendJson(response, 200, results);
+      return sendJson(response, 200, results, results);
     }
 
     /* ─── Provider Chat (direct, no agent needed) ─── */
@@ -723,11 +854,11 @@ const server = createServer(async (request, response) => {
       const body = await readRequestBody(request);
       const providerName = body.provider || DEFAULT_PROVIDER;
       const provider = providers[providerName];
-      if (!provider) return sendJson(response, 400, { error: `Provider '${providerName}' not configured. Available: ${Object.keys(providers).join(", ")}` });
+      if (!provider) return sendJson(response, request, 400, { error: `Provider '${providerName}' not configured. Available: ${Object.keys(providers).join(', ')}` });
 
       const messages = body.messages || [{ role: "user", content: body.message || "" }];
       if (!messages.length || !messages[messages.length - 1]?.content?.trim()) {
-        return sendJson(response, 400, { error: "Message is required" });
+        return sendJson(response, 400, { error: "Message is required" }, { error: "Message is required" });
       }
 
       // Check if streaming is requested
@@ -815,7 +946,7 @@ const server = createServer(async (request, response) => {
           provider: providerName,
         });
       } catch (e) {
-        return sendJson(response, 502, { error: e.message });
+        return sendJson(response, 502, { error: e.message }, { error: e.message });
       }
     }
 
@@ -826,11 +957,11 @@ const server = createServer(async (request, response) => {
     if (chatMatch && request.method === "POST") {
       const agentId = chatMatch[1];
       const agent = registry.getAgent(agentId);
-      if (!agent) return sendJson(response, 404, { error: "Agent not found" });
+      if (!agent) return sendJson(response, 404, { error: "Agent not found" }, { error: "Agent not found" });
 
       const body = await readRequestBody(request);
       const userMessage = body.message || body.content || "";
-      if (!userMessage.trim()) return sendJson(response, 400, { error: "Message is required" });
+      if (!userMessage.trim()) return sendJson(response, 400, { error: "Message is required" }, { error: "Message is required" });
 
       // Check if streaming is requested
       if (body.stream === true) {
@@ -956,7 +1087,7 @@ const server = createServer(async (request, response) => {
 
       // Call provider (default to ollama, agent can override)
       const chatProvider = providers[agent.provider?.toLowerCase()] || providers[DEFAULT_PROVIDER];
-      if (!chatProvider) return sendJson(response, 502, { error: `No provider configured for agent '${agent.name}' (tried '${agent.provider}')` });
+      if (!chatProvider) return sendJson(response, request, 502, { error: `No provider configured for agent '${agent.name}' (tried '${agent.provider}')` });
       const result = await chatProvider.chat(history, { model: agent.model, temperature: body.temperature, maxTokens: body.maxTokens });
 
       // Save assistant response
@@ -990,9 +1121,9 @@ const server = createServer(async (request, response) => {
           });
         }
         
-        return sendJson(response, 200, { agents });
+        return sendJson(response, 200, { agents }, { agents });
       } catch (err) {
-        return sendJson(response, 500, { error: "Internal server error" });
+        return sendJson(response, 500, { error: "Internal server error" }, { error: "Internal server error" });
       }
     }
 
@@ -1005,17 +1136,17 @@ const server = createServer(async (request, response) => {
           topology.agents = topology.agents.slice(0, 1000);
         }
         
-        return sendJson(response, 200, topology);
+        return sendJson(response, 200, topology, topology);
       } catch (err) {
-        return sendJson(response, 500, { error: "Internal server error" });
+        return sendJson(response, 500, { error: "Internal server error" }, { error: "Internal server error" });
       }
     }
 
     if (request.method === "GET" && url.pathname === "/api/providers") {
       try {
-        return sendJson(response, 200, providerSummary());
+        return sendJson(response, request, 200, providerSummary());
       } catch (err) {
-        return sendJson(response, 500, { error: "Internal server error" });
+        return sendJson(response, request, 500, { error: "Internal server error" });
       }
     }
 
@@ -1026,7 +1157,7 @@ const server = createServer(async (request, response) => {
           summary: getProviderReadinessSummary(process.env)
         });
       } catch (err) {
-        return sendJson(response, 500, { error: "Internal server error" });
+        return sendJson(response, 500, { error: "Internal server error" }, { error: "Internal server error" });
       }
     }
 
@@ -1035,9 +1166,9 @@ const server = createServer(async (request, response) => {
         const body = await readRequestBody(request);
         const payload = parseCreateAgentInput(body);
         const agent = registry.createAgent(payload);
-        return sendJson(response, 201, { agent });
+        return sendJson(response, 201, { agent }, { agent });
       } catch (err) {
-        return sendJson(response, 400, { error: err.message || "Invalid request body" });
+        return sendJson(response, 400, { error: err.message || "Invalid request body" }, { error: err.message || "Invalid request body" });
       }
     }
 
@@ -1046,9 +1177,9 @@ const server = createServer(async (request, response) => {
         const body = await readRequestBody(request);
         const payload = parseCreateLinkInput(body);
         const link = registry.createLink(payload);
-        return sendJson(response, 201, { link });
+        return sendJson(response, 201, { link }, { link });
       } catch (err) {
-        return sendJson(response, 400, { error: err.message || "Invalid request body" });
+        return sendJson(response, 400, { error: err.message || "Invalid request body" }, { error: err.message || "Invalid request body" });
       }
     }
 
@@ -1063,14 +1194,14 @@ const server = createServer(async (request, response) => {
             filePath.includes('..') || filePath.includes('~') || 
             filePath.includes('//') || filePath.includes('\0') ||
             !filePath || filePath.length > 1024) {
-          return sendJson(response, 403, { error: "Forbidden: Invalid path" });
+          return sendJson(response, 403, { error: "Forbidden: Invalid path" }, { error: "Forbidden: Invalid path" });
         }
         
         // Check file exists and is readable
         try {
           const stats = await readFile(filePath, { throwIfNoEntry: false });
           if (!stats) {
-            return sendJson(response, 404, { error: "File not found" });
+            return sendJson(response, 404, { error: "File not found" }, { error: "File not found" });
           }
           
           // Security: Don't serve sensitive files or directories
@@ -1080,13 +1211,13 @@ const server = createServer(async (request, response) => {
           
           // Check for sensitive file names
           if (sensitiveFiles.some(sensitive => fileName.includes(sensitive))) {
-            return sendJson(response, 403, { error: "Forbidden: Cannot access this file" });
+            return sendJson(response, 403, { error: "Forbidden: Cannot access this file" }, { error: "Forbidden: Cannot access this file" });
           }
           
           // Check for sensitive file extensions
           const fileExtension = extname(filePath).toLowerCase();
           if (sensitiveExtensions.includes(fileExtension)) {
-            return sendJson(response, 403, { error: "Forbidden: Cannot access this file type" });
+            return sendJson(response, 403, { error: "Forbidden: Cannot access this file type" }, { error: "Forbidden: Cannot access this file type" });
           }
           
           // Security headers for static files
@@ -1100,15 +1231,15 @@ const server = createServer(async (request, response) => {
           return;
         } catch (fileErr) {
           console.error('File access error:', fileErr);
-          return sendJson(response, 404, { error: "File not found" });
+          return sendJson(response, 404, { error: "File not found" }, { error: "File not found" });
         }
       } catch (err) {
         console.error('File serving error:', err);
-        return sendJson(response, 500, { error: "Internal server error" });
+        return sendJson(response, 500, { error: "Internal server error" }, { error: "Internal server error" });
       }
     }
 
-    sendJson(response, 404, { error: "Not found" });
+    sendJson(response, 404, { error: "Not found" }, { error: "Not found" });
   } catch (error) {
     // Use standardized error handling
     handleError(error, request, response);
@@ -1174,6 +1305,41 @@ const applyRateLimit = (request, response) => {
   }
 };
 
+// Clean up old entries more efficiently
+const cleanupRateLimitEntries = () => {
+  const now = Date.now();
+  const keysToDelete = [];
+  
+  // Batch collect keys to delete and perform size check in one pass
+  for (const [key, data] of rateLimit.entries()) {
+    if (now - data.timestamp > RATE_LIMIT_WINDOW) {
+      keysToDelete.push(key);
+    }
+  }
+  
+  // Batch delete for better performance
+  for (const key of keysToDelete) {
+    rateLimit.delete(key);
+  }
+  
+  // Memory optimization: enforce maximum size with efficient cleanup
+  if (rateLimit.size > MAX_REQUESTS_PER_MINUTE * 15) {
+    // Sort by timestamp and keep most recent entries
+    const sortedEntries = Array.from(rateLimit.entries())
+      .sort((a, b) => b[1].timestamp - a[1].timestamp);
+    
+    // Clear and repopulate with recent entries
+    rateLimit.clear();
+    const entriesToKeep = sortedEntries.slice(0, MAX_REQUESTS_PER_MINUTE * 10);
+    
+    for (const [key, data] of entriesToKeep) {
+      rateLimit.set(key, data);
+    }
+    
+    console.log(`Rate limit cleanup: removed ${rateLimit.size - entriesToKeep.length} old entries`);
+  }
+};
+
 // Optimized rate limit cleanup with better performance
 const cleanupRateLimitInterval = setInterval(() => {
   const now = Date.now();
@@ -1211,11 +1377,11 @@ const cleanupRateLimitInterval = setInterval(() => {
 
 // Clean up on exit
 process.on('SIGINT', () => {
-  cleanupRateLimitInterval.clear();
+  clearInterval(cleanupRateLimitInterval);
   rateLimit.clear();
 });
 process.on('SIGTERM', () => {
-  cleanupRateLimitInterval.clear();
+  clearInterval(cleanupRateLimitInterval);
   rateLimit.clear();
 });
 
