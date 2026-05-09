@@ -2132,7 +2132,7 @@ const server = createServer(async (request, response) => {
       }
     }
 
-    if (request.method === "GET") {
+    if (request.method === "GET" && !url.pathname.startsWith('/api/')) {
       try {
         const target = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
         const filePath = normalize(join(webRoot, target));

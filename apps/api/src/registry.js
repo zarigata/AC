@@ -1599,9 +1599,9 @@ export class AgentRegistry {
   getPendingJobs(limit = 10) {
     try {
       const stmt = this.db.prepare(
-        'SELECT * FROM jobs WHERE status = "pending" ORDER BY priority DESC, createdAt DESC LIMIT ?'
+        'SELECT * FROM jobs WHERE status = ? ORDER BY priority DESC, createdAt DESC LIMIT ?'
       );
-      const jobs = stmt.all(limit);
+      const jobs = stmt.all('pending', limit);
       
       return jobs.map(job => ({
         ...job,
