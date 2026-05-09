@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
-import { mkdirSync, existsSync } from "node:fs";
-import { dirname } from "node:path";
+import { mkdirSync, existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { dirname, join, extname, basename } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { inspect } from "node:util";
 
@@ -191,7 +191,34 @@ export class AgentRegistry {
           CREATE INDEX IF NOT EXISTS idx_logs_status ON logs(status);
           CREATE INDEX IF NOT EXISTS idx_logs_path ON logs(path);
           CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs(createdAt);
+          
+          CREATE TABLE IF NOT EXISTS agent_files (
+            id TEXT PRIMARY KEY,
+            agentId TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            originalName TEXT NOT NULL,
+            fileSize INTEGER NOT NULL,
+            fileType TEXT NOT NULL,
+            fileHash TEXT NOT NULL,
+            description TEXT,
+            tags TEXT,
+            uploadedAt TEXT NOT NULL,
+            lastAccessed TEXT,
+            accessCount INTEGER DEFAULT 0,
+            FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_files_agent ON agent_files(agentId);
+          CREATE INDEX IF NOT EXISTS idx_files_uploaded_at ON agent_files(uploadedAt);
+          CREATE INDEX IF NOT EXISTS idx_files_filetype ON agent_files(fileType);
+          CREATE INDEX IF NOT EXISTS idx_files_hash ON agent_files(fileHash);
         `);
+        
+        // Create file storage directory
+        this.filesDir = join(dirname(options.databasePath), 'files');
+        if (!existsSync(this.filesDir)) {
+          mkdirSync(this.filesDir, { recursive: true, mode: 0o755 });
+        }
         
         // Enable WAL mode for better performance
         this.db.exec('PRAGMA journal_mode = WAL');
@@ -998,6 +1025,318 @@ export class AgentRegistry {
     } catch (err) {
       console.error('Error getting agent usage:', err);
       return null;
+    }
+  }
+
+  // File upload and management methods
+  uploadFile(agentId, fileData, options = {}) {
+    try {
+      // Validate agent ID format
+      if (!agentId || typeof agentId !== 'string' || agentId.length > 64) {
+        throw new Error('Invalid agent ID format');
+      }
+      
+      // Check if agent exists
+      const agent = this.getAgent(agentId);
+      if (!agent) {
+        throw new Error('Agent not found');
+      }
+      
+      // Validate file data
+      if (!fileData || typeof fileData !== 'object') {
+        throw new Error('Invalid file data');
+      }
+      
+      const { content, filename, originalName, description, tags = [] } = fileData;
+      
+      if (!content || typeof content !== 'string') {
+        throw new Error('File content is required');
+      }
+      
+      if (!filename || typeof filename !== 'string') {
+        throw new Error('Filename is required');
+      }
+      
+      if (!originalName || typeof originalName !== 'string') {
+        throw new Error('Original filename is required');
+      }
+      
+      // Validate file size (10MB limit)
+      const maxSize = 10 * 1024 * 1024; // 10MB
+      if (content.length > maxSize) {
+        throw new Error(`File size exceeds maximum limit of ${maxSize / 1024 / 1024}MB`);
+      }
+      
+      // Generate file hash for deduplication
+      const fileHash = createHash('sha256').update(content).digest('hex');
+      
+      // Check for duplicates
+      const existingFile = this.db.prepare(
+        "SELECT id FROM agent_files WHERE agentId = ? AND fileHash = ?"
+      ).get(agentId, fileHash);
+      
+      if (existingFile) {
+        return this.getFile(agentId, existingFile.id);
+      }
+      
+      // Determine file type
+      const fileExt = extname(filename).toLowerCase().substring(1);
+      const fileType = fileExt || 'unknown';
+      
+      // Create file record
+      const fileId = crypto.randomUUID();
+      const timestamp = now();
+      
+      const insertStmt = this.db.prepare(
+        `INSERT INTO agent_files (
+          id, agentId, filename, originalName, fileSize, fileType, fileHash, 
+          description, tags, uploadedAt, lastAccessed, accessCount
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      
+      const result = insertStmt.run(
+        fileId, agentId, filename, originalName, content.length, fileType, 
+        fileHash, description, JSON.stringify(tags), timestamp, timestamp, 0
+      );
+      
+      if (result.changes === 0) {
+        throw new Error('Failed to save file record');
+      }
+      
+      // Save actual file to disk
+      const filePath = join(this.filesDir, fileId);
+      writeFileSync(filePath, content);
+      
+      return {
+        id: fileId,
+        agentId,
+        filename,
+        originalName,
+        fileSize: content.length,
+        fileType,
+        fileHash,
+        description,
+        tags,
+        uploadedAt: timestamp,
+        lastAccessed: timestamp,
+        accessCount: 0,
+        url: `/api/agents/${agentId}/files/${fileId}`
+      };
+    } catch (err) {
+      console.error('Error uploading file:', err);
+      throw err;
+    }
+  }
+  
+  getAgentFiles(agentId, options = {}) {
+    try {
+      // Validate agent ID format
+      if (!agentId || typeof agentId !== 'string' || agentId.length > 64) {
+        return [];
+      }
+      
+      // Check if agent exists
+      const agent = this.getAgent(agentId);
+      if (!agent) {
+        return [];
+      }
+      
+      // Apply pagination
+      const page = Math.max(1, options.page || 1);
+      const limit = Math.min(Math.max(options.limit || 50, 1), 100);
+      const offset = (page - 1) * limit;
+      
+      // Get total count
+      const countResult = this.db.prepare(
+        "SELECT COUNT(*) as total FROM agent_files WHERE agentId = ?"
+      ).get(agentId);
+      
+      const total = countResult.total;
+      
+      // Get paginated files
+      const filesQuery = this.db.prepare(
+        "SELECT * FROM agent_files WHERE agentId = ? ORDER BY uploadedAt DESC LIMIT ? OFFSET ?"
+      );
+      
+      const files = filesQuery.all(agentId, limit, offset);
+      
+      // Convert tags from JSON string to array
+      const processedFiles = files.map(file => ({
+        ...file,
+        tags: JSON.parse(file.tags || '[]')
+      }));
+      
+      return {
+        files: processedFiles,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+          hasNext: page * limit < total,
+          hasPrev: page > 1
+        }
+      };
+    } catch (err) {
+      console.error('Error getting agent files:', err);
+      return { files: [], pagination: { page: 1, limit: 50, total: 0, totalPages: 0, hasNext: false, hasPrev: false } };
+    }
+  }
+  
+  getFile(agentId, fileId) {
+    try {
+      // Validate IDs format
+      if (!agentId || typeof agentId !== 'string' || agentId.length > 64) {
+        return null;
+      }
+      
+      if (!fileId || typeof fileId !== 'string' || fileId.length > 64) {
+        return null;
+      }
+      
+      const file = this.db.prepare(
+        "SELECT * FROM agent_files WHERE agentId = ? AND id = ?"
+      ).get(agentId, fileId);
+      
+      if (!file) {
+        return null;
+      }
+      
+      // Convert tags from JSON string to array
+      const processedFile = {
+        ...file,
+        tags: JSON.parse(file.tags || '[]')
+      };
+      
+      // Update last accessed time and increment access count
+      const timestamp = now();
+      this.db.prepare(
+        "UPDATE agent_files SET lastAccessed = ?, accessCount = accessCount + 1 WHERE id = ?"
+      ).run(timestamp, fileId);
+      
+      processedFile.lastAccessed = timestamp;
+      processedFile.accessCount += 1;
+      
+      // Read file content
+      const filePath = join(this.filesDir, fileId);
+      if (existsSync(filePath)) {
+        processedFile.content = readFileSync(filePath, 'utf8');
+      } else {
+        throw new Error('File content not found on disk');
+      }
+      
+      return processedFile;
+    } catch (err) {
+      console.error('Error getting file:', err);
+      return null;
+    }
+  }
+  
+  deleteFile(agentId, fileId) {
+    try {
+      // Validate IDs format
+      if (!agentId || typeof agentId !== 'string' || agentId.length > 64) {
+        return false;
+      }
+      
+      if (!fileId || typeof fileId !== 'string' || fileId.length > 64) {
+        return false;
+      }
+      
+      // Check if file exists and belongs to agent
+      const file = this.db.prepare(
+        "SELECT id FROM agent_files WHERE agentId = ? AND id = ?"
+      ).get(agentId, fileId);
+      
+      if (!file) {
+        return false;
+      }
+      
+      // Delete file from disk
+      const filePath = join(this.filesDir, fileId);
+      if (existsSync(filePath)) {
+        rmSync(filePath, { force: true });
+      }
+      
+      // Delete file record from database
+      const result = this.db.prepare(
+        "DELETE FROM agent_files WHERE agentId = ? AND id = ?"
+      ).run(agentId, fileId);
+      
+      return result.changes > 0;
+    } catch (err) {
+      console.error('Error deleting file:', err);
+      return false;
+    }
+  }
+  
+  updateFile(agentId, fileId, updates) {
+    try {
+      // Validate IDs format
+      if (!agentId || typeof agentId !== 'string' || agentId.length > 64) {
+        return null;
+      }
+      
+      if (!fileId || typeof fileId !== 'string' || fileId.length > 64) {
+        return null;
+      }
+      
+      // Check if file exists and belongs to agent
+      const existingFile = this.db.prepare(
+        "SELECT * FROM agent_files WHERE agentId = ? AND id = ?"
+      ).get(agentId, fileId);
+      
+      if (!existingFile) {
+        return null;
+      }
+      
+      const allowed = ['filename', 'description', 'tags'];
+      const fields = [];
+      const values = [];
+      
+      // Validate and sanitize updates
+      for (const key of allowed) {
+        if (key in updates) {
+          let value = updates[key];
+          
+          if (key === 'filename' && (typeof value !== 'string' || value.length > 200)) {
+            throw new Error(`Invalid ${key} value`);
+          }
+          
+          if (key === 'description' && typeof value !== 'string' && value !== null) {
+            throw new Error(`Invalid ${key} value`);
+          }
+          
+          if (key === 'tags' && (!Array.isArray(value) || value.length > 50)) {
+            throw new Error(`Invalid ${key} value: must be an array with max 50 items`);
+          }
+          
+          fields.push(`${key} = ?`);
+          values.push(key === 'tags' ? JSON.stringify(value) : value);
+        }
+      }
+      
+      if (fields.length === 0) {
+        return this.getFile(agentId, fileId);
+      }
+      
+      // Update timestamp
+      fields.push('lastAccessed = ?');
+      values.push(now());
+      values.push(agentId);
+      values.push(fileId);
+      
+      const updateStmt = this.db.prepare(`UPDATE agent_files SET ${fields.join(', ')} WHERE agentId = ? AND id = ?`);
+      const result = updateStmt.run(...values);
+      
+      if (result.changes === 0) {
+        return null;
+      }
+      
+      return this.getFile(agentId, fileId);
+    } catch (err) {
+      console.error('Error updating file:', err);
+      throw err;
     }
   }
 }

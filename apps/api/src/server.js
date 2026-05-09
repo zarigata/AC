@@ -213,8 +213,16 @@ const sanitizeJsonPayload = (payload) => {
 
 const sendJson = (response, req1, statusCode, payload) => {
   // Handle both old and new function signatures
+  // Allow both 3-parameter (response, statusCode, payload) and 4-parameter (response, request, statusCode, payload) calls
   const request = (req1 && req1.url) ? req1 : (req1 && req1.method ? { url: '', method: req1 } : null);
   const origin = request?.headers?.origin || response.getHeader('origin');
+  
+  // If this is a 4-parameter call with duplicate payload, extract the single payload
+  let actualPayload = payload;
+  if (payload && typeof payload === 'object' && Array.isArray(payload) && payload.length === 2 && payload[0] === payload[1]) {
+    actualPayload = payload[0];
+  }
+  
   const headers = {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
@@ -239,7 +247,7 @@ const sendJson = (response, req1, statusCode, payload) => {
   }
   
   try {
-    const sanitizedPayload = sanitizeJsonPayload(payload);
+    const sanitizedPayload = sanitizeJsonPayload(actualPayload);
     response.writeHead(statusCode, headers);
     response.end(sanitizedPayload);
   } catch (err) {
@@ -523,7 +531,7 @@ const server = createServer(async (request, response) => {
       
       // Validate agent ID format with comprehensive checks
       if (!agentId || typeof agentId !== 'string' || agentId.length > 64 || agentId.length < 1) {
-        return sendJson(response, 400, { error: "Invalid agent ID format" }, { error: "Invalid agent ID format" });
+        return sendJson(response, 400, { error: "Invalid agent ID format" });
       }
       
       if (!agentIdPattern.test(agentId)) {
@@ -534,7 +542,7 @@ const server = createServer(async (request, response) => {
       if (agentId.toLowerCase().includes('admin') || 
           agentId.toLowerCase().includes('system') || 
           agentId.toLowerCase().includes('root')) {
-        return sendJson(response, 400, { error: "Invalid agent ID: reserved name" }, { error: "Invalid agent ID: reserved name" });
+        return sendJson(response, 400, { error: "Invalid agent ID: reserved name" });
       }
 
       if (request.method === "GET") {
@@ -1404,21 +1412,183 @@ const server = createServer(async (request, response) => {
       });
     }
 
+    /* ─── Agent Files (Knowledge Base) ─── */
+
+    const filesMatch = url.pathname.match(/^\/api\/agents\/([\w-]+)\/files$/);
+    const fileMatch = url.pathname.match(/^\/api\/agents\/([\w-]+)\/files\/([\w-]+)$/);
+
+    if (filesMatch && request.method === "GET") {
+      try {
+        const agentId = filesMatch[1];
+        
+        // Validate agent ID format
+        if (!agentIdPattern.test(agentId) || agentId.length > 64) {
+          return sendJson(response, 400, { error: "Invalid agent ID format" });
+        }
+        
+        // Check if agent exists
+        const agent = registry.getAgent(agentId);
+        if (!agent) return sendJson(response, 404, { error: "Agent not found" });
+        
+        // Get list of files
+        const result = registry.getAgentFiles(agentId);
+        return sendJson(response, 200, result);
+      } catch (err) {
+        return sendJson(response, 500, { error: "Internal server error" });
+      }
+    }
+
+    if (filesMatch && request.method === "POST") {
+      try {
+        const agentId = filesMatch[1];
+        
+        // Validate agent ID format
+        if (!agentIdPattern.test(agentId) || agentId.length > 64) {
+          return sendJson(response, 400, { error: "Invalid agent ID format" });
+        }
+        
+        // Check if agent exists
+        const agent = registry.getAgent(agentId);
+        if (!agent) return sendJson(response, 404, { error: "Agent not found" });
+        
+        // Read request body as JSON for file metadata
+        const body = await readRequestBody(request);
+        
+        // Generate unique filename if not provided
+        const timestamp = Date.now();
+        const filename = body.filename || `upload_${timestamp}.txt`;
+        const originalName = body.originalName || filename;
+        const description = body.description || "";
+        const tags = Array.isArray(body.tags) ? body.tags : [];
+        
+        // Read file content from request body
+        let content = "";
+        if (body.content) {
+          content = String(body.content);
+        } else if (body.data) {
+          // Handle base64 encoded data
+          content = Buffer.from(body.data, 'base64').toString('utf8');
+        }
+        
+        if (!content) {
+          return sendJson(response, 400, { error: "File content is required" });
+        }
+        
+        // Validate file size (10MB limit)
+        const maxSize = 10 * 1024 * 1024; // 10MB
+        if (content.length > maxSize) {
+          return sendJson(response, 400, { error: `File size exceeds maximum limit of ${maxSize / 1024 / 1024}MB` }, { error: `File size exceeds maximum limit of ${maxSize / 1024 / 1024}MB` });
+        }
+        
+        // Upload file
+        const fileData = {
+          content,
+          filename,
+          originalName,
+          description,
+          tags
+        };
+        
+        const file = registry.uploadFile(agentId, fileData);
+        return sendJson(response, 201, { file });
+      } catch (err) {
+        console.error('File upload error:', err);
+        return sendJson(response, 400, { error: err.message || "Invalid file data" });
+      }
+    }
+
+    if (fileMatch) {
+      try {
+        const agentId = fileMatch[1];
+        const fileId = fileMatch[2];
+        
+        // Validate ID formats
+        if (!agentIdPattern.test(agentId) || agentId.length > 64 || 
+            !agentIdPattern.test(fileId) || fileId.length > 64) {
+          return sendJson(response, 400, { error: "Invalid ID format" });
+        }
+        
+        // Check if agent exists
+        const agent = registry.getAgent(agentId);
+        if (!agent) return sendJson(response, 404, { error: "Agent not found" });
+        
+        if (request.method === "GET") {
+          // Get specific file
+          const file = registry.getFile(agentId, fileId);
+          if (!file) return sendJson(response, 404, { error: "File not found" }, { error: "File not found" });
+          
+          // Set appropriate content type header
+          const contentType = file.fileType === 'txt' ? 'text/plain' : 
+                            file.fileType === 'json' ? 'application/json' : 
+                            file.fileType === 'md' ? 'text/markdown' : 
+                            'application/octet-stream';
+          
+          response.writeHead(200, {
+            "Content-Type": `${contentType}; charset=utf-8`,
+            "Content-Length": file.fileSize,
+            "Content-Disposition": `inline; filename="${file.originalName}"`,
+            "Cache-Control": "public, max-age=3600"
+          });
+          
+          response.end(file.content);
+          return;
+        }
+        
+        if (request.method === "PATCH") {
+          // Update file metadata
+          const body = await readRequestBody(request);
+          
+          // Validate update input
+          if (body.tags && !Array.isArray(body.tags)) {
+            return sendJson(response, 400, { error: "Tags must be an array" });
+          }
+          
+          const updated = registry.updateFile(agentId, fileId, body);
+          if (!updated) return sendJson(response, 404, { error: "File not found" });
+          
+          return sendJson(response, 200, { file: updated });
+        }
+        
+        if (request.method === "DELETE") {
+          // Delete file
+          const deleted = registry.deleteFile(agentId, fileId);
+          if (!deleted) return sendJson(response, 404, { error: "File not found" });
+          
+          return sendJson(response, 200, { deleted: true });
+        }
+      } catch (err) {
+        console.error('File operation error:', err);
+        return sendJson(response, 400, { error: err.message || "Invalid file data" });
+      }
+    }
+
     if (request.method === "GET" && url.pathname === "/api/agents") {
       try {
         const agents = registry.listAgents();
         
         // Limit response size to prevent DoS
         if (agents.length > 1000) {
-          return sendJson(response, 200, { 
+          response.writeHead(200, {
+            "Content-Type": "application/json; charset=utf-8",
+            "Access-Control-Allow-Origin": "http://localhost:4000"
+          });
+          return response.end(JSON.stringify({ 
             agents: agents.slice(0, 1000),
             warning: "Response truncated to first 1000 agents"
-          });
+          }));
         }
         
-        return sendJson(response, 200, { agents }, { agents });
+        response.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Access-Control-Allow-Origin": "http://localhost:4000"
+        });
+        return response.end(JSON.stringify({ agents }));
       } catch (err) {
-        return sendJson(response, 500, { error: "Internal server error" }, { error: "Internal server error" });
+        response.writeHead(500, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Access-Control-Allow-Origin": "http://localhost:4000"
+        });
+        return response.end(JSON.stringify({ error: "Internal server error" }));
       }
     }
 
@@ -1431,9 +1601,9 @@ const server = createServer(async (request, response) => {
           topology.agents = topology.agents.slice(0, 1000);
         }
         
-        return sendJson(response, 200, topology, topology);
+        return sendJson(response, 200, topology);
       } catch (err) {
-        return sendJson(response, 500, { error: "Internal server error" }, { error: "Internal server error" });
+        return sendJson(response, 500, { error: "Internal server error" });
       }
     }
 
@@ -1738,7 +1908,7 @@ const cleanupOnExit = (signal) => {
   rateLimit.clear();
   
   // Clear cleanup intervals
-  cleanupRateLimitInterval.clear();
+  clearInterval(cleanupRateLimitInterval);
   
   // Clear connected clients
   connectedClients.clear();
