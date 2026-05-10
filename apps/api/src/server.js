@@ -1820,24 +1820,7 @@ const server = createServer(async (request, response) => {
 
       // Check if streaming is requested
       if (body.stream === true) {
-        // Create or reuse session
-        const sessions = registry.listSessions(agentId);
-        let session = sessions.length > 0 ? sessions[0] : registry.createSession(agentId, { title: "Chat" });
-
-        // Save user message
-        registry.createMessage(agentId, session.id, {
-          role: "user",
-          content: userMessage,
-          tokensIn: 0
-        });
-
-        // Build message history for provider
-        const history = (registry.listMessages(agentId, session.id).messages || []).map((m) => ({
-          role: m.role,
-          content: m.content
-        }));
-
-        // Set up SSE headers
+        // Set up SSE headers first - this is crucial for streaming to work
         response.writeHead(200, {
           "Content-Type": "text/event-stream; charset=utf-8",
           "Cache-Control": "no-cache",
@@ -1846,6 +1829,40 @@ const server = createServer(async (request, response) => {
           "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type, Authorization"
         });
+        // Set up SSE headers first - this is crucial for streaming to work
+        response.writeHead(200, {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization"
+        });
+
+        // Create/get session first to avoid race conditions
+        let session;
+        try {
+          const sessions = registry.listSessions(agentId);
+          session = sessions.length > 0 ? sessions[0] : registry.createSession(agentId, { title: "Chat" });
+          
+          // Save user message
+          registry.createMessage(agentId, session.id, {
+            role: "user",
+            content: userMessage,
+            tokensIn: 0
+          });
+        } catch (sessErr) {
+          console.error('Failed to create session:', sessErr.message);
+          // Continue with streaming anyway, use fresh history
+        }
+        
+        // Build message history (if session available, otherwise start fresh)
+        const history = session ? 
+          (registry.listMessages(agentId, session.id).messages || []).map((m) => ({
+            role: m.role,
+            content: m.content
+          })) : 
+          [{ role: "user", content: userMessage }];
 
         // Call provider (default to ollama, agent can override)
         const chatProvider = providers[agent.provider?.toLowerCase()] || providers[DEFAULT_PROVIDER];
@@ -1859,13 +1876,18 @@ const server = createServer(async (request, response) => {
           response.end();
           return;
         }
+        
+        // Handle session creation error by sending warning in first chunk
+        if (sessionCreationError) {
+          console.warn('Session creation failed, proceeding with streaming anyway:', sessionCreationError.message);
+        }
 
         try {
           let accumulatedContent = "";
           let accumulatedTokensIn = 0;
           let accumulatedTokensOut = 0;
           
-          await chatProvider.chatStream(history, { model: agent.model, temperature: body.temperature, maxTokens: body.maxTokens }, (chunk) => {
+          await chatProvider.chatStream(history, { model: agent.model, temperature: body.temperature ?? 0.7, maxTokens: body.maxTokens ?? 512 }, (chunk) => {
             accumulatedContent += chunk.content || "";
             accumulatedTokensIn += chunk.tokensIn || 0;
             accumulatedTokensOut += chunk.tokensOut || 0;
@@ -1884,14 +1906,23 @@ const server = createServer(async (request, response) => {
             
             response.write(`data: ${eventData}\n\n`);
           }, (finalResult) => {
-            // Save assistant response
-            registry.createMessage(agentId, session.id, {
-              role: "assistant",
-              content: finalResult.content,
-              tokensIn: finalResult.tokensIn,
-              tokensOut: finalResult.tokensOut,
-              model: finalResult.model
-            });
+            // Save assistant response asynchronously - don't break streaming if this fails
+            if (session && session.id) {
+              (async () => {
+                try {
+                  registry.createMessage(agentId, session.id, {
+                    role: "assistant",
+                    content: finalResult.content,
+                    tokensIn: finalResult.tokensIn,
+                    tokensOut: finalResult.tokensOut,
+                    model: finalResult.model
+                  });
+                } catch (msgErr) {
+                  console.error('Failed to save assistant message:', msgErr.message);
+                  // Don't break streaming for this error
+                }
+              })();
+            }
             
             // Send final event
             const eventData = JSON.stringify({
@@ -1901,7 +1932,7 @@ const server = createServer(async (request, response) => {
               tokensOut: finalResult.tokensOut || 0,
               duration: finalResult.duration || 0,
               model: finalResult.model || agent.model,
-              sessionId: session.id,
+              sessionId: session ? session.id : 'unknown',
               done: true,
               final: true
             });

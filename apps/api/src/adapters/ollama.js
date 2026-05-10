@@ -249,6 +249,15 @@ export class OllamaAdapter {
 
     const url = new URL("/api/chat", this.baseUrl);
     
+    console.log('Ollama adapter: sending request:', {
+      url: url.href,
+      model,
+      messagesLength: messages.length,
+      temperature: options.temperature,
+      maxTokens: options.maxTokens,
+      body: body.substring(0, 200) + '...' // Truncate for readability
+    });
+    
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         req.destroy();
@@ -268,25 +277,41 @@ export class OllamaAdapter {
           const lines = chunk.toString().split("\n").filter(line => line.trim());
           
           for (const line of lines) {
+            // Handle both SSE format (data: ...) and raw JSON
+            let jsonData;
             if (line.startsWith("data: ") && line !== "data: [DONE]") {
               try {
-                const data = JSON.parse(line.slice(6));
-                if (data.message?.content) {
-                  accumulatedContent += data.message.content;
-                  accumulatedTokensOut = data.eval_count || 0;
-                  accumulatedDuration = data.total_duration ? Math.round(data.total_duration / 1e6) : 0;
-                  
-                  onChunk({
-                    content: data.message.content,
-                    tokensIn: data.prompt_eval_count || 0,
-                    tokensOut: data.eval_count || 0,
-                    duration: data.total_duration ? Math.round(data.total_duration / 1e6) : 0,
-                    model: data.model || model,
-                    done: data.done || false
-                  });
-                }
+                jsonData = JSON.parse(line.slice(6));
               } catch (err) {
-                console.error("Failed to parse SSE chunk:", err);
+                // Parse error, continue
+              }
+            } else if (line.trim()) {
+              try {
+                jsonData = JSON.parse(line);
+              } catch (err) {
+                // Parse error, continue
+              }
+            }
+            
+            if (jsonData) {
+              // Handle both content and thinking fields
+              if (jsonData.message?.content || jsonData.message?.thinking) {
+                const content = jsonData.message.content || '';
+                const thinking = jsonData.message.thinking || '';
+                
+                accumulatedContent += content;
+                accumulatedTokensOut = jsonData.eval_count || 0;
+                accumulatedDuration = jsonData.total_duration ? Math.round(jsonData.total_duration / 1e6) : 0;
+                
+                onChunk({
+                  content: content,
+                  thinking: thinking,
+                  tokensIn: jsonData.prompt_eval_count || 0,
+                  tokensOut: jsonData.eval_count || 0,
+                  duration: jsonData.total_duration ? Math.round(jsonData.total_duration / 1e6) : 0,
+                  model: jsonData.model || model,
+                  done: jsonData.done || false
+                });
               }
             }
           }
