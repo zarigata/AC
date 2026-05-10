@@ -40,8 +40,7 @@ test("updateAgent patches specified fields", () => {
 
 test("updateAgent returns null for unknown id", () => {
   const registry = createRegistry();
-  // Use a properly formatted UUID that doesn't exist
-  assert.equal(registry.updateAgent("12345678-abcd-1234-abcd-123456789abc", { name: "X" }), null);
+  assert.equal(registry.updateAgent("00000000-0000-0000-0000-000000000000", { name: "X" }), null);
 });
 
 /* ─── DELETE agent ─── */

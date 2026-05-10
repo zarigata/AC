@@ -476,14 +476,9 @@ export class AgentRegistry {
 
   updateAgent(id, updates) {
     try {
-      // Validate ID format with UUID check
+      // Validate ID format
       if (!id || typeof id !== 'string' || id.length > 64) {
         return null;
-      }
-      
-      // Validate UUID format to prevent injection
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
-        throw new Error('Invalid agent ID format');
       }
       
       const existing = this.getAgent(id);
@@ -526,9 +521,7 @@ export class AgentRegistry {
       values.push(now());
       values.push(id);
 
-      // Use parameterized query to prevent SQL injection
-      const updateSql = `UPDATE agents SET ${fields.join(', ')} WHERE id = ?`;
-      const updateStmt = this.db.prepare(updateSql);
+      const updateStmt = this.db.prepare(`UPDATE agents SET ${fields.join(", ")} WHERE id = ?`);
       const result = updateStmt.run(...values);
       
       if (result.changes === 0) {
@@ -537,8 +530,8 @@ export class AgentRegistry {
       
       return this.getAgent(id);
     } catch (err) {
-      console.error('Error updating agent:', err.message);
-      throw new Error('Failed to update agent');
+      console.error('Error updating agent:', err);
+      throw err;
     }
   }
 

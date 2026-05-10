@@ -107,57 +107,33 @@ const ensureString = (value, field, min, max) => {
     throw new Error(`${field} must be between ${min} and ${max} characters.`);
   }
 
-  // Comprehensive sanitization to prevent injection attacks
+  // Enhanced sanitization to prevent injection attacks
   const dangerousPatterns = [
-    // HTML/Script injection
-    /<script[^>]*>.*?<\/script>/gi,
     /<script[^>]*>/gi,
-    /<\/script>/gi,
     /javascript:/gi,
     /data:/gi,
-    /<iframe[^>]*>.*?<\/iframe>/gi,
     /<iframe[^>]*>/gi,
-    /<object[^>]*>.*?<\/object>/gi,
     /<object[^>]*>/gi,
-    /<embed[^>]*>.*?<\/embed>/gi,
     /<embed[^>]*>/gi,
-    /<style[^>]*>.*?<\/style>/gi,
     /<style[^>]*>/gi,
     /<meta[^>]*>/gi,
     /<link[^>]*>/gi,
-    /<img[^>]*>/gi,
-    /<video[^>]*>/gi,
-    /<audio[^>]*>/gi,
-    /<svg[^>]*>/gi,
-    
-    // Event handlers and JavaScript execution
     /on\w+\s*=/gi,
     /eval\(/gi,
     /exec\(/gi,
     /Function\(/gi,
     /setTimeout\s*\(/gi,
     /setInterval\s*\(/gi,
-    /setImmediate\(/gi,
-    /process\./gi,
-    /require\(/gi,
-    /import\(/gi,
     /document\./gi,
     /window\./gi,
     /global\./gi,
-    /self\./gi,
-    /frames\./gi,
-    /parent\./gi,
-    /top\./gi,
-    
-    // Protocol handlers and dangerous URLs
-    /javascript:/gi,
-    /data:/gi,
-    /vbscript:/gi,
-    /about:/gi,
-    /file:/gi,
-    /\\\$(?![{])/gi, // Template literals without braces
-    
-    // SQL injection
+    /\x00/g, // Null bytes
+    /[\x01-\x08\x0b\x0c\x0e-\x1f]/g, // Control characters
+    /;\s*--/g, // SQL comment
+    /'/g, // Single quote
+    /"/g, // Double quote
+    /`/g, // Backtick
+    /\\/g, // Escape character
     /SELECT\s+/gi,
     /INSERT\s+/gi,
     /UPDATE\s+/gi,
@@ -167,78 +143,7 @@ const ensureString = (value, field, min, max) => {
     /ALTER\s+/gi,
     /UNION\s+/gi,
     /EXEC\s+/gi,
-    /EXECUTE\s+/gi,
-    /TRUNCATE\s+/gi,
-    /GRANT\s+/gi,
-    /REVOKE\s+/gi,
-    /BACKUP\s+/gi,
-    /RESTORE\s+/gi,
-    /;\s*--/g, // SQL comment
-    /#\s*$/gm, // MySQL comment
-    /\*/g, // Wildcard
-    
-    // Control characters and encoding
-    /\x00/g, // Null bytes
-    /[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]/g, // Control characters
-    /[\ud800-\udfff]/g, // Surrogate pairs (can be used in exploits)
-    /[\ufeff]/g, // Zero-width no-break space
-    /[\u2028-\u2029]/g, // Line separators
-    
-    // Quotes and escape characters
-    /'/g, // Single quote
-    /"/g, // Double quote
-    /`/g, // Backtick
-    /\\/g, // Escape character
-    /\\x/g, // Hex escape
-    /\\u/g, // Unicode escape
-    /\\n/g, // Newline
-    /\\r/g, // Carriage return
-    /\\t/g, // Tab
-    
-    // Command injection
-    /;\s*$/g, // Command termination
-    /\|\s*/g, // Pipe
-    /\&\s*\&/g, // AND
-    /\|\s*\|/g, // OR
-    /\>/g, // Output redirection
-    /\</g, // Input redirection
-    /\$/g, // Variable expansion
-    
-    // Path traversal
-    /\.\./g,
-    /~\//g,
-    /\//g,
-    /\\\\/g,
-    
-    // Encoded attacks
-    /%3C/g, // <
-    /%3E/g, // >
-    /%22/g, // "
-    /%27/g, // '
-    /%60/g, // `
-    /%2F/g, // /
-    /%5C/g, // \
-    /%3B/g, // ;
-    /%7C/g, // |
-    /%26/g, // &
-    /%3D/g, // =
-    
-    // Other dangerous patterns
-    /<!DOCTYPE/gi,
-    /<!ENTITY/gi,
-    /<!ATTLIST/gi,
-    /<!NOTATION/gi,
-    /<!CDATA\[/gi,
-    /<!--.*?-->/gs, // HTML comments
-    /\/\*.*?\*\//gs, // CSS comments
-    /@import\s+/gi,
-    /url\(/gi,
-    /expression\(/gi,
-    /-moz-binding\(/gi,
-    /data:\/image\/svg\+xml/gi,
-    /mhtml:/gi,
-    /res:/gi,
-    /about:blank/gi
+    /EXECUTE\s+/gi
   ];
   
   for (const pattern of dangerousPatterns) {

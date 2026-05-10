@@ -283,104 +283,13 @@ const getProvider = (providerName = DEFAULT_PROVIDER) => {
 };
 const startTime = Date.now();
 
-// Enhanced Rate limiting with improved security
+// Rate limiting: max 60 requests per minute per IP
 const rateLimit = new Map();
 const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
 const MAX_REQUESTS_PER_MINUTE = 60;
 const MAX_CONCURRENT_CONNECTIONS = 100; // Maximum concurrent connections per IP
 const CONN_CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
-const MAX_RATE_LIMIT_ENTRIES = 5000; // Reduced for better memory security
-const MAX_REQUEST_SIZE = 1024 * 1024; // 1MB max request size
-const MAX_CONNECTIONS_PER_IP = 20; // Reduced to prevent DoS
-const MAX_CONCURRENT_TOTAL = 1000; // Total concurrent connections
-const MAX_REQUEST_TIMEOUT = 30000; // 30 seconds timeout for requests
-
-// Track active connections for DoS protection
-const activeConnections = new Map();
-let totalActiveConnections = 0;
-
-// IP tracking and blocking for abuse prevention
-const blockedIPs = new Set();
-const ipViolationCounts = new Map();
-const BLOCK_THRESHOLD = 50; // violations before blocking
-const BLOCK_DURATION = 30 * 60 * 1000; // 30 minutes
-const IP_CLEANUP_INTERVAL = 15 * 60 * 1000; // 15 minutes
-
-const isBlockedIP = (ip) => {
-  return blockedIPs.has(ip);
-};
-
-const recordIPViolation = (ip) => {
-  const now = Date.now();
-  const count = (ipViolationCounts.get(ip) || 0) + 1;
-  ipViolationCounts.set(ip, count);
-  
-  // Block IP if threshold exceeded
-  if (count >= BLOCK_THRESHOLD) {
-    blockedIPs.add(ip);
-    // Schedule unblocking
-    setTimeout(() => {
-      blockedIPs.delete(ip);
-      ipViolationCounts.delete(ip);
-    }, BLOCK_DURATION);
-    console.log(`IP ${ip} blocked due to ${count} violations`);
-  }
-};
-
-const cleanupIPTracking = () => {
-  const now = Date.now();
-  for (const [ip, lastViolation] of ipViolationCounts.entries()) {
-    if (now - lastViolation > BLOCK_DURATION) {
-      ipViolationCounts.delete(ip);
-    }
-  }
-};
-
-// Start IP tracking cleanup
-setInterval(cleanupIPTracking, IP_CLEANUP_INTERVAL);
-
-// CSRF protection
-const CSRF_TOKEN_SECRET = process.env.CSRF_TOKEN_SECRET || randomBytes(32).toString('hex');
-const csrfTokenStore = new Map();
-
-const generateCSRFToken = () => {
-  const token = randomBytes(32).toString('hex');
-  const hmac = createHmac('sha256', CSRF_TOKEN_SECRET).update(token).digest('hex');
-  csrfTokenStore.set(token, Date.now());
-  return { token, hmac };
-};
-
-const validateCSRFToken = (token) => {
-  if (!token || typeof token !== 'string') return false;
-  
-  const hmac = createHmac('sha256', CSRF_TOKEN_SECRET).update(token).digest('hex');
-  const isValidHmac = crypto.timingSafeEqual(
-    Buffer.from(hmac),
-    Buffer.from(token.split('.')[1] || '')
-  );
-  
-  const isValidToken = csrfTokenStore.has(token) && isValidHmac;
-  
-  if (isValidToken) {
-    csrfTokenStore.delete(token);
-  }
-  
-  return isValidToken;
-};
-
-const cleanupCSRFTokenStore = () => {
-  const now = Date.now();
-  const TOKEN_LIFETIME = 30 * 60 * 1000; // 30 minutes
-  
-  for (const [token, timestamp] of csrfTokenStore.entries()) {
-    if (now - timestamp > TOKEN_LIFETIME) {
-      csrfTokenStore.delete(token);
-    }
-  }
-};
-
-// Start CSRF token cleanup
-setInterval(cleanupCSRFTokenStore, 15 * 60 * 1000); // Every 15 minutes
+const MAX_RATE_LIMIT_ENTRIES = 10000; // Maximum entries in rate limit map to prevent memory exhaustion
 
 // Security: Secret for HMAC-based rate limiting
 const RATE_LIMIT_SECRET = process.env.RATE_LIMIT_SECRET || randomBytes(32).toString('hex');
@@ -412,55 +321,6 @@ const host = process.env.HOST ?? "0.0.0.0";
 const databasePath = process.env.ZSIISTANT_DB_PATH ?? new URL("../data/zsiistant.sqlite", import.meta.url).pathname;
 const webRoot = fileURLToPath(new URL("../../web/", import.meta.url));
 
-// Security helper functions
-const getTrustedIP = (request) => {
-  // Get IP from various headers with security checks
-  const ip = request.headers['x-forwarded-for'] || 
-             request.headers['x-real-ip'] || 
-             request.socket.remoteAddress;
-  
-  if (typeof ip !== 'string') return 'unknown';
-  
-  // Extract first IP from x-forwarded-for if present
-  if (ip.includes(',')) {
-    const ips = ip.split(',').map(i => i.trim());
-    // Return the first IP that appears valid
-    for (const candidate of ips) {
-      if (isValidIP(candidate)) return candidate;
-    }
-    return ips[0]; // fallback to first
-  }
-  
-  return ip;
-};
-
-const isValidIP = (ip) => {
-  if (typeof ip !== 'string' || ip.length > 45) return false;
-  
-  // IPv4 validation
-  if (ip.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
-    const parts = ip.split('.');
-    return parts.every(part => parseInt(part) >= 0 && parseInt(part) <= 255);
-  }
-  
-  // IPv6 validation (simplified)
-  if (ip.match(/^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$/)) {
-    return true;
-  }
-  
-  return false;
-};
-
-const validateRequestSize = (request) => {
-  if (request.headers['content-length']) {
-    const contentLength = parseInt(request.headers['content-length']);
-    if (contentLength > MAX_REQUEST_SIZE) {
-      throw new Error(`Request size exceeds maximum limit of ${MAX_REQUEST_SIZE / 1024 / 1024}MB`);
-    }
-  }
-  return true;
-};
-
 const registry = new AgentRegistry({ databasePath });
 try { registry.seed(); } catch (seedErr) { console.error("Seed error (non-fatal):", seedErr.message); }
 
@@ -468,9 +328,7 @@ const ALLOWED_ORIGINS = [
   "http://localhost:3000",
   "http://localhost:4000",
   "http://127.0.0.1:3000",
-  "http://127.0.0.1:4000",
-  "null", // Allow requests without origin header (local testing)
-  undefined // Allow requests without origin header
+  "http://127.0.0.1:4000"
 ];
 
 // Additional security: validate origin format and prevent wildcard origins
@@ -497,10 +355,7 @@ const validateOrigin = (origin) => {
 };
 
 const isOriginAllowed = (origin) => {
-  // Allow requests without origin for local development/testing
-  if (!origin || origin === 'null' || origin === undefined) {
-    return true;
-  }
+  if (!origin) return false; // Block requests without origin for API endpoints
   
   // First validate the origin format
   if (!validateOrigin(origin)) {
@@ -660,60 +515,52 @@ const sendError = (response, statusCode, errorType, message, details = null) => 
   }
 };
 
-// Enhanced error handling middleware with security
+// Enhanced error handling middleware
 const handleError = (error, request, response) => {
-  // Log detailed error internally but don't expose to client
-  console.error(`Error ${request.method} ${request.url}:`, error.message);
-  console.error('Stack trace:', error.stack);
+  console.error(`Error ${request.method} ${request.url}:`, error);
   
   let statusCode = 500;
   let errorType = 'Internal Server Error';
   let message = 'An unexpected error occurred';
   
-  // Sanitize error information before sending to client
-  const clientError = {
-    timestamp: Date.now(),
-    requestId: crypto.randomUUID(),
-    path: request.url,
-    method: request.method
-  };
-  
-  // Categorize errors with sanitized client responses
+  // Categorize errors
   if (error instanceof Error) {
-    const errorMessage = error.message.toLowerCase();
-    
-    if (errorMessage.includes('validation')) {
+    if (error.message.includes('validation')) {
       statusCode = 400;
       errorType = 'Validation Error';
-      message = 'Invalid input data';
-    } else if (errorMessage.includes('not found')) {
+      message = error.message;
+    } else if (error.message.includes('not found')) {
       statusCode = 404;
       errorType = 'Not Found';
-      message = 'Requested resource not found';
-    } else if (errorMessage.includes('forbidden') || errorMessage.includes('unauthorized')) {
+      message = error.message;
+    } else if (error.message.includes('forbidden') || error.message.includes('unauthorized')) {
       statusCode = 403;
       errorType = 'Forbidden';
-      message = 'Access denied';
-    } else if (errorMessage.includes('timeout')) {
+      message = error.message;
+    } else if (error.message.includes('timeout')) {
       statusCode = 408;
       errorType = 'Request Timeout';
-      message = 'Request took too long to process';
-    } else if (errorMessage.includes('rate limit')) {
+      message = error.message;
+    } else if (error.message.includes('rate limit')) {
       statusCode = 429;
       errorType = 'Rate Limit Exceeded';
-      message = 'Too many requests';
-    } else if (errorMessage.includes('database')) {
+      message = error.message;
+    } else if (error.message.includes('database')) {
       statusCode = 503;
-      errorType = 'Service Unavailable';
+      errorType = 'Database Error';
       message = 'Service temporarily unavailable';
     }
   }
   
-  // Send sanitized error response to client
-  sendError(response, statusCode, errorType, message, clientError);
+  sendError(response, statusCode, errorType, message, {
+    path: request.url,
+    method: request.method,
+    userAgent: request.headers['user-agent']
+  });
 };
 
 const MAX_JSON_PAYLOAD_SIZE = 1024 * 1024; // 1MB limit
+const MAX_REQUEST_TIMEOUT = 30000; // 30 seconds timeout for requests
 
 const readRequestBody = async (request) => {
   try {
@@ -826,63 +673,19 @@ const providerSummary = () => {
 const server = createServer(async (request, response) => {
   const requestStartTime = Date.now();
   
-  try {
-    // Validate request size first
-    try {
-      validateRequestSize(request);
-    } catch (sizeError) {
-      sendError(response, 413, 'Payload Too Large', 'Request exceeds size limit');
+  // Apply rate limiting
+  if (!applyRateLimit(request, response)) {
+    return; // Response already sent for rate limit exceeded
+  }
+  
+  // Validate origin for API endpoints
+  if (request.url?.startsWith('/api/') && request.method !== 'OPTIONS') {
+    const origin = request.headers.origin;
+    if (!isOriginAllowed(origin)) {
+      sendJson(response, 403, { error: 'Forbidden: Origin not allowed' });
       return;
     }
-    
-    // Apply rate limiting
-    if (!applyRateLimit(request, response)) {
-      return; // Response already sent for rate limit exceeded
-    }
-    
-    // Validate origin for API endpoints
-    if (request.url?.startsWith('/api/') && request.method !== 'OPTIONS') {
-      const origin = request.headers.origin;
-      if (!isOriginAllowed(origin)) {
-        sendError(response, 403, 'Forbidden: Origin not allowed');
-        return;
-      }
-    }
-    
-    // Check total concurrent connections
-    if (totalActiveConnections >= MAX_CONCURRENT_TOTAL) {
-      sendError(response, 429, 'Too Many Requests', 'Server at maximum capacity');
-      return;
-    }
-    
-    // Track connection for cleanup and DoS protection
-    const clientIP = getTrustedIP(request);
-    const connectionKey = `${clientIP}:${request.socket.remoteAddress}:${requestStartTime}`;
-    
-    // Set timeout for request processing
-    request.setTimeout(MAX_REQUEST_TIMEOUT, () => {
-      if (!response.headersSent) {
-        sendError(response, 408, 'Request Timeout', 'Request took too long to process');
-      }
-      request.destroy();
-    });
-    
-    // Track this request for cleanup
-    activeConnections.set(connectionKey, {
-      startTime: requestStartTime,
-      ip: clientIP,
-      url: request.url,
-      method: request.method
-    });
-    
-    // Increment counter with bounds checking
-    const currentCount = totalActiveConnections + 1;
-    if (currentCount <= MAX_CONCURRENT_TOTAL) {
-      totalActiveConnections = currentCount;
-    } else {
-      // Clean up old connections if we're at limit
-      cleanupOldConnections();
-    }
+  }
   
   const originalEnd = response.end;
   response.end = function(chunk, encoding) {
@@ -900,11 +703,6 @@ const server = createServer(async (request, response) => {
     
     return originalEnd.call(this, chunk, encoding);
   };
-  
-  } catch (error) {
-    // Use standardized error handling
-    handleError(error, request, response);
-  }
   
   // Handle CORS preflight requests
   if (request.method === 'OPTIONS' && request.url?.startsWith('/api/')) {
@@ -2390,25 +2188,15 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && !url.pathname.startsWith('/api/')) {
       try {
         const target = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
+        const filePath = normalize(join(webRoot, target));
         
-        // Enhanced path validation with security checks
-        if (!target || target.length > 512) {
+        // Enhanced path validation
+        if (!filePath.startsWith(webRoot) || 
+            relative(webRoot, filePath).startsWith("..") ||
+            filePath.includes('..') || filePath.includes('~') || 
+            filePath.includes('//') || filePath.includes('\0') ||
+            !filePath || filePath.length > 1024) {
           return sendJson(response, 403, { error: "Forbidden: Invalid path" });
-        }
-        
-        // Check for path traversal attempts
-        if (target.includes('..') || target.includes('~') || 
-            target.includes('//') || target.includes('\0') ||
-            target.includes('%2e') || target.includes('%2e%2e')) {
-          return sendJson(response, 403, { error: "Forbidden: Invalid path" });
-        }
-        
-        // Use safe path resolution
-        const filePath = join(webRoot, target);
-        
-        // Security: Ensure path is within web root
-        if (!filePath.startsWith(webRoot) || relative(webRoot, filePath).startsWith('..')) {
-          return sendJson(response, 403, { error: "Forbidden: Path traversal attempt" });
         }
         
         // Check file exists and is readable
@@ -2622,19 +2410,20 @@ const server = createServer(async (request, response) => {
 // Enhanced rate limiting middleware with better security
 const applyRateLimit = (request, response) => {
   try {
-    const clientIP = getTrustedIP(request);
+    const clientIP = request.headers['x-forwarded-for'] || request.socket.remoteAddress;
     const userAgent = request.headers['user-agent'] || '';
     const timestamp = Date.now();
     
-    // Validate client IP format
-    if (!clientIP || clientIP === 'unknown') {
+    // Validate client IP format with enhanced security
+    if (!clientIP || typeof clientIP !== 'string') {
       sendError(response, 400, 'Invalid Client IP', 'Invalid client IP address');
       return false;
     }
     
-    // Check if IP is already blocked
-    if (isBlockedIP(clientIP)) {
-      sendError(response, 429, 'IP Blocked', 'Your IP address has been temporarily blocked');
+    // Validate IP address format (prevent IP spoofing)
+    const ipRegex = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$|^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$/;
+    if (!ipRegex.test(clientIP.toString())) {
+      sendError(response, 400, 'Invalid IP Format', 'Invalid IP address format');
       return false;
     }
     
@@ -3057,30 +2846,6 @@ const sendWebSocketError = (socket, statusCode, message) => {
     socket.destroy();
   }
 };
-
-const cleanupOldConnections = () => {
-  const now = Date.now();
-  const CONNECTION_TIMEOUT = 5 * 60 * 1000; // 5 minutes
-  const keysToDelete = [];
-  
-  // Clean up old connections
-  for (const [key, connection] of activeConnections.entries()) {
-    if (now - connection.startTime > CONNECTION_TIMEOUT) {
-      keysToDelete.push(key);
-    }
-  }
-  
-  // Remove old connections
-  for (const key of keysToDelete) {
-    activeConnections.delete(key);
-  }
-  
-  // Update total active connections counter
-  totalActiveConnections = activeConnections.size;
-};
-
-// Start connection cleanup
-setInterval(cleanupOldConnections, 60 * 1000); // Every minute
 
 // Broadcast status updates every 30 seconds
 // setInterval(broadcastAgentStatus, 30 * 1000);
