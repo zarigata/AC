@@ -283,6 +283,37 @@ export class AgentRegistry {
           CREATE INDEX IF NOT EXISTS idx_presets_created_at ON presets(createdAt);
           CREATE INDEX IF NOT EXISTS idx_presets_is_active ON presets(isActive);
           CREATE INDEX IF NOT EXISTS idx_presets_is_builtin ON presets(isBuiltIn);
+          
+          CREATE TABLE IF NOT EXISTS skills (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            version TEXT NOT NULL DEFAULT '1.0.0',
+            author TEXT NOT NULL,
+            category TEXT NOT NULL,
+            tags TEXT,
+            code TEXT NOT NULL,
+            dependencies TEXT,
+            configSchema TEXT,
+            isBuiltIn INTEGER NOT NULL DEFAULT 0,
+            isActive INTEGER NOT NULL DEFAULT 1,
+            isPublic INTEGER NOT NULL DEFAULT 1,
+            downloadCount INTEGER NOT NULL DEFAULT 0,
+            rating REAL NOT NULL DEFAULT 0,
+            reviewCount INTEGER NOT NULL DEFAULT 0,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL,
+            publishedAt TEXT
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name);
+          CREATE INDEX IF NOT EXISTS idx_skills_category ON skills(category);
+          CREATE INDEX IF NOT EXISTS idx_skills_author ON skills(author);
+          CREATE INDEX IF NOT EXISTS idx_skills_is_active ON skills(isActive);
+          CREATE INDEX IF NOT EXISTS idx_skills_is_builtin ON skills(isBuiltIn);
+          CREATE INDEX IF NOT EXISTS idx_skills_is_public ON skills(isPublic);
+          CREATE INDEX IF NOT EXISTS idx_skills_created_at ON skills(createdAt);
+          CREATE INDEX IF NOT EXISTS idx_skills_category_active ON skills(category, isActive);
         `);
         
         // Create file storage directory
@@ -1988,6 +2019,425 @@ export class AgentRegistry {
 
     for (const preset of presets) {
       this.createPreset(preset);
+    }
+  }
+
+  // Skill Management Methods
+  
+  createSkill(input) {
+    try {
+      // Validate input
+      if (!input || typeof input !== 'object') {
+        throw new Error('Skill input must be an object');
+      }
+      
+      const tags = Array.isArray(input.tags) ? input.tags : [];
+      const dependencies = Array.isArray(input.dependencies) ? input.dependencies : [];
+      
+      validateInput(input, {
+        name: { required: true, type: 'string', minLength: 2, maxLength: 100 },
+        description: { required: true, type: 'string', minLength: 10, maxLength: 1000 },
+        version: { required: false, type: 'string', minLength: 2, maxLength: 20, default: '1.0.0' },
+        author: { required: true, type: 'string', minLength: 2, maxLength: 100 },
+        category: { required: true, type: 'string', minLength: 2, maxLength: 50 },
+        code: { required: true, type: 'string' },
+        isBuiltIn: { required: false, type: 'boolean', default: false },
+        isActive: { required: false, type: 'boolean', default: true },
+        isPublic: { required: false, type: 'boolean', default: true }
+      }, 'Skill input');
+
+      // Check if skill with same name and version already exists
+      const existingSkill = this.db.prepare('SELECT id FROM skills WHERE name = ? AND version = ?').get(input.name, input.version || '1.0.0');
+      if (existingSkill) {
+        throw new Error(`Skill '${input.name}' version '${input.version}' already exists`);
+      }
+
+      const id = crypto.randomUUID();
+      const timestamp = now();
+      const publishedAt = input.isPublic ? timestamp : null;
+      
+      const skill = {
+        id,
+        name: sanitizeContent(input.name, 'skill name').trim(),
+        description: sanitizeContent(input.description, 'skill description').trim(),
+        version: input.version || '1.0.0',
+        author: sanitizeContent(input.author, 'skill author').trim(),
+        category: sanitizeContent(input.category, 'skill category').trim(),
+        tags: JSON.stringify(input.tags || []),
+        code: input.code,
+        dependencies: JSON.stringify(input.dependencies || []),
+        configSchema: input.configSchema ? JSON.stringify(input.configSchema) : null,
+        isBuiltIn: Number(input.isBuiltIn || false),
+        isActive: Number(input.isActive !== false),
+        isPublic: Number(input.isPublic !== false),
+        downloadCount: 0,
+        rating: 0,
+        reviewCount: 0,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        publishedAt
+      };
+
+      this.db.exec('BEGIN TRANSACTION');
+      try {
+        const insertStmt = this.db.prepare(
+          `INSERT INTO skills (
+            id, name, description, version, author, category, tags, code,
+            dependencies, configSchema, isBuiltIn, isActive, isPublic,
+            downloadCount, rating, reviewCount, createdAt, updatedAt, publishedAt
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        );
+
+        const result = insertStmt.run(
+          skill.id,
+          skill.name,
+          skill.description,
+          skill.version,
+          skill.author,
+          skill.category,
+          skill.tags,
+          skill.code,
+          skill.dependencies,
+          skill.configSchema,
+          skill.isBuiltIn,
+          skill.isActive,
+          skill.isPublic,
+          skill.downloadCount,
+          skill.rating,
+          skill.reviewCount,
+          skill.createdAt,
+          skill.updatedAt,
+          skill.publishedAt
+        );
+
+        if (result.changes === 0) {
+          throw new Error('Failed to create skill');
+        }
+
+        this.db.exec('COMMIT');
+        return skill;
+      } catch (dbErr) {
+        try {
+          this.db.exec('ROLLBACK');
+        } catch (rollbackErr) {
+          console.error('Error during rollback:', rollbackErr);
+        }
+        throw new Error(`Failed to create skill: ${dbErr.message}`);
+      }
+    } catch (err) {
+      console.error('Error creating skill:', err);
+      throw err;
+    }
+  }
+
+  listSkills(limit = 100, options = {}) {
+    try {
+      const safeLimit = Math.min(Math.max(Number(limit), 1), 1000);
+      const offset = (options.page || 1 - 1) * safeLimit;
+      
+      let query = 'SELECT * FROM skills';
+      const params = [];
+      
+      // Apply filters
+      const filters = [];
+      
+      if (options.category) {
+        filters.push('category = ?');
+        params.push(options.category);
+      }
+      
+      if (options.author) {
+        filters.push('author = ?');
+        params.push(options.author);
+      }
+      
+      if (options.isPublic !== undefined) {
+        filters.push('isPublic = ?');
+        params.push(Number(options.isPublic));
+      }
+      
+      if (options.isActive !== undefined) {
+        filters.push('isActive = ?');
+        params.push(Number(options.isActive));
+      }
+      
+      if (options.isBuiltIn !== undefined) {
+        filters.push('isBuiltIn = ?');
+        params.push(Number(options.isBuiltIn));
+      }
+      
+      if (options.search) {
+        filters.push('(name LIKE ? OR description LIKE ? OR tags LIKE ?)');
+        const searchPattern = `%${options.search}%`;
+        params.push(searchPattern, searchPattern, searchPattern);
+      }
+      
+      if (filters.length > 0) {
+        query += ' WHERE ' + filters.join(' AND ');
+      }
+      
+      query += ' ORDER BY createdAt DESC LIMIT ? OFFSET ?';
+      params.push(safeLimit, offset);
+      
+      const rows = this.db.prepare(query).all(...params);
+      
+      return rows.map(row => ({
+        ...row,
+        tags: JSON.parse(row.tags || '[]'),
+        dependencies: JSON.parse(row.dependencies || '[]'),
+        configSchema: row.configSchema ? JSON.parse(row.configSchema) : null,
+        isBuiltIn: Boolean(row.isBuiltIn),
+        isActive: Boolean(row.isActive),
+        isPublic: Boolean(row.isPublic),
+        publishedAt: row.publishedAt
+      }));
+    } catch (err) {
+      console.error('Error listing skills:', err);
+      return [];
+    }
+  }
+
+  getSkill(id) {
+    try {
+      const row = this.db.prepare('SELECT * FROM skills WHERE id = ?').get(id);
+      if (!row) return null;
+      
+      return {
+        ...row,
+        tags: JSON.parse(row.tags || '[]'),
+        dependencies: JSON.parse(row.dependencies || '[]'),
+        configSchema: row.configSchema ? JSON.parse(row.configSchema) : null,
+        isBuiltIn: Boolean(row.isBuiltIn),
+        isActive: Boolean(row.isActive),
+        isPublic: Boolean(row.isPublic),
+        publishedAt: row.publishedAt
+      };
+    } catch (err) {
+      console.error('Error getting skill:', err);
+      return null;
+    }
+  }
+
+  updateSkill(id, updates) {
+    try {
+      const existing = this.getSkill(id);
+      if (!existing) throw new Error('Skill not found');
+
+      const allowed = ['name', 'description', 'version', 'author', 'category', 'tags', 'code', 'dependencies', 'configSchema', 'isActive', 'isPublic'];
+      const fields = [];
+      const values = [];
+      const timestamp = now();
+
+      for (const key of allowed) {
+        if (key in updates) {
+          let value = updates[key];
+          
+          // Validate specific fields
+          if (key === 'name' && (typeof value !== 'string' || value.length > 100)) {
+            throw new Error(`Invalid ${key} value`);
+          }
+          
+          if (key === 'description' && (typeof value !== 'string' || value.length > 1000)) {
+            throw new Error(`Invalid ${key} value`);
+          }
+          
+          if (key === 'version' && (typeof value !== 'string' || value.length > 20)) {
+            throw new Error(`Invalid ${key} value`);
+          }
+          
+          if (key === 'author' && (typeof value !== 'string' || value.length > 100)) {
+            throw new Error(`Invalid ${key} value`);
+          }
+          
+          if (key === 'category' && (typeof value !== 'string' || value.length > 50)) {
+            throw new Error(`Invalid ${key} value`);
+          }
+          
+          if (key === 'tags' && (!Array.isArray(value))) {
+            throw new Error(`Invalid ${key} value: must be an array`);
+          }
+          
+          if (key === 'dependencies' && (!Array.isArray(value))) {
+            throw new Error(`Invalid ${key} value: must be an array`);
+          }
+          
+          if (key === 'code' && (typeof value !== 'string')) {
+            throw new Error(`Invalid ${key} value: must be a string`);
+          }
+          
+          if (key === 'configSchema' && (value !== null && typeof value !== 'object')) {
+            throw new Error(`Invalid ${key} value: must be an object or null`);
+          }
+          
+          if ((key === 'isActive' || key === 'isPublic') && typeof value !== 'boolean') {
+            throw new Error(`Invalid ${key} value: must be boolean`);
+          }
+          
+          fields.push(`${key} = ?`);
+          values.push(key === 'tags' || key === 'dependencies' ? JSON.stringify(value) :
+                     key === 'configSchema' ? (value ? JSON.stringify(value) : null) :
+                     value);
+        }
+      }
+
+      if (fields.length === 0) return existing;
+
+      fields.push('updatedAt = ?');
+      values.push(timestamp);
+      values.push(id);
+
+      const updateStmt = this.db.prepare(`UPDATE skills SET ${fields.join(', ')} WHERE id = ?`);
+      const result = updateStmt.run(...values);
+
+      if (result.changes === 0) {
+        throw new Error('Failed to update skill');
+      }
+
+      return this.getSkill(id);
+    } catch (err) {
+      console.error('Error updating skill:', err);
+      throw err;
+    }
+  }
+
+  deleteSkill(id) {
+    try {
+      // Check if skill exists and is built-in
+      const existing = this.getSkill(id);
+      if (!existing) return false;
+      
+      if (existing.isBuiltIn) {
+        throw new Error('Cannot delete built-in skills');
+      }
+
+      const result = this.db.prepare('DELETE FROM skills WHERE id = ?').run(id);
+      return result.changes > 0;
+    } catch (err) {
+      console.error('Error deleting skill:', err);
+      return false;
+    }
+  }
+
+  getSkillCategories() {
+    try {
+      const rows = this.db.prepare('SELECT DISTINCT category FROM skills WHERE isActive = 1 ORDER BY category').all();
+      return rows.map(row => row.category);
+    } catch (err) {
+      console.error('Error getting skill categories:', err);
+      return [];
+    }
+  }
+
+  getPopularSkills(limit = 10) {
+    try {
+      const rows = this.db.prepare(
+        'SELECT * FROM skills WHERE isActive = 1 AND isPublic = 1 ORDER BY downloadCount DESC, rating DESC, reviewCount DESC LIMIT ?'
+      ).all(limit);
+      
+      return rows.map(row => ({
+        ...row,
+        tags: JSON.parse(row.tags || '[]'),
+        dependencies: JSON.parse(row.dependencies || '[]'),
+        configSchema: row.configSchema ? JSON.parse(row.configSchema) : null,
+        isBuiltIn: Boolean(row.isBuiltIn),
+        isActive: Boolean(row.isActive),
+        isPublic: Boolean(row.isPublic),
+        publishedAt: row.publishedAt
+      }));
+    } catch (err) {
+      console.error('Error getting popular skills:', err);
+      return [];
+    }
+  }
+
+  incrementSkillDownloads(skillId) {
+    try {
+      const result = this.db.prepare('UPDATE skills SET downloadCount = downloadCount + 1, updatedAt = ? WHERE id = ?').run(now(), skillId);
+      return result.changes > 0;
+    } catch (err) {
+      console.error('Error incrementing skill downloads:', err);
+      return false;
+    }
+  }
+
+  rateSkill(skillId, rating) {
+    try {
+      if (typeof rating !== 'number' || rating < 1 || rating > 5) {
+        throw new Error('Rating must be between 1 and 5');
+      }
+      
+      const skill = this.getSkill(skillId);
+      if (!skill) {
+        throw new Error('Skill not found');
+      }
+      
+      // Calculate new average rating
+      const currentRating = skill.rating;
+      const currentReviewCount = skill.reviewCount;
+      const newTotalRating = (currentRating * currentReviewCount) + rating;
+      const newReviewCount = currentReviewCount + 1;
+      const newAverageRating = newTotalRating / newReviewCount;
+      
+      const result = this.db.prepare(
+        'UPDATE skills SET rating = ?, reviewCount = ?, updatedAt = ? WHERE id = ?'
+      ).run(newAverageRating, newReviewCount, now(), skillId);
+      
+      return result.changes > 0;
+    } catch (err) {
+      console.error('Error rating skill:', err);
+      throw err;
+    }
+  }
+
+  seedBuiltInSkills() {
+    if (this.listSkills({ isBuiltIn: true }).length > 0) {
+      return;
+    }
+
+    const skills = [
+      {
+        name: "Web Scraper",
+        description: "Scrape content from websites with configurable selectors and output formatting",
+        version: "1.0.0",
+        author: "system",
+        category: "data",
+        tags: ["web", "scraping", "extraction"],
+        code: `// Web Scraper Skill\nconst scrapeWeb = async (url, options = {}) => {\n  const { selectors = [], outputFormat = 'json' } = options;\n  // Implementation here\n  return { success: true, data: [] };\n};\n\nmodule.exports = { scrapeWeb };`,
+        dependencies: [],
+        isBuiltIn: true,
+        isActive: true,
+        isPublic: true
+      },
+      {
+        name: "File Processor",
+        description: "Process and analyze various file types with format detection and content extraction",
+        version: "1.0.0",
+        author: "system",
+        category: "files",
+        tags: ["files", "processing", "analysis"],
+        code: `// File Processor Skill\nconst processFile = async (file, options = {}) => {\n  const { analyzeContent = true, extractMetadata = true } = options;\n  // Implementation here\n  return { success: true, processed: true };\n};\n\nmodule.exports = { processFile };`,
+        dependencies: [],
+        isBuiltIn: true,
+        isActive: true,
+        isPublic: true
+      },
+      {
+        name: "Data Analyzer",
+        description: "Analyze datasets with statistical analysis and visualization capabilities",
+        version: "1.0.0",
+        author: "system",
+        category: "analysis",
+        tags: ["data", "analysis", "statistics", "visualization"],
+        code: `// Data Analyzer Skill\nconst analyzeData = async (data, options = {}) => {\n  const { type = 'descriptive', visualize = false } = options;\n  // Implementation here\n  return { success: true, analysis: {} };\n};\n\nmodule.exports = { analyzeData };`,
+        dependencies: [],
+        isBuiltIn: true,
+        isActive: true,
+        isPublic: true
+      }
+    ];
+
+    for (const skill of skills) {
+      this.createSkill(skill);
     }
   }
 }

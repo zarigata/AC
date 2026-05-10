@@ -1251,6 +1251,86 @@ const server = createServer(async (request, response) => {
       });
     }
 
+    if (request.method === "GET" && url.pathname === "/api/setup/wizard") {
+      // Check if this is a first-run scenario
+      const agents = registry.listAgents();
+      const presets = registry.listPresets();
+      const hasAnyAgents = agents.length > 0;
+      const hasAnyPresets = presets.length > 0;
+      
+      const wizardState = {
+        isFirstRun: !hasAnyAgents && !hasAnyPresets,
+        step: 1, // Default first step
+        completedSteps: [],
+        currentStep: 'welcome',
+        nextSteps: ['agent-creation', 'preset-selection', 'configuration', 'testing'],
+        data: {
+          availableProviders: listProviders(),
+          availablePresets: presets.filter(p => p.isActive),
+          systemInfo: {
+            version: VERSION,
+            uptime: Math.floor((Date.now() - startTime) / 1000),
+            databasePath: databasePath
+          }
+        }
+      };
+      
+      // Determine appropriate step based on existing setup
+      if (hasAnyAgents) {
+        wizardState.currentStep = 'preset-selection';
+        wizardState.completedSteps = ['agent-creation'];
+      }
+      
+      if (hasAnyPresets) {
+        wizardState.currentStep = 'configuration';
+        wizardState.completedSteps = ['agent-creation', 'preset-selection'];
+      }
+      
+      if (hasAnyAgents && hasAnyPresets) {
+        wizardState.currentStep = 'testing';
+        wizardState.completedSteps = ['agent-creation', 'preset-selection', 'configuration'];
+      }
+      
+      return sendJson(response, 200, wizardState);
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/setup/wizard/complete") {
+      try {
+        const body = await readRequestBody(request);
+        
+        // Validate completion data
+        if (!body || typeof body !== 'object') {
+          return sendJson(response, 400, { error: "Invalid request body" });
+        }
+        
+        // Log wizard completion for analytics
+        console.log('Wizard completed:', {
+          timestamp: Date.now(),
+          stepsCompleted: body.completedSteps || [],
+          agentsCreated: body.agentsCreated || 0,
+          presetsApplied: body.presetsApplied || 0,
+          userPreferences: body.preferences || {}
+        });
+        
+        // Here you could update settings, create agents, apply presets, etc.
+        // based on the wizard completion data
+        
+        return sendJson(response, 200, {
+          success: true,
+          message: "Setup wizard completed successfully",
+          completedAt: Date.now(),
+          nextSteps: [
+            "Start using your agents",
+            "Configure integrations",
+            "Customize settings",
+            "Explore advanced features"
+          ]
+        });
+      } catch (err) {
+        return sendJson(response, 400, { error: err.message || "Invalid request body" });
+      }
+    }
+
     if (request.method === "PATCH" && url.pathname === "/api/settings") {
       try {
         const body = await readRequestBody(request);
@@ -2816,6 +2896,254 @@ const server = createServer(async (request, response) => {
         } catch (err) {
           return sendJson(response, 500, { error: err.message || "Failed to delete job" });
         }
+      }
+    }
+
+    /* ─── Skill Management ─── */
+    
+    // Seed built-in skills on startup if no skills exist
+    try {
+      const existingSkills = registry.listSkills({ isBuiltIn: true });
+      if (existingSkills.length === 0) {
+        console.log('Seeding built-in skills...');
+        registry.seedBuiltInSkills();
+        console.log('Built-in skills seeded successfully');
+      }
+    } catch (seedErr) {
+      console.error('Error seeding skills:', seedErr.message);
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/skills") {
+      try {
+        const limit = new URLSearchParams(url.search).get('limit') || '100';
+        const category = new URLSearchParams(url.search).get('category');
+        const author = new URLSearchParams(url.search).get('author');
+        const search = new URLSearchParams(url.search).get('search');
+        const isPublic = new URLSearchParams(url.search).get('public');
+        const isActive = new URLSearchParams(url.search).get('active');
+        
+        const options = {
+          limit: parseInt(limit),
+          category,
+          author,
+          search,
+          isPublic: isPublic === 'true',
+          isActive: isActive === 'true'
+        };
+        
+        const skills = registry.listSkills(100, options);
+        const categories = registry.getSkillCategories();
+        const popularSkills = registry.getPopularSkills(5);
+        
+        return sendJson(response, 200, { 
+          skills, 
+          total: skills.length, 
+          categories,
+          popularSkills,
+          filters: options
+        });
+      } catch (err) {
+        console.error('Error listing skills:', err);
+        return sendJson(response, 500, { error: "Failed to list skills" });
+      }
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/skills") {
+      try {
+        const body = await readRequestBody(request);
+        
+        // Validate skill input
+        if (!body || typeof body !== 'object') {
+          return sendJson(response, 400, { error: "Invalid request body" });
+        }
+        
+        const name = body.name?.trim();
+        const description = body.description?.trim();
+        
+        if (!name || name.length < 2 || name.length > 100) {
+          return sendJson(response, 400, { error: "Invalid skill name: must be 2-100 characters" });
+        }
+        
+        if (!description || description.length < 10 || description.length > 1000) {
+          return sendJson(response, 400, { error: "Invalid skill description: must be 10-1000 characters" });
+        }
+        
+        // Validate required fields
+        const requiredFields = ['author', 'category', 'code'];
+        for (const field of requiredFields) {
+          if (!body[field]) {
+            return sendJson(response, 400, { error: `Missing required field: ${field}` });
+          }
+        }
+        
+        const skill = registry.createSkill({
+          name,
+          description,
+          version: body.version || '1.0.0',
+          author: body.author?.trim(),
+          category: body.category?.trim(),
+          tags: Array.isArray(body.tags) ? body.tags : [],
+          code: body.code,
+          dependencies: Array.isArray(body.dependencies) ? body.dependencies : [],
+          configSchema: body.configSchema,
+          isBuiltIn: body.isBuiltIn || false,
+          isActive: body.isActive !== false,
+          isPublic: body.isPublic !== false
+        });
+        
+        if (!skill) {
+          return sendJson(response, 500, { error: "Failed to create skill" });
+        }
+        
+        return sendJson(response, 201, { skill });
+      } catch (err) {
+        return sendJson(response, 400, { error: err.message || "Invalid request body" });
+      }
+    }
+
+    const skillMatch = url.pathname.match(/^\/api\/skills\/([\w-]+)$/);
+
+    if (skillMatch) {
+      const skillId = skillMatch[1];
+      
+      if (request.method === "GET") {
+        const skill = registry.getSkill(skillId);
+        if (!skill) return sendJson(response, 404, { error: "Skill not found" });
+        return sendJson(response, 200, { skill });
+      }
+      
+      if (request.method === "PATCH") {
+        try {
+          const body = await readRequestBody(request);
+          
+          // Validate skill ID format
+          if (!skillId || skillId.length > 64) {
+            return sendJson(response, 400, { error: "Invalid skill ID" });
+          }
+          
+          // Check if skill exists
+          const existingSkill = registry.getSkill(skillId);
+          if (!existingSkill) {
+            return sendJson(response, 404, { error: "Skill not found" });
+          }
+          
+          // Prevent modification of built-in skills
+          if (existingSkill.isBuiltIn && body.name && body.name !== existingSkill.name) {
+            return sendJson(response, 400, { error: "Cannot modify built-in skill names" });
+          }
+          
+          const updates = {};
+          const allowedFields = ['name', 'description', 'version', 'author', 'category', 'tags', 'code', 'dependencies', 'configSchema', 'isActive', 'isPublic'];
+          
+          for (const field of allowedFields) {
+            if (body[field] !== undefined) {
+              if (field === 'name' && typeof body[field] !== 'string') {
+                return sendJson(response, 400, { error: "Invalid skill name" });
+              }
+              if (field === 'description' && typeof body[field] !== 'string') {
+                return sendJson(response, 400, { error: "Invalid skill description" });
+              }
+              if ((field === 'isActive' || field === 'isPublic') && typeof body[field] !== 'boolean') {
+                return sendJson(response, 400, { error: `Invalid ${field} value: must be boolean` });
+              }
+              if ((field === 'tags' || field === 'dependencies') && !Array.isArray(body[field])) {
+                return sendJson(response, 400, { error: `Invalid ${field}: must be an array` });
+              }
+              updates[field] = body[field];
+            }
+          }
+          
+          if (Object.keys(updates).length === 0) {
+            return sendJson(response, 400, { error: "No valid updates provided" });
+          }
+          
+          const updatedSkill = registry.updateSkill(skillId, updates);
+          if (!updatedSkill) {
+            return sendJson(response, 500, { error: "Failed to update skill" });
+          }
+          
+          return sendJson(response, 200, { skill: updatedSkill });
+        } catch (err) {
+          return sendJson(response, 400, { error: err.message || "Invalid request body" });
+        }
+      }
+      
+      if (request.method === "DELETE") {
+        try {
+          // Validate skill ID format
+          if (!skillId || skillId.length > 64) {
+            return sendJson(response, 400, { error: "Invalid skill ID" });
+          }
+          
+          const deleted = registry.deleteSkill(skillId);
+          if (!deleted) return sendJson(response, 404, { error: "Skill not found" });
+          return sendJson(response, 200, { deleted: true, skillId });
+        } catch (err) {
+          return sendJson(response, 400, { error: err.message });
+        }
+      }
+    }
+
+    if (request.method === "POST" && url.pathname.match(/^\/api\/skills\/([\w-]+)\/download$/)) {
+      const skillId = url.pathname.match(/^\/api\/skills\/([\w-]+)\/download$/)[1];
+      
+      try {
+        const skill = registry.getSkill(skillId);
+        if (!skill) {
+          return sendJson(response, 404, { error: "Skill not found" });
+        }
+        
+        if (!skill.isPublic) {
+          return sendJson(response, 403, { error: "Skill is not public" });
+        }
+        
+        // Increment download count
+        registry.incrementSkillDownloads(skillId);
+        
+        return sendJson(response, 200, {
+          success: true,
+          skill: {
+            id: skill.id,
+            name: skill.name,
+            version: skill.version,
+            code: skill.code,
+            downloadedAt: Date.now()
+          }
+        });
+      } catch (err) {
+        return sendJson(response, 400, { error: err.message });
+      }
+    }
+
+    if (request.method === "POST" && url.pathname.match(/^\/api\/skills\/([\w-]+)\/rate$/)) {
+      const skillId = url.pathname.match(/^\/api\/skills\/([\w-]+)\/rate$/)[1];
+      
+      try {
+        const body = await readRequestBody(request);
+        const rating = body.rating;
+        
+        if (typeof rating !== 'number' || rating < 1 || rating > 5) {
+          return sendJson(response, 400, { error: "Rating must be between 1 and 5" });
+        }
+        
+        const success = registry.rateSkill(skillId, rating);
+        if (!success) {
+          return sendJson(response, 404, { error: "Skill not found" });
+        }
+        
+        const skill = registry.getSkill(skillId);
+        
+        return sendJson(response, 200, {
+          success: true,
+          skill: {
+            id: skill.id,
+            name: skill.name,
+            rating: skill.rating,
+            reviewCount: skill.reviewCount
+          }
+        });
+      } catch (err) {
+        return sendJson(response, 400, { error: err.message });
       }
     }
 
