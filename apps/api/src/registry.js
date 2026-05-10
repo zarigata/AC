@@ -1382,27 +1382,37 @@ export class AgentRegistry {
       const fileId = crypto.randomUUID();
       const timestamp = now();
       
-      const insertStmt = this.db.prepare(
-        `INSERT INTO agent_files (
-          id, agentId, filename, originalName, fileSize, fileType, fileHash, 
-          description, tags, uploadedAt, lastAccessed, accessCount
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      );
-      
-      const result = insertStmt.run(
-        fileId, agentId, filename, originalName, content.length, fileType, 
-        fileHash, description, JSON.stringify(tags), timestamp, timestamp, 0
-      );
-      
-      if (result.changes === 0) {
-        throw new Error('Failed to save file record');
-      }
-      
-      // Save actual file to disk
-      const filePath = join(this.filesDir, fileId);
-      writeFileSync(filePath, content);
-      
-      return {
+      // Begin transaction for data consistency
+      this.db.exec('BEGIN TRANSACTION');
+      try {
+        const insertStmt = this.db.prepare(
+          `INSERT INTO agent_files (
+            id, agentId, filename, originalName, fileSize, fileType, fileHash, 
+            description, tags, uploadedAt, lastAccessed, accessCount
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        );
+        
+        const result = insertStmt.run(
+          fileId, agentId, filename, originalName, content.length, fileType, 
+          fileHash, description, JSON.stringify(tags), timestamp, timestamp, 0
+        );
+        
+        if (result.changes === 0) {
+          throw new Error('Failed to save file record');
+        }
+        
+        // Save actual file to disk
+        const filePath = join(this.filesDir, fileId);
+        try {
+          writeFileSync(filePath, content);
+        } catch (fileErr) {
+          // File write failed, rollback the database record
+          this.db.exec('ROLLBACK');
+          throw new Error(`Failed to save file to disk: ${fileErr.message}`);
+        }
+        
+        this.db.exec('COMMIT');
+        return {
         id: fileId,
         agentId,
         filename,
@@ -1417,10 +1427,17 @@ export class AgentRegistry {
         accessCount: 0,
         url: `/api/agents/${agentId}/files/${fileId}`
       };
-    } catch (err) {
-      console.error('Error uploading file:', err);
-      throw err;
-    }
+      } catch (dbErr) {
+        this.db.exec('ROLLBACK');
+        console.error('Database error uploading file:', dbErr);
+        throw new Error('Database operation failed');
+      } catch (err) {
+        console.error('Error uploading file:', err);
+        // Sanitize error message for client
+        const errorMessage = err.message.includes('database') ? 'Database operation failed' : 
+                            err.message.includes('file') ? 'File operation failed' : 'Failed to upload file';
+        throw new Error(errorMessage);
+      }
   }
   
   getAgentFiles(agentId, options = {}) {

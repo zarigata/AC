@@ -375,6 +375,9 @@ const MAX_REQUEST_TIMEOUT = 30000; // 30 seconds timeout for requests
 const activeConnections = new Map();
 let totalActiveConnections = 0;
 
+// Rate limiting data structure for WebSocket messages
+const messageTimestamps = new Map();
+
 // IP tracking and blocking for abuse prevention
 const blockedIPs = new Set();
 const ipViolationCounts = new Map();
@@ -3835,7 +3838,7 @@ server.on('upgrade', (request, socket, head) => {
           connectedClients.delete(clientInfo);
         });
         
-        // Handle messages with comprehensive validation
+        // Handle messages with comprehensive validation and rate limiting
         ws.on('message', (message) => {
           try {
             // Validate message size (1MB limit)
@@ -3862,20 +3865,39 @@ server.on('upgrade', (request, socket, head) => {
               throw new Error('Invalid message type: must be string');
             }
             
+            // Rate limiting: Check message frequency per client
+            const now = Date.now();
+            const clientKey = clientInfo.id || clientInfo.ip;
+            
+            // Initialize rate limiting data if not exists
+            if (!messageTimestamps[clientKey]) {
+              messageTimestamps[clientKey] = [];
+            }
+            
+            // Remove timestamps older than 1 minute
+            const oneMinuteAgo = now - 60000;
+            messageTimestamps[clientKey] = messageTimestamps[clientKey].filter(timestamp => timestamp > oneMinuteAgo);
+            
+            // Check if rate limit exceeded (max 100 messages per minute)
+            if (messageTimestamps[clientKey].length >= 100) {
+              throw new Error('Rate limit exceeded: maximum 100 messages per minute');
+            }
+            
+            // Record this message timestamp
+            messageTimestamps[clientKey].push(now);
+            
             // Log message securely (no sensitive data)
             console.log('Received WebSocket message:', {
               type: data.type || 'unknown',
-              timestamp: Date.now(),
+              timestamp: now,
               dataSize: JSON.stringify(data).length,
-              hasData: !!data.data
+              hasData: !!data.data,
+              messageCount: messageTimestamps[clientKey].length
             });
-            
-            // Add rate limiting for message frequency
-            // Implementation would track message timestamps per client
             
           } catch (err) {
             console.error('Invalid WebSocket message format:', err.message);
-            ws.close(1008, 'Invalid message format');
+            ws.close(1008, err.message);
           }
         });
       });
