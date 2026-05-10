@@ -274,6 +274,11 @@ const ensureInteger = (value, field, min, max) => {
     throw new Error(`${field} must be an integer.`);
   }
   
+  // Enhanced security: check for NaN, Infinity, or other numeric anomalies
+  if (!Number.isFinite(value)) {
+    throw new Error(`${field} must be a finite integer.`);
+  }
+  
   // Check bounds with safety margins for security
   const safeMin = Math.max(min, 0); // Ensure minimum is not negative
   const safeMax = Math.min(max, 100000); // Reasonable upper limit for security
@@ -302,6 +307,11 @@ const ensureInteger = (value, field, min, max) => {
   // Check for potentially problematic values
   if (value <= 0 && field !== 'timeout') {
     throw new Error(`${field} must be a positive integer for security reasons.`);
+  }
+
+  // Additional security: check for numeric manipulation attempts
+  if (value > Number.MAX_SAFE_INTEGER - 1) {
+    throw new Error(`${field} exceeds maximum safe integer value.`);
   }
 
   return value;

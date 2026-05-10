@@ -4,6 +4,23 @@ import { dirname, join, extname, basename } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { inspect } from "node:util";
 
+// Security helper function to sanitize error messages
+const sanitizeError = (error) => {
+  if (!error) return 'Unknown error';
+  
+  // Convert to string if not already
+  const errorStr = typeof error === 'string' ? error : error.message || 'Unknown error';
+  
+  // Remove potentially sensitive information
+  return errorStr
+    .replace(/API key[^\s]*[^\s\w]/gi, '***')
+    .replace(/token[^\s]*[^\s\w]/gi, '***')
+    .replace(/password[^\s]*[^\s\w]/gi, '***')
+    .replace(/secret[^\s]*[^\s\w]/gi, '***')
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, '***')
+    .substring(0, 500); // Limit length
+};
+
 const sanitizeContent = (content, fieldName = 'content') => {
   if (typeof content !== 'string') {
     if (content === null || content === undefined) {
@@ -41,27 +58,39 @@ const validateInput = (input, rules, fieldName) => {
     throw new Error(`${fieldName} is required`);
   }
   
-  // Check for prototype pollution attempts
+  // Check for prototype pollution attempts with enhanced security
   if (input && typeof input === 'object') {
     // Check for prototype pollution attempts - only check own properties
-    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype', '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__'];
     for (const key of dangerousKeys) {
       if (Object.prototype.hasOwnProperty.call(input, key)) {
         throw new Error(`${fieldName} contains potentially dangerous property: ${key}`);
       }
     }
     
-    // Check for circular references and deeply nested objects
-    const maxDepth = 10;
-    const checkDepth = (obj, depth = 0) => {
+    // Check for circular references and deeply nested objects with increased security
+    const maxDepth = 8; // Reduced for security
+    const maxProperties = 50; // Limit number of properties
+    const checkDepth = (obj, depth = 0, visited = new WeakSet()) => {
       if (depth > maxDepth) {
-        throw new Error(`${fieldName} is too deeply nested`);
+        throw new Error(`${fieldName} is too deeply nested (maximum depth: ${maxDepth})`);
       }
       
       if (obj && typeof obj === 'object') {
+        // Prevent circular references
+        if (visited.has(obj)) {
+          throw new Error(`${fieldName} contains circular references`);
+        }
+        visited.add(obj);
+        
+        // Limit number of properties
+        if (Object.keys(obj).length > maxProperties) {
+          throw new Error(`${fieldName} has too many properties (maximum: ${maxProperties})`);
+        }
+        
         for (const value of Object.values(obj)) {
           if (typeof value === 'object' && value !== null) {
-            checkDepth(value, depth + 1);
+            checkDepth(value, depth + 1, visited);
           }
         }
       }
@@ -69,40 +98,96 @@ const validateInput = (input, rules, fieldName) => {
     checkDepth(input);
   }
   
+  // Validate each field with enhanced security checks
   for (const [key, rule] of Object.entries(rules)) {
-    const value = input[key];
+    let value = input[key];
     
     if (rule.required && (value === undefined || value === null || value === '')) {
       throw new Error(`${fieldName}.${key} is required`);
     }
     
     if (value !== undefined && value !== null) {
+      // Type validation
       if (rule.type && typeof value !== rule.type) {
         throw new Error(`${fieldName}.${key} must be a ${rule.type}`);
       }
       
+      // Length validation with security bounds
       if (rule.minLength && value.length < rule.minLength) {
         throw new Error(`${fieldName}.${key} must be at least ${rule.minLength} characters`);
       }
       
       if (rule.maxLength && value.length > rule.maxLength) {
-        throw new Error(`${fieldName}.${key} must be no more than ${rule.maxLength} characters`);
+        // Enforce strict maximum length for security
+        const securityMax = Math.min(rule.maxLength, 1000);
+        if (value.length > securityMax) {
+          throw new Error(`${fieldName}.${key} exceeds maximum allowed length of ${securityMax} characters`);
+        }
       }
       
+      // Numeric validation with bounds checking
       if (rule.min !== undefined && Number(value) < rule.min) {
         throw new Error(`${fieldName}.${key} must be at least ${rule.min}`);
       }
       
       if (rule.max !== undefined && Number(value) > rule.max) {
-        throw new Error(`${fieldName}.${key} must be no more than ${rule.max}`);
+        // Enforce strict maximum for security-sensitive fields
+        const securityMax = Math.min(rule.max, 1000000);
+        if (Number(value) > securityMax) {
+          throw new Error(`${fieldName}.${key} exceeds maximum allowed value of ${securityMax}`);
+        }
       }
       
+      // Enum validation
       if (rule.enum && !rule.enum.includes(value)) {
         throw new Error(`${fieldName}.${key} must be one of: ${rule.enum.join(', ')}`);
       }
       
-      if (rule.pattern && !rule.pattern.test(value)) {
-        throw new Error(`${fieldName}.${key} format is invalid`);
+      // Pattern validation with security checks
+      if (rule.pattern) {
+        try {
+          if (!rule.pattern.test(String(value))) {
+            throw new Error(`${fieldName}.${key} format is invalid`);
+          }
+        } catch (patternError) {
+          throw new Error(`${fieldName}.${key} pattern validation failed: ${patternError.message}`);
+        }
+      }
+      
+      // Additional security validation for string fields
+      if (typeof value === 'string') {
+        // Check for injection patterns
+        const dangerousPatterns = [
+          /<script[^>]*>.*?<\/script>/gi,
+          /javascript:/gi,
+          /data:/gi,
+          /on\w+\s*=/gi,
+          /eval\(/gi,
+          /exec\(/gi,
+          /Function\(/gi,
+          /SELECT\s+/gi,
+          /INSERT\s+/gi,
+          /UPDATE\s+/gi,
+          /DELETE\s+/gi,
+          /DROP\s+/gi,
+          /CREATE\s+/gi,
+          /ALTER\s+/gi,
+          /;\s*--/g,
+          /#\s*$/gm,
+          /\\/g,
+          /\x00/g
+        ];
+        
+        for (const pattern of dangerousPatterns) {
+          if (pattern.test(value)) {
+            throw new Error(`${fieldName}.${key} contains potentially dangerous content`);
+          }
+        }
+        
+        // Check for control characters
+        if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g.test(value)) {
+          throw new Error(`${fieldName}.${key} contains control characters`);
+        }
       }
     }
   }
@@ -525,17 +610,29 @@ export class AgentRegistry {
 
   getAgent(id) {
     try {
-      // Validate ID format
-      if (!id || typeof id !== 'string' || id.length > 64) {
+      // Validate ID format with enhanced security
+      if (!id || typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
         return null;
       }
       
+      // Use parameterized query to prevent SQL injection
       const row = this.db.prepare("SELECT * FROM agents WHERE id = ?").get(id);
       if (!row) return null;
       
-      return parseAgent({ ...row, peerAccess: Boolean(row.peerAccess) });
+      // Parse agent with sanitized data
+      const agent = parseAgent({ ...row, peerAccess: Boolean(row.peerAccess) });
+      
+      // Remove sensitive information from returned data
+      if (agent.apiKey) {
+        agent.apiKey = '***';
+      }
+      if (agent.secret) {
+        agent.secret = '***';
+      }
+      
+      return agent;
     } catch (err) {
-      console.error('Error getting agent:', err);
+      console.error('Error getting agent:', sanitizeError(err));
       return null;
     }
   }
@@ -1727,17 +1824,30 @@ export class AgentRegistry {
 
   deleteJob(jobId) {
     try {
-      // Validate job ID format
-      if (!jobId || typeof jobId !== 'string' || jobId.length !== 36) {
+      // Validate job ID format with enhanced security
+      if (!jobId || typeof jobId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(jobId)) {
         throw new Error('Invalid job ID format');
       }
+      
+      // Check if job exists before deletion
+      const existingJob = this.getJob(jobId);
+      if (!existingJob) {
+        return false;
+      }
 
+      // Use parameterized query to prevent SQL injection
       const deleteStmt = this.db.prepare('DELETE FROM jobs WHERE id = ?');
       const result = deleteStmt.run(jobId);
 
-      return result.changes > 0;
+      // Verify deletion was successful
+      if (result.changes === 0) {
+        console.warn(`Job ${jobId} was not deleted (changes: 0)`);
+        return false;
+      }
+
+      return true;
     } catch (err) {
-      console.error('Error deleting job:', err);
+      console.error('Error deleting job:', sanitizeError(err));
       throw err;
     }
   }

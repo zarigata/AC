@@ -19,6 +19,57 @@ import { OllamaAdapter, createProvider } from "./adapters/ollama.js";
 import { FailoverChainAdapter, createFailoverChain } from "./adapters/failover.js";
 import { AgentRegistry } from "./registry.js";
 
+// Security helper functions
+const sanitizeError = (error) => {
+  if (!error) return 'Unknown error';
+  
+  // Convert to string if not already
+  const errorStr = typeof error === 'string' ? error : error.message || 'Unknown error';
+  
+  // Remove potentially sensitive information
+  return errorStr
+    .replace(/API key[^\s]*[^\s\w]/gi, '***')
+    .replace(/token[^\s]*[^\s\w]/gi, '***')
+    .replace(/password[^\s]*[^\s\w]/gi, '***')
+    .replace(/secret[^\s]*[^\s\w]/gi, '***')
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, '***')
+    .substring(0, 500); // Limit length
+};
+
+const sanitizeOutput = (data) => {
+  if (data === null || data === undefined) return data;
+  
+  if (typeof data === 'string') {
+    // Remove potentially dangerous characters from strings
+    return data
+      .replace(/<[^>]*script[^>]*>.*?<\/[^>]*script[^>]*>/gi, '')
+      .replace(/javascript:/gi, '')
+      .replace(/data:/gi, '')
+      .replace(/on\w+\s*=/gi, '')
+      .replace(/\x00/g, '')
+      .substring(0, 1000); // Limit length
+  }
+  
+  if (Array.isArray(data)) {
+    return data.map(item => sanitizeOutput(item));
+  }
+  
+  if (typeof data === 'object') {
+    const sanitized = {};
+    for (const [key, value] of Object.entries(data)) {
+      // Skip potentially dangerous keys
+      if (key.includes('password') || key.includes('secret') || key.includes('token')) {
+        sanitized[key] = '***';
+      } else {
+        sanitized[key] = sanitizeOutput(value);
+      }
+    }
+    return sanitized;
+  }
+  
+  return data;
+};
+
 // Simple Job Processor
 const JOB_PROCESSOR_INTERVAL = 5000; // 5 seconds
 const MAX_CONCURRENT_JOBS = 3;
@@ -41,23 +92,44 @@ const processJobs = async () => {
     const job = pendingJobs[0];
     const jobId = job.id;
     
+    // Validate job structure before processing
+    if (!job || typeof job !== 'object' || !job.id || !job.type) {
+      console.error('Invalid job structure:', job);
+      return;
+    }
+    
     // Mark job as running
     runningJobs.add(jobId);
-    const runningJob = registry.updateJob(jobId, { status: 'running' });
+    try {
+      const runningJob = registry.updateJob(jobId, { status: 'running' });
+      if (!runningJob) {
+        runningJobs.delete(jobId);
+        console.error(`Failed to update job status for job ${jobId}`);
+        return;
+      }
+    } catch (updateError) {
+      runningJobs.delete(jobId);
+      console.error(`Failed to update job status for job ${jobId}:`, updateError.message);
+      return;
+    }
     
     // Broadcast job start
-    broadcastJobUpdate({
-      id: jobId,
-      name: job.name,
-      type: job.type,
-      status: 'running',
-      progress: 0,
-      startedAt: runningJob.startedAt
-    });
+    try {
+      broadcastJobUpdate({
+        id: jobId,
+        name: sanitizeOutput(job.name),
+        type: sanitizeOutput(job.type),
+        status: 'running',
+        progress: 0,
+        startedAt: runningJob.startedAt
+      });
+    } catch (broadcastError) {
+      console.error('Failed to broadcast job start:', broadcastError.message);
+    }
     
     console.log(`Starting job: ${job.name} (${jobId})`);
     
-    // Process the job based on its type
+    // Process the job based on its type with enhanced error handling
     try {
       let result;
       
@@ -101,30 +173,34 @@ const processJobs = async () => {
           // Generic job processing
           await new Promise(resolve => setTimeout(resolve, 1000));
           result = { 
-            message: `Job type ${job.type} processed`, 
+            message: `Job type ${sanitizeOutput(job.type)} processed`, 
             timestamp: Date.now() 
           };
       }
       
-      // Update job with result
-      const completedJob = registry.updateJob(jobId, { 
-        status: 'completed', 
-        progress: 100,
-        result: result 
-      });
-      
-      // Broadcast job completion
-      broadcastJobUpdate({
-        id: jobId,
-        name: job.name,
-        type: job.type,
-        status: 'completed',
-        progress: 100,
-        result: result,
-        completedAt: completedJob.completedAt
-      });
-      
-      console.log(`Completed job: ${job.name} (${jobId})`);
+      // Update job with result with error handling
+      try {
+        const completedJob = registry.updateJob(jobId, { 
+          status: 'completed', 
+          progress: 100,
+          result: sanitizeOutput(result) 
+        });
+        
+        // Broadcast job completion with error handling
+        broadcastJobUpdate({
+          id: jobId,
+          name: sanitizeOutput(job.name),
+          type: sanitizeOutput(job.type),
+          status: 'completed',
+          progress: 100,
+          result: sanitizeOutput(result),
+          completedAt: completedJob.completedAt
+        });
+        
+        console.log(`Completed job: ${job.name} (${jobId})`);
+      } catch (completionError) {
+        console.error(`Failed to complete job ${jobId}:`, completionError.message);
+      }
       
     } catch (error) {
       // Mark job as failed
@@ -3812,22 +3888,34 @@ server.on('upgrade', (request, socket, head) => {
   }
 });
 
-// Helper function to send WebSocket error responses
+// Helper function to send WebSocket error responses with enhanced security
 const sendWebSocketError = (socket, statusCode, message) => {
   try {
+    // Sanitize error message to prevent information leakage
+    const sanitizedMessage = sanitizeError(message);
+    
     const errorResponse = {
       type: 'error',
       code: statusCode,
-      message: message,
+      message: sanitizedMessage,
       timestamp: Date.now()
     };
     
+    // Validate JSON structure before sending
     const response = `data: ${JSON.stringify(errorResponse)}\n\n`;
-    socket.write(response);
-    socket.end();
+    
+    // Check socket state before writing
+    if (socket && socket.writable) {
+      socket.write(response);
+      socket.end();
+    } else {
+      console.error('Socket not writable, cannot send error response');
+    }
   } catch (err) {
-    console.error('Error sending WebSocket error response:', err);
-    socket.destroy();
+    console.error('Error sending WebSocket error response:', sanitizeError(err.message));
+    if (socket && socket.destroy) {
+      socket.destroy();
+    }
   }
 };
 
