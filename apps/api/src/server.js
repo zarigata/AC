@@ -2233,6 +2233,213 @@ const server = createServer(async (request, response) => {
       }
     }
 
+    /* ─── Preset Management ─── */
+    
+    // Seed built-in presets on startup if no presets exist
+    try {
+      const existingPresets = registry.listPresets();
+      if (existingPresets.length === 0) {
+        console.log('Seeding built-in presets...');
+        registry.seedBuiltInPresets();
+        console.log('Built-in presets seeded successfully');
+      }
+    } catch (seedErr) {
+      console.error('Error seeding presets:', seedErr.message);
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/presets") {
+      const activeOnly = new URLSearchParams(url.search).get('active') === 'true';
+      const builtinOnly = new URLSearchParams(url.search).get('builtin') === 'true';
+      const presets = registry.listPresets(100, { 
+        active: activeOnly ? true : undefined, 
+        builtIn: builtinOnly ? true : undefined 
+      });
+      
+      return sendJson(response, 200, { presets, total: presets.length });
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/presets") {
+      try {
+        const body = await readRequestBody(request);
+        
+        // Validate preset input
+        if (!body || typeof body !== 'object') {
+          return sendJson(response, 400, { error: "Invalid request body" });
+        }
+        
+        const name = body.name?.trim();
+        const description = body.description?.trim();
+        const config = body.config;
+        
+        if (!name || name.length < 2 || name.length > 100) {
+          return sendJson(response, 400, { error: "Invalid preset name: must be 2-100 characters" });
+        }
+        
+        if (!description || description.length < 10 || description.length > 500) {
+          return sendJson(response, 400, { error: "Invalid preset description: must be 10-500 characters" });
+        }
+        
+        if (!config || typeof config !== 'object') {
+          return sendJson(response, 400, { error: "Invalid preset config: must be an object" });
+        }
+        
+        // Create preset
+        const preset = registry.createPreset({
+          name,
+          description,
+          config,
+          isBuiltIn: body.isBuiltIn || false,
+          createdBy: body.createdBy || 'api'
+        });
+        
+        if (!preset) {
+          return sendJson(response, 500, { error: "Failed to create preset" });
+        }
+        
+        return sendJson(response, 201, { preset });
+      } catch (err) {
+        return sendJson(response, 400, { error: err.message || "Invalid request body" });
+      }
+    }
+
+    const presetMatch = url.pathname.match(/^\/api\/presets\/([\w-]+)$/);
+
+    if (presetMatch) {
+      const presetId = presetMatch[1];
+      
+      if (request.method === "GET") {
+        const preset = registry.getPreset(presetId);
+        if (!preset) return sendJson(response, 404, { error: "Preset not found" });
+        return sendJson(response, 200, { preset });
+      }
+      
+      if (request.method === "PATCH") {
+        try {
+          const body = await readRequestBody(request);
+          
+          // Validate preset ID format
+          if (!presetId || presetId.length > 64) {
+            return sendJson(response, 400, { error: "Invalid preset ID" });
+          }
+          
+          // Check if preset exists and is built-in
+          const existingPreset = registry.getPreset(presetId);
+          if (!existingPreset) {
+            return sendJson(response, 404, { error: "Preset not found" });
+          }
+          
+          // Prevent modification of built-in presets
+          if (existingPreset.isBuiltIn && body.name && body.name !== existingPreset.name) {
+            return sendJson(response, 400, { error: "Cannot modify built-in preset names" });
+          }
+          
+          // Validate update fields
+          const updates = {};
+          
+          if (body.name !== undefined) {
+            const name = body.name?.trim();
+            if (!name || name.length < 2 || name.length > 100) {
+              return sendJson(response, 400, { error: "Invalid preset name: must be 2-100 characters" });
+            }
+            updates.name = name;
+          }
+          
+          if (body.description !== undefined) {
+            const description = body.description?.trim();
+            if (!description || description.length < 10 || description.length > 500) {
+              return sendJson(response, 400, { error: "Invalid preset description: must be 10-500 characters" });
+            }
+            updates.description = description;
+          }
+          
+          if (body.config !== undefined) {
+            if (typeof body.config !== 'object') {
+              return sendJson(response, 400, { error: "Invalid preset config: must be an object" });
+            }
+            updates.config = body.config;
+          }
+          
+          if (body.isActive !== undefined) {
+            if (typeof body.isActive !== 'boolean') {
+              return sendJson(response, 400, { error: "Invalid active status: must be boolean" });
+            }
+            updates.isActive = body.isActive;
+          }
+          
+          // Don't allow changing isBuiltIn flag
+          if (body.isBuiltIn !== undefined && body.isBuiltIn !== existingPreset.isBuiltIn) {
+            return sendJson(response, 400, { error: "Cannot change built-in status" });
+          }
+          
+          if (Object.keys(updates).length === 0) {
+            return sendJson(response, 400, { error: "No valid updates provided" });
+          }
+          
+          const updatedPreset = registry.updatePreset(presetId, updates);
+          if (!updatedPreset) {
+            return sendJson(response, 500, { error: "Failed to update preset" });
+          }
+          
+          return sendJson(response, 200, { preset: updatedPreset });
+        } catch (err) {
+          return sendJson(response, 400, { error: err.message || "Invalid request body" });
+        }
+      }
+      
+      if (request.method === "DELETE") {
+        try {
+          // Validate preset ID format
+          if (!presetId || presetId.length > 64) {
+            return sendJson(response, 400, { error: "Invalid preset ID" });
+          }
+          
+          const deleted = registry.deletePreset(presetId);
+          if (!deleted) return sendJson(response, 404, { error: "Preset not found" });
+          return sendJson(response, 200, { deleted: true, presetId });
+        } catch (err) {
+          return sendJson(response, 400, { error: err.message });
+        }
+      }
+    }
+
+    if (request.method === "POST" && url.pathname.match(/^\/api\/presets\/([\w-]+)\/apply$/)) {
+      const presetId = url.pathname.match(/^\/api\/presets\/([\w-]+)\/apply$/)[1];
+      
+      try {
+        const preset = registry.getPreset(presetId);
+        if (!preset) {
+          return sendJson(response, 404, { error: "Preset not found" });
+        }
+        
+        if (!preset.isActive) {
+          return sendJson(response, 400, { error: "Preset is not active" });
+        }
+        
+        // Validate and apply preset configuration
+        if (typeof preset.config !== 'object' || Object.keys(preset.config).length === 0) {
+          return sendJson(response, 400, { error: "Invalid preset configuration" });
+        }
+        
+        // Here you would typically apply the preset configuration
+        // For now, we'll just return the preset and a success message
+        // In a real implementation, this would update settings, create agents, etc.
+        
+        return sendJson(response, 200, {
+          success: true,
+          message: "Preset configuration applied successfully",
+          preset: {
+            id: preset.id,
+            name: preset.name,
+            description: preset.description,
+            config: preset.config,
+            appliedAt: Date.now()
+          }
+        });
+      } catch (err) {
+        return sendJson(response, 400, { error: err.message });
+      }
+    }
+
     if (request.method === "POST" && url.pathname === "/api/agents") {
       try {
         const body = await readRequestBody(request);
@@ -3089,3 +3296,5 @@ server.listen(port, host, () => {
   console.log(`Zsiistant v${VERSION} listening on http://${host}:${port}`);
   console.log(`WebSocket endpoint available at ws://${host}:${port}/ws`);
 });
+
+

@@ -266,6 +266,23 @@ export class AgentRegistry {
           CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(createdAt);
           CREATE INDEX IF NOT EXISTS idx_jobs_started_at ON jobs(startedAt);
           CREATE INDEX IF NOT EXISTS idx_jobs_updated_at ON jobs(updatedAt);
+          
+          CREATE TABLE IF NOT EXISTS presets (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            config TEXT NOT NULL,
+            isBuiltIn INTEGER NOT NULL DEFAULT 0,
+            isActive INTEGER NOT NULL DEFAULT 1,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL,
+            createdBy TEXT
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_presets_name ON presets(name);
+          CREATE INDEX IF NOT EXISTS idx_presets_created_at ON presets(createdAt);
+          CREATE INDEX IF NOT EXISTS idx_presets_is_active ON presets(isActive);
+          CREATE INDEX IF NOT EXISTS idx_presets_is_builtin ON presets(isBuiltIn);
         `);
         
         // Create file storage directory
@@ -1691,6 +1708,286 @@ export class AgentRegistry {
     } catch (err) {
       console.error('Error getting pending jobs:', err);
       throw err;
+    }
+  }
+
+  // Preset Management Methods
+  
+  createPreset(input) {
+    try {
+      // Validate input
+      validateInput(input, {
+        name: { required: true, type: 'string', minLength: 2, maxLength: 100 },
+        description: { required: true, type: 'string', minLength: 10, maxLength: 500 },
+        config: { required: true, type: 'object' },
+        isBuiltIn: { required: false, type: 'boolean', default: false },
+        createdBy: { required: false, type: 'string', maxLength: 100 }
+      }, 'Preset input');
+
+      // Check if preset with same name already exists
+      const existingPreset = this.db.prepare('SELECT id FROM presets WHERE name = ?').get(input.name);
+      if (existingPreset) {
+        throw new Error(`Preset with name '${input.name}' already exists`);
+      }
+
+      const id = crypto.randomUUID();
+      const timestamp = now();
+      
+      const preset = {
+        id,
+        name: sanitizeContent(input.name, 'preset name').trim(),
+        description: sanitizeContent(input.description, 'preset description').trim(),
+        config: JSON.stringify(input.config),
+        isBuiltIn: Number(input.isBuiltIn || false),
+        isActive: input.isActive !== undefined ? Number(input.isActive) : 1,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        createdBy: input.createdBy ? sanitizeContent(input.createdBy, 'created by').trim() : null
+      };
+
+      this.db.exec('BEGIN TRANSACTION');
+      try {
+        const insertStmt = this.db.prepare(
+          `INSERT INTO presets (id, name, description, config, isBuiltIn, isActive, createdAt, updatedAt, createdBy)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        );
+
+        const result = insertStmt.run(
+          preset.id,
+          preset.name,
+          preset.description,
+          preset.config,
+          preset.isBuiltIn,
+          preset.isActive,
+          preset.createdAt,
+          preset.updatedAt,
+          preset.createdBy
+        );
+
+        if (result.changes === 0) {
+          throw new Error('Failed to create preset');
+        }
+
+        this.db.exec('COMMIT');
+        return preset;
+      } catch (dbErr) {
+        try {
+          this.db.exec('ROLLBACK');
+        } catch (rollbackErr) {
+          console.error('Error during rollback:', rollbackErr);
+        }
+        throw new Error(`Failed to create preset: ${dbErr.message}`);
+      }
+    } catch (err) {
+      console.error('Error creating preset:', err);
+      throw err;
+    }
+  }
+
+  listPresets(limit = 100, options = {}) {
+    try {
+      const safeLimit = Math.min(Math.max(Number(limit), 1), 1000);
+      const offset = (options.page || 1 - 1) * safeLimit;
+      
+      let query = 'SELECT * FROM presets';
+      const params = [];
+      
+      // Filter by active status if specified
+      if (options.active !== undefined) {
+        query += ' WHERE isActive = ?';
+        params.push(Number(options.active));
+      }
+      
+      // Filter by built-in status if specified
+      if (options.builtIn !== undefined) {
+        query += options.active ? ' AND isBuiltIn = ?' : ' WHERE isBuiltIn = ?';
+        params.push(Number(options.builtIn));
+      }
+      
+      query += ' ORDER BY createdAt DESC LIMIT ? OFFSET ?';
+      params.push(safeLimit, offset);
+      
+      const rows = this.db.prepare(query).all(...params);
+      
+      return rows.map(row => ({
+        ...row,
+        config: JSON.parse(row.config),
+        isBuiltIn: Boolean(row.isBuiltIn),
+        isActive: Boolean(row.isActive)
+      }));
+    } catch (err) {
+      console.error('Error listing presets:', err);
+      return [];
+    }
+  }
+
+  getPreset(id) {
+    try {
+      const row = this.db.prepare('SELECT * FROM presets WHERE id = ?').get(id);
+      if (!row) return null;
+      
+      return {
+        ...row,
+        config: JSON.parse(row.config),
+        isBuiltIn: Boolean(row.isBuiltIn),
+        isActive: Boolean(row.isActive)
+      };
+    } catch (err) {
+      console.error('Error getting preset:', err);
+      return null;
+    }
+  }
+
+  updatePreset(id, updates) {
+    try {
+      const existing = this.getPreset(id);
+      if (!existing) throw new Error('Preset not found');
+      
+      const allowed = ['name', 'description', 'config', 'isActive', 'isBuiltIn'];
+      const fields = [];
+      const values = [];
+      const timestamp = now();
+
+      for (const key of allowed) {
+        if (key in updates) {
+          let value = updates[key];
+          
+          // Validate specific fields
+          if (key === 'name' && (typeof value !== 'string' || value.length > 100)) {
+            throw new Error(`Invalid ${key} value`);
+          }
+          
+          if (key === 'description' && (typeof value !== 'string' || value.length > 500)) {
+            throw new Error(`Invalid ${key} value`);
+          }
+          
+          if (key === 'config' && (typeof value !== 'object')) {
+            throw new Error(`Invalid ${key} value: must be an object`);
+          }
+          
+          if (key === 'isBuiltIn' && typeof value !== 'boolean') {
+            throw new Error(`Invalid ${key} value: must be boolean`);
+          }
+          
+          if (key === 'isActive' && typeof value !== 'boolean') {
+            throw new Error(`Invalid ${key} value: must be boolean`);
+          }
+          
+          fields.push(`${key} = ?`);
+          values.push(key === 'config' ? JSON.stringify(value) : 
+                     key === 'isBuiltIn' || key === 'isActive' ? Number(value) : value);
+        }
+      }
+
+      if (fields.length === 0) return existing;
+
+      fields.push('updatedAt = ?');
+      values.push(timestamp);
+      values.push(id);
+
+      const updateStmt = this.db.prepare(`UPDATE presets SET ${fields.join(', ')} WHERE id = ?`);
+      const result = updateStmt.run(...values);
+
+      if (result.changes === 0) {
+        throw new Error('Failed to update preset');
+      }
+
+      return this.getPreset(id);
+    } catch (err) {
+      console.error('Error updating preset:', err);
+      throw err;
+    }
+  }
+
+  deletePreset(id) {
+    try {
+      // Check if preset exists and is built-in
+      const existing = this.getPreset(id);
+      if (!existing) return false;
+      
+      if (existing.isBuiltIn) {
+        throw new Error('Cannot delete built-in presets');
+      }
+
+      const result = this.db.prepare('DELETE FROM presets WHERE id = ?').run(id);
+      return result.changes > 0;
+    } catch (err) {
+      console.error('Error deleting preset:', err);
+      return false;
+    }
+  }
+
+  getActivePresets() {
+    try {
+      const rows = this.db.prepare('SELECT * FROM presets WHERE isActive = 1 ORDER BY createdAt DESC').all();
+      
+      return rows.map(row => ({
+        ...row,
+        config: JSON.parse(row.config),
+        isBuiltIn: Boolean(row.isBuiltIn),
+        isActive: Boolean(row.isActive)
+      }));
+    } catch (err) {
+      console.error('Error getting active presets:', err);
+      return [];
+    }
+  }
+
+  seedBuiltInPresets() {
+    if (this.listPresets().length > 0) {
+      return;
+    }
+
+    const presets = [
+      {
+        name: "Home Assistant",
+        description: "Calendar, reminders, household management, morning briefs - perfect for home automation",
+        config: {
+          defaultModel: "gpt-4o",
+          safetyLevel: "moderate",
+          tools: ["calendar", "reminders", "home_automation", "weather", "news"],
+          personality: "helpful_household",
+          channels: ["telegram"],
+          maxTokens: 4000,
+          temperature: 0.7
+        },
+        isBuiltIn: true,
+        createdBy: "system"
+      },
+      {
+        name: "Productivity Pro",
+        description: "Task management, email triage, meeting notes, CRM - designed for productivity",
+        config: {
+          defaultModel: "claude-3.5-sonnet",
+          safetyLevel: "high",
+          tools: ["task_manager", "email", "calendar", "notes", "crm"],
+          personality: "professional_assistant",
+          channels: ["email", "slack"],
+          maxTokens: 6000,
+          temperature: 0.5
+        },
+        isBuiltIn: true,
+        createdBy: "system"
+      },
+      {
+        name: "Unfiltered",
+        description: "Full access, no presets, configure everything - maximum control for power users",
+        config: {
+          defaultModel: "gpt-5.4",
+          safetyLevel: "none",
+          tools: ["all"],
+          personality: "unfiltered_assistant",
+          channels: ["all"],
+          maxTokens: 32000,
+          temperature: 0.8
+        },
+        isBuiltIn: true,
+        createdBy: "system"
+      }
+    ];
+
+    for (const preset of presets) {
+      this.createPreset(preset);
     }
   }
 }
