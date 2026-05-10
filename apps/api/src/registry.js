@@ -314,6 +314,24 @@ export class AgentRegistry {
           CREATE INDEX IF NOT EXISTS idx_skills_is_public ON skills(isPublic);
           CREATE INDEX IF NOT EXISTS idx_skills_created_at ON skills(createdAt);
           CREATE INDEX IF NOT EXISTS idx_skills_category_active ON skills(category, isActive);
+          
+          CREATE TABLE IF NOT EXISTS agent_memory (
+            id TEXT PRIMARY KEY,
+            agentId TEXT NOT NULL,
+            type TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            metadata TEXT,
+            expiresAt TEXT,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL,
+            FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_agent_memory_agent_id ON agent_memory(agentId);
+          CREATE INDEX IF NOT EXISTS idx_agent_memory_type_key ON agent_memory(type, key);
+          CREATE INDEX IF NOT EXISTS idx_agent_memory_expires_at ON agent_memory(expiresAt);
+          CREATE INDEX IF NOT EXISTS idx_agent_memory_created_at ON agent_memory(createdAt);
         `);
         
         // Create file storage directory
@@ -2438,6 +2456,256 @@ export class AgentRegistry {
 
     for (const skill of skills) {
       this.createSkill(skill);
+    }
+  }
+
+  // Agent Memory Methods
+  
+  setMemory(agentId, type, key, value, options = {}) {
+    try {
+      // Validate input
+      if (!agentId || typeof agentId !== 'string') {
+        throw new Error('Invalid agent ID');
+      }
+      
+      if (!type || typeof type !== 'string' || type.length > 50) {
+        throw new Error('Invalid memory type');
+      }
+      
+      if (!key || typeof key !== 'string' || key.length > 200) {
+        throw new Error('Invalid memory key');
+      }
+      
+      if (value === undefined || value === null) {
+        throw new Error('Memory value cannot be null or undefined');
+      }
+      
+      const id = crypto.randomUUID();
+      const timestamp = now();
+      const expiresAt = options.expiresAt ? new Date(options.expiresAt).toISOString() : null;
+      const metadata = options.metadata ? JSON.stringify(options.metadata) : null;
+      
+      // Check if memory entry already exists and update it
+      const existing = this.db.prepare('SELECT id FROM agent_memory WHERE agentId = ? AND type = ? AND key = ?').get(agentId, type, key);
+      
+      if (existing) {
+        const updateStmt = this.db.prepare(
+          `UPDATE agent_memory 
+          SET value = ?, metadata = ?, expiresAt = ?, updatedAt = ? 
+          WHERE id = ?`
+        );
+        
+        updateStmt.run(
+          typeof value === 'string' ? value : JSON.stringify(value),
+          metadata,
+          expiresAt,
+          timestamp,
+          existing.id
+        );
+        
+        return { id: existing.id, agentId, type, key, value, metadata, expiresAt, updatedAt: timestamp };
+      } else {
+        const insertStmt = this.db.prepare(
+          `INSERT INTO agent_memory 
+          (id, agentId, type, key, value, metadata, expiresAt, createdAt, updatedAt) 
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        );
+        
+        insertStmt.run(
+          id,
+          agentId,
+          type,
+          key,
+          typeof value === 'string' ? value : JSON.stringify(value),
+          metadata,
+          expiresAt,
+          timestamp,
+          timestamp
+        );
+        
+        return { id, agentId, type, key, value, metadata, expiresAt, createdAt: timestamp, updatedAt: timestamp };
+      }
+    } catch (err) {
+      console.error('Error setting memory:', err);
+      throw err;
+    }
+  }
+
+  getMemory(agentId, type, key) {
+    try {
+      if (!agentId || !type || !key) {
+        return null;
+      }
+      
+      const row = this.db.prepare(
+        `SELECT * FROM agent_memory 
+        WHERE agentId = ? AND type = ? AND key = ?`
+      ).get(agentId, type, key);
+      
+      if (!row) return null;
+      
+      // Check if memory has expired
+      if (row.expiresAt && new Date(row.expiresAt) < new Date()) {
+        this.deleteMemory(agentId, type, key);
+        return null;
+      }
+      
+      return {
+        id: row.id,
+        agentId: row.agentId,
+        type: row.type,
+        key: row.key,
+        value: row.value,
+        metadata: row.metadata ? JSON.parse(row.metadata) : null,
+        expiresAt: row.expiresAt,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt
+      };
+    } catch (err) {
+      console.error('Error getting memory:', err);
+      return null;
+    }
+  }
+
+  getMemories(agentId, type, limit = 100, options = {}) {
+    try {
+      if (!agentId) {
+        return [];
+      }
+      
+      const safeLimit = Math.min(Math.max(Number(limit), 1), 1000);
+      
+      let query = 'SELECT * FROM agent_memory WHERE agentId = ?';
+      const params = [agentId];
+      
+      if (type) {
+        query += ' AND type = ?';
+        params.push(type);
+      }
+      
+      if (options.onlyActive !== undefined) {
+        query += options.onlyActive ? ' AND (expiresAt IS NULL OR expiresAt > datetime("now"))' : '';
+      }
+      
+      if (options.search) {
+        query += ' AND (key LIKE ? OR value LIKE ?)';
+        params.push(`%${options.search}%`, `%${options.search}%`);
+      }
+      
+      query += ' ORDER BY createdAt DESC LIMIT ?';
+      params.push(safeLimit);
+      
+      const rows = this.db.prepare(query).all(...params);
+      
+      return rows.map(row => ({
+        id: row.id,
+        agentId: row.agentId,
+        type: row.type,
+        key: row.key,
+        value: row.value,
+        metadata: row.metadata ? JSON.parse(row.metadata) : null,
+        expiresAt: row.expiresAt,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt
+      })).filter(memory => {
+        // Filter out expired memories
+        if (memory.expiresAt && new Date(memory.expiresAt) < new Date()) {
+          this.deleteMemory(memory.agentId, memory.type, memory.key);
+          return false;
+        }
+        return true;
+      });
+    } catch (err) {
+      console.error('Error getting memories:', err);
+      return [];
+    }
+  }
+
+  deleteMemory(agentId, type, key) {
+    try {
+      if (!agentId || !type || !key) {
+        return false;
+      }
+      
+      const result = this.db.prepare(
+        'DELETE FROM agent_memory WHERE agentId = ? AND type = ? AND key = ?'
+      ).run(agentId, type, key);
+      
+      return result.changes > 0;
+    } catch (err) {
+      console.error('Error deleting memory:', err);
+      return false;
+    }
+  }
+
+  clearMemories(agentId, type) {
+    try {
+      if (!agentId) {
+        return false;
+      }
+      
+      let query = 'DELETE FROM agent_memory WHERE agentId = ?';
+      const params = [agentId];
+      
+      if (type) {
+        query += ' AND type = ?';
+        params.push(type);
+      }
+      
+      const result = this.db.prepare(query).run(...params);
+      
+      return result.changes > 0;
+    } catch (err) {
+      console.error('Error clearing memories:', err);
+      return false;
+    }
+  }
+
+  cleanupExpiredMemories() {
+    try {
+      const now = now();
+      const result = this.db.prepare(
+        'DELETE FROM agent_memory WHERE expiresAt IS NOT NULL AND expiresAt < ?'
+      ).run(now);
+      
+      return result.changes;
+    } catch (err) {
+      console.error('Error cleaning up expired memories:', err);
+      return 0;
+    }
+  }
+
+  getMemoryStats(agentId) {
+    try {
+      if (!agentId) {
+        return null;
+      }
+      
+      // Get total memories
+      const totalMemories = this.db.prepare(
+        'SELECT COUNT(*) as count FROM agent_memory WHERE agentId = ?'
+      ).get(agentId);
+      
+      // Get active memories (not expired)
+      const activeMemories = this.db.prepare(
+        'SELECT COUNT(*) as count FROM agent_memory WHERE agentId = ? AND (expiresAt IS NULL OR expiresAt > datetime("now"))'
+      ).get(agentId);
+      
+      // Get memories by type
+      const byType = this.db.prepare(
+        'SELECT type, COUNT(*) as count FROM agent_memory WHERE agentId = ? GROUP BY type ORDER BY count DESC'
+      ).all(agentId);
+      
+      return {
+        agentId,
+        total: totalMemories.count,
+        active: activeMemories.count,
+        expired: totalMemories.count - activeMemories.count,
+        byType: byType.map(row => ({ type: row.type, count: row.count }))
+      };
+    } catch (err) {
+      console.error('Error getting memory stats:', err);
+      return null;
     }
   }
 }

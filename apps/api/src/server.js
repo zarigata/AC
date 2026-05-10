@@ -3147,6 +3147,213 @@ const server = createServer(async (request, response) => {
       }
     }
 
+    /* ─── Agent Memory ─── */
+    
+    const agentMemoryMatch = url.pathname.match(/^\/api\/agents\/([^\/]+)\/memory$/);
+    
+    if (agentMemoryMatch && request.method === "GET") {
+      const agentId = agentMemoryMatch[1];
+      
+      try {
+        // Validate agent ID format
+        if (!agentId || agentId.length > 64) {
+          return sendJson(response, 400, { error: "Invalid agent ID" });
+        }
+        
+        // Check if agent exists
+        const agent = registry.getAgent(agentId);
+        if (!agent) {
+          return sendJson(response, 404, { error: "Agent not found" });
+        }
+        
+        const type = new URLSearchParams(url.search).get('type');
+        const limit = new URLSearchParams(url.search).get('limit') || '100';
+        const search = new URLSearchParams(url.search).get('search');
+        
+        const memories = registry.getMemories(agentId, type, parseInt(limit), { search });
+        const stats = registry.getMemoryStats(agentId);
+        
+        return sendJson(response, 200, { 
+          memories, 
+          stats,
+          agent: { id: agent.id, name: agent.name }
+        });
+      } catch (err) {
+        return sendJson(response, 500, { error: "Failed to get memories" });
+      }
+    }
+
+    if (agentMemoryMatch && request.method === "POST") {
+      const agentId = agentMemoryMatch[1];
+      
+      try {
+        // Validate agent ID format
+        if (!agentId || agentId.length > 64) {
+          return sendJson(response, 400, { error: "Invalid agent ID" });
+        }
+        
+        // Check if agent exists
+        const agent = registry.getAgent(agentId);
+        if (!agent) {
+          return sendJson(response, 404, { error: "Agent not found" });
+        }
+        
+        const body = await readRequestBody(request);
+        
+        if (!body || typeof body !== 'object') {
+          return sendJson(response, 400, { error: "Invalid request body" });
+        }
+        
+        const { type, key, value, expiresAt, metadata } = body;
+        
+        // Validate required fields
+        if (!type || typeof type !== 'string') {
+          return sendJson(response, 400, { error: "Memory type is required" });
+        }
+        
+        if (!key || typeof key !== 'string') {
+          return sendJson(response, 400, { error: "Memory key is required" });
+        }
+        
+        if (value === undefined || value === null) {
+          return sendJson(response, 400, { error: "Memory value is required" });
+        }
+        
+        // Validate expiration date format
+        if (expiresAt && typeof expiresAt !== 'string') {
+          return sendJson(response, 400, { error: "Expiration date must be a string" });
+        }
+        
+        // Validate metadata format
+        if (metadata && typeof metadata !== 'object') {
+          return sendJson(response, 400, { error: "Metadata must be an object" });
+        }
+        
+        const memory = registry.setMemory(agentId, type, key, value, { 
+          expiresAt, 
+          metadata 
+        });
+        
+        return sendJson(response, 201, { memory });
+      } catch (err) {
+        return sendJson(response, 400, { error: err.message || "Invalid request body" });
+      }
+    }
+
+    if (agentMemoryMatch && request.method === "DELETE") {
+      const agentId = agentMemoryMatch[1];
+      
+      try {
+        // Validate agent ID format
+        if (!agentId || agentId.length > 64) {
+          return sendJson(response, 400, { error: "Invalid agent ID" });
+        }
+        
+        // Check if agent exists
+        const agent = registry.getAgent(agentId);
+        if (!agent) {
+          return sendJson(response, 404, { error: "Agent not found" });
+        }
+        
+        const type = new URLSearchParams(url.search).get('type');
+        
+        if (type) {
+          // Clear all memories of a specific type
+          const cleared = registry.clearMemories(agentId, type);
+          return sendJson(response, 200, { 
+            cleared: true, 
+            agentId, 
+            type,
+            count: cleared ? 'all' : 0
+          });
+        } else {
+          // Clear all memories for the agent
+          const cleared = registry.clearMemories(agentId);
+          return sendJson(response, 200, { 
+            cleared: true, 
+            agentId,
+            count: cleared ? 'all' : 0
+          });
+        }
+      } catch (err) {
+        return sendJson(response, 500, { error: "Failed to clear memories" });
+      }
+    }
+
+    const memoryMatch = url.pathname.match(/^\/api\/agents\/([^\/]+)\/memory\/([^\/]+)$/);
+
+    if (memoryMatch) {
+      const agentId = memoryMatch[1];
+      const memoryKey = memoryMatch[2];
+      
+      try {
+        // Validate agent ID format
+        if (!agentId || agentId.length > 64) {
+          return sendJson(response, 400, { error: "Invalid agent ID" });
+        }
+        
+        // Check if agent exists
+        const agent = registry.getAgent(agentId);
+        if (!agent) {
+          return sendJson(response, 404, { error: "Agent not found" });
+        }
+        
+        if (request.method === "GET") {
+          const type = new URLSearchParams(url.search).get('type');
+          
+          const memory = registry.getMemory(agentId, type || 'session', memoryKey);
+          if (!memory) {
+            return sendJson(response, 404, { error: "Memory not found" });
+          }
+          
+          return sendJson(response, 200, { memory });
+        }
+        
+        if (request.method === "PATCH") {
+          const body = await readRequestBody(request);
+          
+          if (!body || typeof body !== 'object') {
+            return sendJson(response, 400, { error: "Invalid request body" });
+          }
+          
+          const { value, expiresAt, metadata } = body;
+          
+          // Get existing memory to preserve type
+          const existingMemory = registry.getMemory(agentId, 'session', memoryKey);
+          if (!existingMemory) {
+            return sendJson(response, 404, { error: "Memory not found" });
+          }
+          
+          // Validate expiration date format
+          if (expiresAt && typeof expiresAt !== 'string') {
+            return sendJson(response, 400, { error: "Expiration date must be a string" });
+          }
+          
+          // Validate metadata format
+          if (metadata && typeof metadata !== 'object') {
+            return sendJson(response, 400, { error: "Metadata must be an object" });
+          }
+          
+          const updatedMemory = registry.setMemory(agentId, existingMemory.type, memoryKey, value !== undefined ? value : existingMemory.value, {
+            expiresAt: expiresAt || existingMemory.expiresAt,
+            metadata: metadata || existingMemory.metadata
+          });
+          
+          return sendJson(response, 200, { memory: updatedMemory });
+        }
+        
+        if (request.method === "DELETE") {
+          const type = new URLSearchParams(url.search).get('type') || 'session';
+          const deleted = registry.deleteMemory(agentId, type, memoryKey);
+          if (!deleted) return sendJson(response, 404, { error: "Memory not found" });
+          
+          return sendJson(response, 200, { deleted: true, agentId, memoryKey, type });
+        }
+      } catch (err) {
+        return sendJson(response, 400, { error: err.message || "Invalid request body" });
+      }
+    }
+
     sendJson(response, 404, { error: "Not found" });
   } catch (error) {
     // Use standardized error handling
