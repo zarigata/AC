@@ -1341,17 +1341,24 @@ export class AgentRegistry {
         sanitizeContent(description, 'file description');
       }
       
-      // Validate tags
+          // Validate tags
       if (!Array.isArray(tags)) {
         throw new Error('Tags must be an array');
+      }
+      
+      if (tags.length > 50) {
+        throw new Error('Tags array cannot exceed 50 items');
       }
       
       for (const tag of tags) {
         if (typeof tag !== 'string' || tag.length > 50) {
           throw new Error('Each tag must be a string with max 50 characters');
         }
-        // Sanitize tags
-        sanitizeContent(tag, 'tag');
+        // Enhanced tag validation and sanitization
+        const sanitizedTag = sanitizeContent(tag, 'tag');
+        if (!sanitizedTag || sanitizedTag.trim().length === 0) {
+          throw new Error('Tag cannot be empty or contain only whitespace');
+        }
       }
       
       // Generate file hash for deduplication
@@ -1363,6 +1370,7 @@ export class AgentRegistry {
       ).get(agentId, fileHash);
       
       if (existingFile) {
+        // Duplicate file found, return existing
         return this.getFile(agentId, existingFile.id);
       }
       
@@ -2679,7 +2687,8 @@ export class AgentRegistry {
 
   getMemories(agentId, type, limit = 100, options = {}) {
     try {
-      if (!agentId) {
+      // Validate agent ID
+      if (!agentId || typeof agentId !== 'string') {
         return [];
       }
       
@@ -2689,6 +2698,9 @@ export class AgentRegistry {
       const params = [agentId];
       
       if (type) {
+        if (typeof type !== 'string') {
+          throw new Error('Memory type must be a string');
+        }
         query += ' AND type = ?';
         params.push(type);
       }
@@ -2698,6 +2710,9 @@ export class AgentRegistry {
       }
       
       if (options.search) {
+        if (typeof options.search !== 'string') {
+          throw new Error('Search query must be a string');
+        }
         query += ' AND (key LIKE ? OR value LIKE ?)';
         params.push(`%${options.search}%`, `%${options.search}%`);
       }
@@ -2707,26 +2722,48 @@ export class AgentRegistry {
       
       const rows = this.db.prepare(query).all(...params);
       
-      return rows.map(row => ({
-        id: row.id,
-        agentId: row.agentId,
-        type: row.type,
-        key: row.key,
-        value: row.value,
-        metadata: row.metadata ? JSON.parse(row.metadata) : null,
-        expiresAt: row.expiresAt,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt
-      })).filter(memory => {
+      return rows.map(row => {
+        try {
+          const metadata = row.metadata ? JSON.parse(row.metadata) : null;
+          return {
+            id: row.id,
+            agentId: row.agentId,
+            type: row.type,
+            key: row.key,
+            value: row.value,
+            metadata,
+            expiresAt: row.expiresAt,
+            createdAt: row.createdAt,
+            updatedAt: row.updatedAt
+          };
+        } catch (parseErr) {
+          console.error('Error parsing memory metadata:', parseErr);
+          return {
+            id: row.id,
+            agentId: row.agentId,
+            type: row.type,
+            key: row.key,
+            value: row.value,
+            metadata: null,
+            expiresAt: row.expiresAt,
+            createdAt: row.createdAt,
+            updatedAt: row.updatedAt
+          };
+        }
+      }).filter(memory => {
         // Filter out expired memories
         if (memory.expiresAt && new Date(memory.expiresAt) < new Date()) {
-          this.deleteMemory(memory.agentId, memory.type, memory.key);
+          try {
+            this.deleteMemory(memory.agentId, memory.type, memory.key);
+          } catch (delErr) {
+            console.error('Error deleting expired memory:', delErr);
+          }
           return false;
         }
         return true;
       });
     } catch (err) {
-      console.error('Error getting memories:', err);
+      console.error('Error getting memories:', sanitizeError(err));
       return [];
     }
   }

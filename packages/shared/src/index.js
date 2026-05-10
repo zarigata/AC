@@ -106,6 +106,11 @@ const ensureString = (value, field, min, max) => {
   if (normalized.length < min || normalized.length > max) {
     throw new Error(`${field} must be between ${min} and ${max} characters.`);
   }
+  
+  // Additional security: check for empty strings after trimming
+  if (normalized.length === 0) {
+    throw new Error(`${field} cannot be empty or contain only whitespace.`);
+  }
 
   // Comprehensive sanitization to prevent injection attacks
   const dangerousPatterns = [

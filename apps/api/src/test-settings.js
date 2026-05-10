@@ -1,9 +1,23 @@
-const { createServer } = require('node:http');
+import { createServer } from 'node:http';
 const ALLOWED_ORIGINS = ['http://localhost:3000', 'http://localhost:4000', 'http://127.0.0.1:3000', 'http://127.0.0.1:4000'];
 
+// Security: Enhanced origin validation
 const isOriginAllowed = (origin) => {
-  if (!origin) return false;
-  return ALLOWED_ORIGINS.includes(origin);
+  if (!origin || typeof origin !== 'string') return false;
+  
+  // Validate origin format
+  try {
+    const url = new URL(origin);
+    // Only allow http/https protocols
+    if (!url.protocol.match(/^https?:$/)) return false;
+    
+    // Check against allowed origins
+    return ALLOWED_ORIGINS.includes(origin.toLowerCase()) || 
+           ALLOWED_ORIGINS.includes(url.origin.toLowerCase());
+  } catch (err) {
+    console.error('Invalid origin format:', origin);
+    return false;
+  }
 };
 
 const sendJson = (response, req1, statusCode, payload) => {

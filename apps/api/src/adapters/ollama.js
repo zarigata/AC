@@ -65,6 +65,12 @@ export class OllamaAdapter {
         throw new Error('Messages array cannot exceed 100 messages');
       }
       
+      // Additional validation: check if messages array is too long in total characters
+      const totalChars = messages.reduce((sum, msg) => sum + (msg.content?.length || 0), 0);
+      if (totalChars > 500000) { // 500KB limit
+        throw new Error('Total message content exceeds allowed limit');
+      }
+      
       for (let i = 0; i < messages.length; i++) {
         const msg = messages[i];
         if (!msg || typeof msg !== 'object') {

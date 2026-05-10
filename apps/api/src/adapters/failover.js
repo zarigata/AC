@@ -57,6 +57,15 @@ export class FailoverChainAdapter {
     }
     
     try {
+      // Validate provider index
+      if (providerIndex < 0 || providerIndex >= this.providers.length) {
+        this.healthCache.set(cacheKey, {
+          isHealthy: false,
+          timestamp: now
+        });
+        return false;
+      }
+      
       const provider = this.providers[providerIndex];
       if (!provider || typeof provider.health !== 'function') {
         // Mark as unhealthy and cache result
