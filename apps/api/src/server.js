@@ -2761,14 +2761,22 @@ const server = createServer(async (request, response) => {
         console.log('DEBUG: Calling sendJson with 201 and agent object');
         return sendJson(response, 201, { agent });
       } catch (err) {
-        // Provide specific error messages for security and validation issues
-        let errorMessage = err.message || "Invalid request body";
+        // Comprehensive error message sanitization
+        let errorMessage = "Invalid request data";
         
-        // Sanitize error messages that might contain sensitive information
-        if (errorMessage.includes('database') || errorMessage.includes('SQL')) {
+        // Log detailed error for debugging (sanitized)
+        const safeErrorMessage = sanitizeError(err.message || "Unknown error");
+        console.log('Agent creation error:', safeErrorMessage);
+        
+        // Provide specific but safe error messages
+        if (err.message && err.message.includes('database')) {
           errorMessage = "Database operation failed";
-        } else if (errorMessage.includes('reserved')) {
-          errorMessage = "Invalid agent name: reserved names not allowed";
+        } else if (err.message && err.message.includes('reserved')) {
+          errorMessage = "Invalid agent name: name not available";
+        } else if (err.message && err.message.includes('validation')) {
+          errorMessage = "Input validation failed";
+        } else if (err.message && err.message.includes('security')) {
+          errorMessage = "Security validation failed";
         }
         
         return sendJson(response, 400, { error: errorMessage });
@@ -2807,12 +2815,18 @@ const server = createServer(async (request, response) => {
         const link = registry.createLink(payload);
         return sendJson(response, 201, { link });
       } catch (err) {
-        // Provide specific error messages for security and validation issues
-        let errorMessage = err.message || "Invalid request body";
+        // Comprehensive error message sanitization for link creation
+        let errorMessage = "Invalid link data";
         
-        // Sanitize error messages
-        if (errorMessage.includes('database') || errorMessage.includes('SQL')) {
+        // Log detailed error for debugging (sanitized)
+        const safeErrorMessage = sanitizeError(err.message || "Unknown error");
+        console.log('Link creation error:', safeErrorMessage);
+        
+        // Provide specific but safe error messages
+        if (err.message && err.message.includes('database')) {
           errorMessage = "Database operation failed";
+        } else if (err.message && err.message.includes('validation')) {
+          errorMessage = "Input validation failed";
         }
         
         return sendJson(response, 400, { error: errorMessage });
@@ -2828,19 +2842,40 @@ const server = createServer(async (request, response) => {
           return sendJson(response, 403, { error: "Forbidden: Invalid path" });
         }
         
-        // Check for path traversal attempts
-        if (target.includes('..') || target.includes('~') || 
-            target.includes('//') || target.includes('\0') ||
-            target.includes('%2e') || target.includes('%2e%2e')) {
-          return sendJson(response, 403, { error: "Forbidden: Invalid path" });
+        // Comprehensive path traversal attempts check
+        const dangerousPatterns = [
+          /[.]{2,}/,          // Parent directory traversal
+          /~/,                // Home directory shortcut
+          /\\0/,             // Null bytes
+          /%2e/i,            // URL-encoded dots
+          /%2e%2e/i,         // URL-encoded double dots
+          /\\\/\\\//,        // Double slashes
+          /[^a-zA-Z0-9_\-.]/ // Invalid characters
+        ];
+        
+        for (const pattern of dangerousPatterns) {
+          if (pattern.test(target)) {
+            console.warn('Blocked potentially dangerous path:', target, pattern.toString());
+            return sendJson(response, 403, { error: "Forbidden: Invalid path" });
+          }
         }
         
         // Use safe path resolution
         const filePath = join(webRoot, target);
         
-        // Security: Ensure path is within web root
-        if (!filePath.startsWith(webRoot) || relative(webRoot, filePath).startsWith('..')) {
-          return sendJson(response, 403, { error: "Forbidden: Path traversal attempt" });
+        // Security: Ensure path is within web root with comprehensive validation
+        try {
+          const resolvedPath = resolve(webRoot, target);
+          if (!resolvedPath.startsWith(webRoot) || 
+              !resolvedPath.startsWith(webRoot) ||
+              resolvedPath.includes(webRoot + '..')) {
+            console.warn('Blocked path traversal attempt:', target);
+            return sendJson(response, 403, { error: "Forbidden: Path traversal attempt" });
+          }
+          filePath = resolvedPath;
+        } catch (pathErr) {
+          console.warn('Path resolution error:', pathErr.message);
+          return sendJson(response, 403, { error: "Forbidden: Invalid path" });
         }
         
         // Check file exists and is readable
@@ -2866,12 +2901,15 @@ const server = createServer(async (request, response) => {
             return sendJson(response, 403, { error: "Forbidden: Cannot access this file type" });
           }
           
-          // Security headers for static files
+          // Comprehensive security headers for static files
           response.writeHead(200, { 
             "Content-Type": contentTypeFor(filePath),
             "X-Content-Type-Options": "nosniff",
             "X-Frame-Options": "DENY",
-            "Referrer-Policy": "strict-origin-when-cross-origin"
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+            "X-XSS-Protection": "1; mode=block",
+            "X-Permitted-Cross-Domain-Policies": "none",
+            "Permissions-Policy": "geolocation=(), microphone=(), camera=()"
           });
           response.end(stats);
           return;

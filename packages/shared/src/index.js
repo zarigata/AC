@@ -162,11 +162,23 @@ const ensureString = (value, field, min, max) => {
     /navigator\./gi
   ];
   
-  // Quick check for dangerous patterns before detailed validation
-  for (const pattern of dangerousPatterns) {
-    if (pattern.test(normalized)) {
-      console.warn(`Blocked potentially dangerous content in ${field}:`, pattern.toString());
-      throw new Error(`${field} contains invalid or potentially dangerous content.`);
+  // Optimized dangerous pattern detection - batch similar patterns for performance
+  const patternGroups = [
+    // Most critical patterns first for early termination
+    [/<script[^>]*>.*?<\/script>/gi, /javascript:/gi, /eval\(/gi, /exec\(/gi],
+    [/on\w+\s*=/gi, /<iframe|<object|<embed|<style|<meta|<link|<img/gi],
+    [/SELECT\s+/gi, /INSERT\s+/gi, /UPDATE\s+/gi, /DELETE\s+/gi],
+    [/DROP\s+/gi, /CREATE\s+/gi, /ALTER\s+/gi, /;\s*--/g],
+    [/\x00/g, /[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]/g],
+    /[\u0000-\u001F\u007F-\u009F]/g, /\.\./g
+  ];
+  
+  for (const group of patternGroups) {
+    for (const pattern of group) {
+      if (pattern.test(normalized)) {
+        console.warn(`Blocked potentially dangerous content in ${field}:`, pattern.toString());
+        throw new Error(`${field} contains invalid or potentially dangerous content.`);
+      }
     }
   }
   

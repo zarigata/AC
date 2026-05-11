@@ -1,21 +1,64 @@
 import { createServer } from 'node:http';
 const ALLOWED_ORIGINS = ['http://localhost:3000', 'http://localhost:4000', 'http://127.0.0.1:3000', 'http://127.0.0.1:4000'];
 
-// Security: Enhanced origin validation
+// Security: Enhanced origin validation with comprehensive checks
 const isOriginAllowed = (origin) => {
   if (!origin || typeof origin !== 'string') return false;
   
-  // Validate origin format
+  // Basic length check
+  if (origin.length > 2048) {
+    console.warn('Origin too long:', origin);
+    return false;
+  }
+  
+  // Validate origin format with comprehensive security checks
   try {
     const url = new URL(origin);
-    // Only allow http/https protocols
-    if (!url.protocol.match(/^https?:$/)) return false;
     
-    // Check against allowed origins
-    return ALLOWED_ORIGINS.includes(origin.toLowerCase()) || 
-           ALLOWED_ORIGINS.includes(url.origin.toLowerCase());
+    // Protocol validation - only allow http/https
+    if (!url.protocol.match(/^https?:$/i)) {
+      console.warn('Invalid protocol in origin:', origin);
+      return false;
+    }
+    
+    // Check for dangerous patterns in hostname
+    const hostname = url.hostname;
+    const dangerousPatterns = [
+      /^.*\.internal$/, /^.*\.local$/, /^.*\.lan$/,
+      /^.*\.(test|staging|dev)\.internal$/, /\.(development|staging)\./,
+      /^.*\.(admin|login|auth|api)\./
+    ];
+    
+    if (dangerousPatterns.some(pattern => pattern.test(hostname))) {
+      console.warn('Dangerous hostname pattern in origin:', origin);
+      return false;
+    }
+    
+    // Check if URL contains credentials (security risk)
+    if (url.username || url.password) {
+      console.warn('Origin contains credentials:', origin);
+      return false;
+    }
+    
+    // Validate port
+    if (url.port) {
+      const port = parseInt(url.port, 10);
+      if (port < 1 || port > 65535) {
+        console.warn('Invalid port in origin:', origin);
+        return false;
+      }
+    }
+    
+    // Check against allowed origins with case-insensitive matching
+    const normalizedOrigin = origin.toLowerCase();
+    const normalizedUrlOrigin = url.origin.toLowerCase();
+    
+    return ALLOWED_ORIGINS.some(allowed => 
+      normalizedOrigin === allowed.toLowerCase() || 
+      normalizedUrlOrigin === allowed.toLowerCase()
+    );
   } catch (err) {
-    console.error('Invalid origin format:', origin);
+    console.error('Invalid origin format:', origin, 'error:', err.message);
     return false;
   }
 };

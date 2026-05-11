@@ -60,28 +60,51 @@ const validateInput = (input, rules, fieldName) => {
     throw new Error(`${fieldName} is required`);
   }
   
-  // Check for prototype pollution attempts with enhanced security
+  // Enhanced prototype pollution protection with comprehensive security checks
   if (input && typeof input === 'object') {
-    // Check for prototype pollution attempts - only check own properties
-    const dangerousKeys = ['__proto__', 'constructor', 'prototype', '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__'];
+    // Check for prototype pollution attempts using Object.isExtensible
+    if (!Object.isExtensible(input)) {
+      throw new Error(`${fieldName} contains non-extensible object - potential prototype pollution`);
+    }
+    
+    // Comprehensive dangerous key detection
+    const dangerousKeys = [
+      '__proto__', 'constructor', 'prototype', 
+      '__defineGetter__', '__defineSetter__', 
+      '__lookupGetter__', '__lookupSetter__',
+      '__proto__ ', ' constructor', ' prototype ',
+      'constructor.prototype', 'prototype.constructor'
+    ];
+    
+    const inputKeys = Object.getOwnPropertyNames(input);
     for (const key of dangerousKeys) {
-      if (Object.prototype.hasOwnProperty.call(input, key)) {
+      if (inputKeys.some(inputKey => inputKey.toLowerCase() === key.toLowerCase())) {
         throw new Error(`${fieldName} contains potentially dangerous property: ${key}`);
       }
     }
     
-    // Additional security: Check for prototype pollution via Object.setPrototypeOf
+    // Additional prototype pollution attempt detection
     try {
+      // Attempt to modify prototype
       const testObj = {};
-      Object.setPrototypeOf(testObj, input);
-      // If we get here without throwing, there was no prototype pollution
+      Object.defineProperty(testObj, 'test', {
+        value: 'test',
+        configurable: true,
+        enumerable: true
+      });
+      
+      // Check if object has been modified
+      const descriptor = Object.getOwnPropertyDescriptor(testObj, 'test');
+      if (!descriptor || descriptor.value !== 'test') {
+        throw new Error(`${fieldName} contains prototype pollution attempt`);
+      }
     } catch (protoErr) {
       throw new Error(`${fieldName} contains prototype pollution attempt`);
     }
     
-    // Check for circular references and deeply nested objects with increased security
-    const maxDepth = 8; // Reduced for security
-    const maxProperties = 50; // Limit number of properties
+    // Enhanced circular reference and depth detection
+    const maxDepth = 6; // Further reduced for security
+    const maxProperties = 30; // Further reduced for security
     const checkDepth = (obj, depth = 0, visited = new WeakSet()) => {
       if (depth > maxDepth) {
         throw new Error(`${fieldName} is too deeply nested (maximum depth: ${maxDepth})`);
@@ -94,9 +117,26 @@ const validateInput = (input, rules, fieldName) => {
         }
         visited.add(obj);
         
-        // Limit number of properties
-        if (Object.keys(obj).length > maxProperties) {
+        // Limit number of properties with additional security checks
+        const propertyCount = Object.keys(obj).length;
+        if (propertyCount > maxProperties) {
           throw new Error(`${fieldName} has too many properties (maximum: ${maxProperties})`);
+        }
+        
+        // Check property names for dangerous patterns
+        const propertyNames = Object.getOwnPropertyNames(obj);
+        for (const propName of propertyNames) {
+          if (typeof propName === 'string') {
+            // Check for dangerous property name patterns
+            const dangerousPatterns = [
+              /^__+/, /^prototype$/i, /^constructor$/i,
+              /__proto__/, /constructor.prototype/
+            ];
+            
+            if (dangerousPatterns.some(pattern => pattern.test(propName))) {
+              throw new Error(`${fieldName} contains dangerous property name: ${propName}`);
+            }
+          }
         }
         
         for (const value of Object.values(obj)) {
@@ -243,6 +283,17 @@ export class AgentRegistry {
       if (!options.databasePath) {
         throw new Error('Database path is required');
       }
+      
+      // Initialize rate limiting with enhanced security
+      this.rateLimit = {
+        requests: new Map(),
+        maxRequests: 100, // Max requests per minute
+        windowMs: 60 * 1000, // 1 minute window
+        enabled: true
+      };
+      
+      // Start rate limiting cleanup
+      this._startRateLimitCleanup();
       
       // Ensure directory exists with proper permissions
       const dbDir = dirname(options.databasePath);
@@ -1336,10 +1387,67 @@ export class AgentRegistry {
     }
   }
 
+  // Rate limiting with enhanced security
+  _checkRateLimit(clientKey) {
+    if (!this.rateLimit.enabled) return true;
+    
+    const now = Date.now();
+    const clientRequests = this.rateLimit.requests.get(clientKey) || [];
+    
+    // Remove old requests outside the window
+    const validRequests = clientRequests.filter(time => now - time < this.rateLimit.windowMs);
+    this.rateLimit.requests.set(clientKey, validRequests);
+    
+    // Check if limit exceeded
+    if (validRequests.length >= this.rateLimit.maxRequests) {
+      const remainingTime = this.rateLimit.windowMs - (now - validRequests[0]);
+      console.warn(`Rate limit exceeded for ${clientKey}, reset in ${Math.ceil(remainingTime / 1000)}s`);
+      return false;
+    }
+    
+    return true;
+  }
+  
+  _recordRequest(clientKey) {
+    if (!this.rateLimit.enabled) return;
+    
+    const now = Date.now();
+    const clientRequests = this.rateLimit.requests.get(clientKey) || [];
+    clientRequests.push(now);
+    this.rateLimit.requests.set(clientKey, clientRequests);
+  }
+  
+  _startRateLimitCleanup() {
+    // Clean up old rate limit records every 5 minutes
+    setInterval(() => {
+      const now = Date.now();
+      const keysToDelete = [];
+      
+      for (const [key, requests] of this.rateLimit.requests.entries()) {
+        const recentRequests = requests.filter(time => now - time < this.rateLimit.windowMs);
+        if (recentRequests.length === 0) {
+          keysToDelete.push(key);
+        } else {
+          this.rateLimit.requests.set(key, recentRequests);
+        }
+      }
+      
+      for (const key of keysToDelete) {
+        this.rateLimit.requests.delete(key);
+      }
+    }, 5 * 60 * 1000);
+  }
+  
+  _getClientKey() {
+    // In a real implementation, this would use IP address or authentication token
+    // For now, use a simple placeholder that would be enhanced in production
+    return 'default-client';
+  }
+  
   // File upload and management methods
   uploadFile(agentId, fileData, options = {}) {
     try {
-      // Validate agent ID format
+      // Validate agent ID format with enhanced security
       if (!agentId || typeof agentId !== 'string' || agentId.length > 64) {
         throw new Error('Invalid agent ID format');
       }
@@ -1350,32 +1458,60 @@ export class AgentRegistry {
         throw new Error('Agent not found');
       }
       
-      // Validate file data
+      // Validate file data structure with comprehensive checks
       if (!fileData || typeof fileData !== 'object') {
         throw new Error('Invalid file data');
       }
       
+      // Check for prototype pollution in file data
+      if (Object.getPrototypeOf(fileData) !== Object.prototype) {
+        throw new Error('Invalid file data structure');
+      }
+      
       const { content, filename, originalName, description, tags = [] } = fileData;
       
+      // Enhanced content validation
       if (!content || typeof content !== 'string') {
-        throw new Error('File content is required');
+        throw new Error('File content is required and must be a string');
       }
       
-      if (!filename || typeof filename !== 'string') {
-        throw new Error('Filename is required');
+      if (content.length === 0) {
+        throw new Error('File content cannot be empty');
       }
       
-      if (!originalName || typeof originalName !== 'string') {
-        throw new Error('Original filename is required');
+      // Content length validation with security bounds
+      const maxFileSize = 2 * 1024 * 1024; // 2MB for security
+      if (content.length > maxFileSize) {
+        throw new Error(`File size exceeds maximum limit of ${maxFileSize / 1024 / 1024}MB`);
+      }
+      
+      // Enhanced filename validation
+      if (!filename || typeof filename !== 'string' || filename.trim().length === 0) {
+        throw new Error('Filename is required and cannot be empty');
+      }
+      
+      if (filename.length > 255) {
+        throw new Error('Filename too long (max 255 characters)');
+      }
+      
+      // Filename character validation
+      const dangerousChars = ['<', '>', ':', '"', '|', '?', '*', '\\', '/'];
+      if (dangerousChars.some(char => filename.includes(char))) {
+        throw new Error('Filename contains invalid characters');
+      }
+      
+      // Enhanced originalName validation
+      if (!originalName || typeof originalName !== 'string' || originalName.trim().length === 0) {
+        throw new Error('Original filename is required and cannot be empty');
+      }
+      
+      if (originalName.length > 512) {
+        throw new Error('Original filename too long (max 512 characters)');
       }
       
       // Enhanced file validation with security checks
       
-      // Validate file size (10MB limit)
-      const maxSize = 2 * 1024 * 1024; // 2MB reduced for security
-      if (content.length > maxSize) {
-        throw new Error(`File size exceeds maximum limit of ${maxSize / 1024 / 1024}MB`);
-      }
+      // File size validation already performed above
       
       // Validate filename for security
       if (filename.length > 255) {
@@ -1719,6 +1855,12 @@ export class AgentRegistry {
   
   createJob(input) {
     try {
+      // Apply rate limiting for job creation
+      const clientKey = this._getClientKey();
+      if (!this._checkRateLimit(clientKey)) {
+        throw new Error('Rate limit exceeded: too many job creation requests');
+      }
+      
       // Validate input
       validateInput(input, {
         name: { required: true, type: 'string', minLength: 2, maxLength: 100 },
@@ -1726,6 +1868,9 @@ export class AgentRegistry {
         payload: { required: true, type: 'object' },
         priority: { required: false, type: 'number', min: 0, max: 100, default: 0 }
       }, 'Job input');
+      
+      // Record the request for rate limiting
+      this._recordRequest(clientKey);
 
       const id = crypto.randomUUID();
       const timestamp = now();

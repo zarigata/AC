@@ -20,29 +20,76 @@ export class OllamaAdapter {
       throw new Error('Invalid timeout: must be a number between 1000 and 300000 milliseconds');
     }
     
-    // Enhanced URL validation with security checks
+    // Enhanced URL validation with comprehensive security checks
     try {
-      const url = new URL(baseUrl);
-      
-      // Validate hostname: localhost, IP, or dotted hostname
-      const hostnameRe = /^(localhost|127\.0\.0\.1|\d+\.\d+\.\d+\.\d+|[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,})$/;
-      if (!hostnameRe.test(url.hostname)) {
-        throw new Error('Invalid hostname: must be localhost, IP address, or valid domain');
+      // Basic format validation first
+      if (baseUrl.length > 2048) {
+        throw new Error('URL exceeds maximum allowed length');
       }
       
-      // Prevent protocol confusion attacks
-      if (!url.protocol.match(/^https?:/)) {
+      const url = new URL(baseUrl);
+      
+      // Protocol validation - only allow http/https
+      if (!url.protocol.match(/^https?:$/i)) {
         throw new Error('Invalid protocol: only http and https are supported');
       }
       
-      // Validate port range
-      if (url.port && (url.port < 1 || url.port > 65535)) {
-        throw new Error('Invalid port: must be between 1 and 65535');
+      // Comprehensive hostname validation
+      const hostname = url.hostname;
+      
+      // Check for dangerous hostname patterns
+      const dangerousPatterns = [
+        /^.*\.internal$/, /^.*\.local$/, /^.*\.lan$/,
+        /^.*\.(test|staging|dev)\.internal$/, /\.(development|staging)\./
+      ];
+      
+      if (dangerousPatterns.some(pattern => pattern.test(hostname))) {
+        throw new Error('Invalid hostname: internal network addresses are not allowed');
       }
       
-      // Validate URL length after parsing
+      // Allow specific safe patterns
+      const allowedPatterns = [
+        /^(localhost|127\.0\.0\.1)$/,
+        /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/, // IPv4
+        /^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$/, // Public domain
+        /^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}\.[a-zA-Z]{2,}$/ // Subdomain
+      ];
+      
+      const isAllowed = allowedPatterns.some(pattern => pattern.test(hostname));
+      if (!isAllowed) {
+        throw new Error('Invalid hostname: only localhost, IP addresses, or valid public domains are allowed');
+      }
+      
+      // Port validation with security bounds
+      if (url.port) {
+        const port = parseInt(url.port, 10);
+        if (port < 1 || port > 65535) {
+          throw new Error('Invalid port: must be between 1 and 65535');
+        }
+        
+        // Block common dangerous ports
+        const dangerousPorts = [22, 23, 25, 53, 80, 110, 143, 443, 993, 995];
+        if (dangerousPorts.includes(port)) {
+          throw new Error(`Port ${port} is not allowed for security reasons`);
+        }
+      }
+      
+      // Validate URL length and structure
       if (url.href.length > 2048) {
         throw new Error('URL too long after parsing');
+      }
+      
+      // Check for URL obfuscation attempts
+      if (url.username || url.password) {
+        throw new Error('URL contains credentials - security risk');
+      }
+      
+      // Validate path is simple and safe
+      if (url.pathname && url.pathname !== '/') {
+        const dangerousPathChars = ['<', '>', '"', "'', '{', '}', '[', ']', '|', '\', '^'];
+        if (dangerousPathChars.some(char => url.pathname.includes(char))) {
+          throw new Error('URL contains dangerous characters in path');
+        }
       }
     } catch (err) {
       throw new Error(`Invalid baseUrl: ${err.message}`);
