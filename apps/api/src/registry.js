@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
-import { mkdirSync, existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, existsSync, readFile, writeFile, rm } from "node:fs/promises";
 import { dirname, join, extname, basename } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { Database } from "node:sqlite";
+import { open } from "node:sqlite";
+import { sqlite3 } from "node:sqlite3";
 import { inspect } from "node:util";
 
 // Security helper function to sanitize error messages
@@ -248,13 +250,17 @@ export class AgentRegistry {
       
       // Initialize database with error handling
       try {
-        this.db = new DatabaseSync(options.databasePath);
+        // Initialize database with proper async handling
+        this.db = await open({
+          filename: options.databasePath,
+          driver: sqlite3.Database
+        });
         
         // Enable foreign key constraints
-        this.db.exec('PRAGMA foreign_keys = ON');
+        await this.db.exec('PRAGMA foreign_keys = ON');
         
         // Create tables with proper indexes
-        this.db.exec(`
+        await this.db.exec(`
           CREATE TABLE IF NOT EXISTS agents (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
@@ -274,7 +280,7 @@ export class AgentRegistry {
           CREATE INDEX IF NOT EXISTS idx_agents_created_at ON agents(createdAt);
         `);
 
-        this.db.exec(`
+        await this.db.exec(`
           CREATE TABLE IF NOT EXISTS agent_links (
             sourceAgentId TEXT NOT NULL,
             targetAgentId TEXT NOT NULL,
@@ -1339,7 +1345,7 @@ export class AgentRegistry {
       // Enhanced file validation with security checks
       
       // Validate file size (10MB limit)
-      const maxSize = 10 * 1024 * 1024; // 10MB
+      const maxSize = 2 * 1024 * 1024; // 2MB reduced for security
       if (content.length > maxSize) {
         throw new Error(`File size exceeds maximum limit of ${maxSize / 1024 / 1024}MB`);
       }

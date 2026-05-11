@@ -338,6 +338,13 @@ export class OllamaAdapter {
                 const thinking = jsonData.message.thinking || '';
                 
                 accumulatedContent += content;
+                
+                // Security: Limit accumulated content to prevent memory exhaustion
+                if (accumulatedContent.length > 100000) { // 100KB limit
+                  console.warn('Content accumulation limit reached, truncating');
+                  accumulatedContent = accumulatedContent.substring(0, 100000);
+                }
+                
                 accumulatedTokensOut = jsonData.eval_count || 0;
                 accumulatedDuration = jsonData.total_duration ? Math.round(jsonData.total_duration / 1e6) : 0;
                 

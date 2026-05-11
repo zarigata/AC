@@ -210,15 +210,17 @@ const ensureInteger = (value, field, min, max) => {
     throw new Error(`${field} must be an integer between ${safeMin} and ${safeMax}.`);
   }
 
-  // Enhanced security checks for specific fields
-  const securityFields = ['maxConcurrentTasks', 'maxTokens', 'timeout', 'limit'];
+  // Enhanced security checks for specific fields with stricter limits
+  const securityFields = ['maxConcurrentTasks', 'maxTokens', 'timeout', 'limit', 'page', 'offset'];
   if (securityFields.includes(field)) {
     // More restrictive limits for security-sensitive fields
     const securityLimits = {
-      'maxConcurrentTasks': { min: 1, max: 32 },
-      'maxTokens': { min: 1, max: 32000 },
-      'timeout': { min: 1000, max: 300000 },
-      'limit': { min: 1, max: 10000 }
+      'maxConcurrentTasks': { min: 1, max: 16 },
+      'maxTokens': { min: 1, max: 16000 },
+      'timeout': { min: 5000, max: 120000 },
+      'limit': { min: 1, max: 100 },
+      'page': { min: 1, max: 1000 },
+      'offset': { min: 0, max: 10000 }
     };
     
     const securityLimit = securityLimits[field];
@@ -228,7 +230,7 @@ const ensureInteger = (value, field, min, max) => {
   }
 
   // Check for potentially problematic values
-  if (value <= 0 && field !== 'timeout') {
+  if (value <= 0 && field !== 'timeout' && field !== 'offset') {
     throw new Error(`${field} must be a positive integer for security reasons.`);
   }
 

@@ -3909,9 +3909,9 @@ server.on('upgrade', (request, socket, head) => {
               throw new Error('Invalid message type: must be string');
             }
             
-            // Rate limiting: Check message frequency per client
+            // Rate limiting: Check message frequency per client with enhanced security
             const now = Date.now();
-            const clientKey = clientInfo.id || clientInfo.ip;
+            const clientKey = clientInfo.ip || clientInfo.id; // Prefer IP for rate limiting
             
             // Initialize rate limiting data if not exists
             if (!messageTimestamps[clientKey]) {
@@ -3922,9 +3922,9 @@ server.on('upgrade', (request, socket, head) => {
             const oneMinuteAgo = now - 60000;
             messageTimestamps[clientKey] = messageTimestamps[clientKey].filter(timestamp => timestamp > oneMinuteAgo);
             
-            // Check if rate limit exceeded (max 100 messages per minute)
-            if (messageTimestamps[clientKey].length >= 100) {
-              throw new Error('Rate limit exceeded: maximum 100 messages per minute');
+            // Check if rate limit exceeded (max 50 messages per minute reduced for security)
+            if (messageTimestamps[clientKey].length >= 50) {
+              throw new Error('Rate limit exceeded: maximum 50 messages per minute');
             }
             
             // Record this message timestamp
