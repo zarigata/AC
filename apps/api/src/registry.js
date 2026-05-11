@@ -248,16 +248,36 @@ export class AgentRegistry {
       const dbDir = dirname(options.databasePath);
       mkdirSync(dbDir, { recursive: true, mode: 0o755 });
       
-      // Initialize database with error handling
-      try {
-        // Initialize database with proper async handling
-        this.db = await open({
-          filename: options.databasePath,
-          driver: sqlite3.Database
-        });
-        
-        // Enable foreign key constraints
-        await this.db.exec('PRAGMA foreign_keys = ON');
+      // Initialize database with enhanced error handling and retry logic
+      let dbAttempts = 0;
+      const maxAttempts = 3;
+      let lastError;
+      
+      while (dbAttempts < maxAttempts) {
+        try {
+          // Initialize database with proper async handling
+          this.db = await open({
+            filename: options.databasePath,
+            driver: sqlite3.Database
+          });
+          
+          // Enable foreign key constraints
+          await this.db.exec('PRAGMA foreign_keys = ON');
+          break; // Success, exit retry loop
+        } catch (dbErr) {
+          lastError = dbErr;
+          dbAttempts++;
+          
+          if (dbAttempts < maxAttempts) {
+            console.warn(`Database initialization attempt ${dbAttempts} failed: ${dbErr.message}. Retrying...`);
+            await new Promise(resolve => setTimeout(resolve, 1000 * dbAttempts)); // Exponential backoff
+          }
+        }
+      }
+      
+      if (dbAttempts >= maxAttempts) {
+        throw new Error(`Database initialization failed after ${maxAttempts} attempts: ${lastError?.message || 'Unknown error'}`);
+      }
         
         // Create tables with proper indexes
         await this.db.exec(`
@@ -677,7 +697,7 @@ export class AgentRegistry {
     try {
       // Validate ID format with UUID check
       if (!id || typeof id !== 'string' || id.length > 64) {
-        return null;
+        throw new Error('Invalid agent ID');
       }
       
       // Validate UUID format to prevent injection
@@ -686,7 +706,9 @@ export class AgentRegistry {
       }
       
       const existing = this.getAgent(id);
-      if (!existing) return null;
+      if (!existing) {
+        throw new Error('Agent not found');
+      }
 
       const allowed = ["name", "purpose", "status", "provider", "model", "isolationMode", "maxConcurrentTasks", "peerAccess"];
       const fields = [];
@@ -751,22 +773,27 @@ export class AgentRegistry {
       const existing = this.getAgent(id);
       if (!existing) return false;
       
-      // Begin transaction for safe deletion
+      // Begin transaction for safe deletion with better error handling
       this.db.exec('BEGIN TRANSACTION');
       try {
-        // Delete dependent records first (foreign key constraints will handle this)
-        this.db.prepare("DELETE FROM agent_links WHERE sourceAgentId = ? OR targetAgentId = ?").run(id, id);
-        this.db.prepare("DELETE FROM sessions WHERE agentId = ?").run(id);
+        // Delete dependent records first with proper error handling
+        const linksDeleted = this.db.prepare("DELETE FROM agent_links WHERE sourceAgentId = ? OR targetAgentId = ?").run(id, id);
+        const sessionsDeleted = this.db.prepare("DELETE FROM sessions WHERE agentId = ?").run(id);
         
         // Delete the agent
         const result = this.db.prepare("DELETE FROM agents WHERE id = ?").run(id);
         
+        if (result.changes === 0) {
+          this.db.exec('ROLLBACK');
+          throw new Error('Failed to delete agent');
+        }
+        
         this.db.exec('COMMIT');
-        return result.changes > 0;
+        return true;
       } catch (deleteErr) {
         this.db.exec('ROLLBACK');
-        console.error('Error deleting agent:', deleteErr);
-        throw deleteErr;
+        console.error('Error deleting agent:', deleteErr.message);
+        throw new Error('Failed to delete agent: ' + deleteErr.message);
       }
     } catch (err) {
       console.error('Error deleting agent:', err);
@@ -1437,7 +1464,7 @@ export class AgentRegistry {
           throw new Error('Failed to save file record');
         }
         
-        // Save actual file to disk
+        // Save actual file to disk with enhanced error handling
         const filePath = join(this.filesDir, fileId);
         try {
           writeFileSync(filePath, content);
@@ -2908,4 +2935,60 @@ export class AgentRegistry {
       return null;
     }
   }
+}
+
+// Enhanced validation function for input data
+const validateInput = (input, rules, context = 'input') => {
+  if (!input || typeof input !== 'object') {
+    throw new Error(`Invalid ${context}: must be an object`);
+  }
+  
+  for (const [field, rule] of Object.entries(rules)) {
+    const value = input[field];
+    
+    // Check if required
+    if (rule.required && (value === undefined || value === null || value === '')) {
+      throw new Error(`${field} is required`);
+    }
+    
+    // Skip validation if not required and not provided
+    if (!rule.required && (value === undefined || value === null)) {
+      continue;
+    }
+    
+    // Type validation
+    if (rule.type) {
+      const actualType = Array.isArray(value) ? 'array' : typeof value;
+      if (actualType !== rule.type) {
+        throw new Error(`${field} must be of type ${rule.type}, got ${actualType}`);
+      }
+    }
+    
+    // String length validation
+    if (rule.type === 'string' && typeof value === 'string') {
+      if (rule.minLength && value.length < rule.minLength) {
+        throw new Error(`${field} must be at least ${rule.minLength} characters`);
+      }
+      if (rule.maxLength && value.length > rule.maxLength) {
+        throw new Error(`${field} must be at most ${rule.maxLength} characters`);
+      }
+    }
+    
+    // Number validation
+    if (rule.type === 'number' && typeof value === 'number') {
+      if (rule.min !== undefined && value < rule.min) {
+        throw new Error(`${field} must be at least ${rule.min}`);
+      }
+      if (rule.max !== undefined && value > rule.max) {
+        throw new Error(`${field} must be at most ${rule.max}`);
+      }
+    }
+    
+    // Enum validation
+    if (rule.enum && !rule.enum.includes(value)) {
+      throw new Error(`${field} must be one of: ${rule.enum.join(', ')}`);
+    }
+  }
+  
+  return true;
 }

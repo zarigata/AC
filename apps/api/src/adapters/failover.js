@@ -10,6 +10,19 @@ export class FailoverChainAdapter {
       throw new Error('Failover chain must be a non-empty array');
     }
     
+    // Validate failover chain entries for security
+    for (const provider of failoverChain) {
+      if (!provider || typeof provider !== 'object') {
+        throw new Error('Each provider in failover chain must be an object');
+      }
+      if (!provider.name || typeof provider.name !== 'string' || provider.name.length > 80) {
+        throw new Error('Provider name is required and must be a string with max 80 characters');
+      }
+      if (provider.config && typeof provider.config !== 'object') {
+        throw new Error('Provider config must be an object');
+      }
+    }
+    
     this.failoverChain = failoverChain;
     this.config = config;
     this.providers = [];
@@ -210,6 +223,12 @@ export class FailoverChainAdapter {
           accumulatedContent += chunk.content || "";
           accumulatedTokensIn += chunk.tokensIn || 0;
           accumulatedTokensOut += chunk.tokensOut || 0;
+          
+          // Security: Limit accumulated content to prevent memory exhaustion
+          if (accumulatedContent.length > 500000) { // 500KB limit
+            console.warn('Accumulated content limit reached in failover adapter, truncating');
+            accumulatedContent = accumulatedContent.substring(0, 500000);
+          }
           
           // Forward chunk to callback with additional metadata
           onChunk({

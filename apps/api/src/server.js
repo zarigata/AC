@@ -1516,12 +1516,12 @@ const server = createServer(async (request, response) => {
         // Apply updates to global settings object
         Object.assign(settings, updates);
         
-        // Log the settings update for audit trail
+        // Log the settings update for audit trail (sensitive data redacted)
         console.log('Settings updated:', {
           timestamp: Date.now(),
-          changedBy: request.headers['x-forwarded-for'] || request.socket.remoteAddress,
-          updates: updates,
-          newSettings: { ...settings }
+          changedBy: request.headers['x-forwarded-for'] ? '***' : 'localhost',
+          updates: Object.keys(updates), // Only log keys, not values
+          newSettings: { version: settings.version } // Only safe metadata
         });
         
         return sendJson(response, 200, {
@@ -1925,15 +1925,6 @@ const server = createServer(async (request, response) => {
           "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type, Authorization"
         });
-        // Set up SSE headers first - this is crucial for streaming to work
-        response.writeHead(200, {
-          "Content-Type": "text/event-stream; charset=utf-8",
-          "Cache-Control": "no-cache",
-          "Connection": "keep-alive",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization"
-        });
 
         // Create/get session first to avoid race conditions
         let session;
@@ -2196,8 +2187,8 @@ const server = createServer(async (request, response) => {
           return sendJson(response, 400, { error: "File content is required" });
         }
         
-        // Enhanced file size validation (5MB limit for security)
-        const maxSize = 5 * 1024 * 1024; // 5MB reduced for security
+        // Enhanced file size validation (1MB limit for security)
+        const maxSize = 1 * 1024 * 1024; // 1MB reduced for security
         if (content.length > maxSize) {
           return sendJson(response, 400, { error: `File size exceeds maximum limit of ${maxSize / 1024 / 1024}MB` });
         }
@@ -3587,15 +3578,15 @@ const cleanupRateLimitEntries = () => {
     rateLimit.delete(key);
   }
   
-  // If we still have too many entries, enforce hard limit
+  // If we still have too many entries, enforce hard limit with more aggressive cleanup
   if (rateLimit.size > MAX_RATE_LIMIT_ENTRIES) {
     // Sort by timestamp (most recent first)
     const sortedEntries = Array.from(rateLimit.entries())
       .sort((a, b) => b[1].timestamp - a[1].timestamp);
     
-    // Clear the map and repopulate with only the most recent entries
+    // Clear the map and repopulate with only the most recent entries (more aggressive)
     rateLimit.clear();
-    const entriesToKeep = sortedEntries.slice(0, MAX_RATE_LIMIT_ENTRIES / 2); // Keep 50% of capacity
+    const entriesToKeep = sortedEntries.slice(0, MAX_RATE_LIMIT_ENTRIES / 4); // Keep 25% of capacity for better memory management
     
     for (const [key, data] of entriesToKeep) {
       rateLimit.set(key, data);

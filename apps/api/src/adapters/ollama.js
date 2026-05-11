@@ -298,6 +298,7 @@ export class OllamaAdapter {
     
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
+        console.warn(`Ollama request timed out after ${this.timeout}ms for ${model}`);
         req.destroy();
         reject(new Error(`Ollama request timed out after ${this.timeout}ms`));
       }, this.timeout);
