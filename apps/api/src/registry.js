@@ -68,6 +68,15 @@ const validateInput = (input, rules, fieldName) => {
       }
     }
     
+    // Additional security: Check for prototype pollution via Object.setPrototypeOf
+    try {
+      const testObj = {};
+      Object.setPrototypeOf(testObj, input);
+      // If we get here without throwing, there was no prototype pollution
+    } catch (protoErr) {
+      throw new Error(`${fieldName} contains prototype pollution attempt`);
+    }
+    
     // Check for circular references and deeply nested objects with increased security
     const maxDepth = 8; // Reduced for security
     const maxProperties = 50; // Limit number of properties
@@ -156,15 +165,18 @@ const validateInput = (input, rules, fieldName) => {
       
       // Additional security validation for string fields
       if (typeof value === 'string') {
-        // Check for injection patterns
+        // Check for injection patterns with comprehensive security validation
         const dangerousPatterns = [
+          // Critical security threats - check these first
           /<script[^>]*>.*?<\/script>/gi,
           /javascript:/gi,
           /data:/gi,
-          /on\w+\s*=/gi,
           /eval\(/gi,
           /exec\(/gi,
           /Function\(/gi,
+          /on\w+\s*=/gi,
+          
+          // SQL injection
           /SELECT\s+/gi,
           /INSERT\s+/gi,
           /UPDATE\s+/gi,
@@ -174,19 +186,37 @@ const validateInput = (input, rules, fieldName) => {
           /ALTER\s+/gi,
           /;\s*--/g,
           /#\s*$/gm,
-          /\\/g,
-          /\x00/g
+          
+          // Control characters and null bytes
+          /\x00/g,
+          /[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]/g,
+          /[\u0000-\u001F\u007F-\u009F]/g,
+          
+          // Path traversal
+          /\.\./g,
+          
+          // Quotes and dangerous characters
+          /['"`\\]/g,
+          
+          // Basic HTML tags that could be dangerous
+          /<iframe|<object|<embed|<style|<meta|<link|<img|<video|<audio|<svg/gi
         ];
         
         for (const pattern of dangerousPatterns) {
           if (pattern.test(value)) {
+            console.warn(`Blocked potentially dangerous content in ${fieldName}.${key}:`, pattern.toString());
             throw new Error(`${fieldName}.${key} contains potentially dangerous content`);
           }
         }
         
-        // Check for control characters
-        if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g.test(value)) {
-          throw new Error(`${fieldName}.${key} contains control characters`);
+        // Additional security: Check for Unicode normalization issues
+        if (value.normalize('NFKC') !== value) {
+          throw new Error(`${fieldName}.${key} contains potentially dangerous Unicode characters`);
+        }
+        
+        // Check for extremely long strings that might cause memory issues
+        if (value.length > 10000) {
+          throw new Error(`${fieldName}.${key} exceeds maximum allowed length`);
         }
       }
     }

@@ -112,8 +112,8 @@ const ensureString = (value, field, min, max) => {
     throw new Error(`${field} cannot be empty or contain only whitespace.`);
   }
 
-  // Optimized sanitization to prevent injection attacks
-  // Grouped patterns for better performance
+  // Enhanced sanitization to prevent injection attacks
+  // Grouped patterns for better performance with comprehensive security coverage
   const dangerousPatterns = [
     // Critical security threats - check these first
     /<script[^>]*>.*?<\/script>/gi,
@@ -147,19 +147,37 @@ const ensureString = (value, field, min, max) => {
     /['"`\\]/g,
     
     // Basic HTML tags that could be dangerous
-    /<iframe|<object|<embed|<style|<meta|<link|<img|<video|<audio|<svg/gi
+    /<iframe|<object|<embed|<style|<meta|<link|<img|<video|<audio|<svg/gi,
+    
+    // Additional DOM access attempts
+    /document\./gi,
+    /window\./gi,
+    /global\./gi,
+    /self\./gi,
+    /top\./gi,
+    /parent\./gi,
+    /frames\./gi,
+    /location\./gi,
+    /history\./gi,
+    /navigator\./gi
   ];
   
   // Quick check for dangerous patterns before detailed validation
   for (const pattern of dangerousPatterns) {
     if (pattern.test(normalized)) {
+      console.warn(`Blocked potentially dangerous content in ${field}:`, pattern.toString());
       throw new Error(`${field} contains invalid or potentially dangerous content.`);
     }
   }
   
-  // Unicode normalization check
+  // Unicode normalization check with enhanced security
   if (normalized.normalize('NFKC') !== normalized) {
     throw new Error(`${field} contains potentially dangerous Unicode characters.`);
+  }
+  
+  // Additional security: Check for extremely long strings that might cause memory issues
+  if (normalized.length > 10000) {
+    throw new Error(`${field} exceeds maximum allowed length for security reasons.`);
   }
   
   return normalized;

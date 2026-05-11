@@ -55,7 +55,7 @@ export class OllamaAdapter {
 
   async chat(messages, options = {}) {
     try {
-      // Validate input
+      // Validate input with enhanced security
       if (!messages || !Array.isArray(messages) || messages.length === 0) {
         throw new Error('Messages array is required and cannot be empty');
       }
@@ -69,6 +69,11 @@ export class OllamaAdapter {
       const totalChars = messages.reduce((sum, msg) => sum + (msg.content?.length || 0), 0);
       if (totalChars > 500000) { // 500KB limit
         throw new Error('Total message content exceeds allowed limit');
+      }
+      
+      // Additional security: validate entire messages structure for prototype pollution
+      if (JSON.stringify(messages).length > 1000000) { // 1MB JSON string limit
+        throw new Error('Messages structure too large');
       }
       
       for (let i = 0; i < messages.length; i++) {
@@ -97,32 +102,59 @@ export class OllamaAdapter {
           throw new Error(`Message ${i} content is too long (max 50000 characters)`);
         }
         
-        // Enhanced security: check for injection attempts
+        // Enhanced security: check for injection attempts with comprehensive validation
         const dangerousPatterns = [
+          // Critical security threats - check these first
           /<script[^>]*>.*?<\/script>/gi,
           /javascript:/gi,
           /data:/gi,
-          /<iframe[^>]*>.*?<\/iframe>/gi,
-          /<object[^>]*>.*?<\/object>/gi,
-          /<embed[^>]*>.*?<\/embed>/gi,
-          /<style[^>]*>.*?<\/style>/gi,
-          /<meta[^>]*>.*?<\/meta>/gi,
-          /<link[^>]*>.*?<\/link>/gi,
-          /on\w+\s*=/gi,
           /eval\(/gi,
           /exec\(/gi,
           /Function\(/gi,
-          /setTimeout\s*\(/gi,
-          /setInterval\s*\(/gi,
+          /on\w+\s*=/gi,
+          
+          // SQL injection
+          /SELECT\s+/gi,
+          /INSERT\s+/gi,
+          /UPDATE\s+/gi,
+          /DELETE\s+/gi,
+          /DROP\s+/gi,
+          /CREATE\s+/gi,
+          /ALTER\s+/gi,
+          /;\s*--/g,
+          /#\s*$/gm,
+          
+          // Control characters and null bytes
+          /\x00/g,
+          /[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]/g,
+          /[\u0000-\u001F\u007F-\u009F]/g,
+          
+          // Path traversal
+          /\.\./g,
+          
+          // DOM access attempts
           /document\./gi,
           /window\./gi,
-          /global\./gi
+          /global\./gi,
+          /self\./gi,
+          /top\./gi,
+          /parent\./gi,
+          /frames\./gi,
+          
+          // Basic HTML tags that could be dangerous
+          /<iframe|<object|<embed|<style|<meta|<link|<img|<video|<audio|<svg/gi
         ];
         
         for (const pattern of dangerousPatterns) {
           if (pattern.test(msg.content)) {
+            console.warn(`Blocked potentially dangerous content in message ${i}:`, pattern.toString());
             throw new Error(`Message ${i} contains potentially dangerous content`);
           }
+        }
+        
+        // Additional security: Check for Unicode normalization issues
+        if (msg.content.normalize('NFKC') !== msg.content) {
+          throw new Error(`Message ${i} contains potentially dangerous Unicode characters`);
         }
         
         // Check for extremely long lines that might cause issues

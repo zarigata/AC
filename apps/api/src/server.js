@@ -311,11 +311,28 @@ const initFailoverChains = () => {
 // Initialize failover chains after basic providers are set up
 initFailoverChains();
 
-// Initialize Ollama as primary
+// Initialize Ollama as primary with enhanced security validation
+const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
+const ollamaModel = process.env.OLLAMA_MODEL || "qwen3:1.7b";
+const ollamaTimeout = parseInt(process.env.OLLAMA_TIMEOUT || "120000", 10);
+
+// Enhanced security validation for Ollama parameters
+if (!ollamaBaseUrl || typeof ollamaBaseUrl !== 'string' || ollamaBaseUrl.length > 2048) {
+  throw new Error('Invalid OLLAMA_BASE_URL: must be a string between 1 and 2048 characters');
+}
+
+if (!ollamaModel || typeof ollamaModel !== 'string' || ollamaModel.length > 120) {
+  throw new Error('Invalid OLLAMA_MODEL: must be a string between 1 and 120 characters');
+}
+
+if (isNaN(ollamaTimeout) || ollamaTimeout < 1000 || ollamaTimeout > 300000) {
+  throw new Error('Invalid OLLAMA_TIMEOUT: must be a number between 1000 and 300000 milliseconds');
+}
+
 providers.ollama = new OllamaAdapter({
-  baseUrl: process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434",
-  model: process.env.OLLAMA_MODEL || "qwen3:1.7b",
-  timeout: parseInt(process.env.OLLAMA_TIMEOUT || "120000", 10),
+  baseUrl: ollamaBaseUrl,
+  model: ollamaModel,
+  timeout: ollamaTimeout,
 });
 
 // Lazy-init other providers (only when API key is set)
@@ -2185,24 +2202,39 @@ const server = createServer(async (request, response) => {
           return sendJson(response, 400, { error: `File size exceeds maximum limit of ${maxSize / 1024 / 1024}MB` });
         }
         
-        // Enhanced file content validation
+        // Enhanced file content validation with comprehensive security checks
         // Check for potentially dangerous file content
         const dangerousPatterns = [
+          // Critical security threats - check these first
           /<script[^>]*>.*?<\/script>/gi,
           /javascript:/gi,
           /data:/gi,
-          /<iframe[^>]*>.*?<\/iframe>/gi,
-          /<object[^>]*>.*?<\/object>/gi,
-          /<embed[^>]*>.*?<\/embed>/gi,
-          /<style[^>]*>.*?<\/style>/gi,
-          /<meta[^>]*>.*?<\/meta>/gi,
-          /<link[^>]*>.*?<\/link>/gi,
-          /on\w+\s*=/gi,
           /eval\(/gi,
           /exec\(/gi,
           /Function\(/gi,
-          /setTimeout\s*\(/gi,
-          /setInterval\s*\(/gi
+          /on\w+\s*=/gi,
+          
+          // SQL injection
+          /SELECT\s+/gi,
+          /INSERT\s+/gi,
+          /UPDATE\s+/gi,
+          /DELETE\s+/gi,
+          /DROP\s+/gi,
+          /CREATE\s+/gi,
+          /ALTER\s+/gi,
+          /;\s*--/g,
+          /#\s*$/gm,
+          
+          // Control characters and null bytes
+          /\x00/g,
+          /[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]/g,
+          /[\u0000-\u001F\u007F-\u009F]/g,
+          
+          // Path traversal
+          /\.\./g,
+          
+          // Basic HTML tags that could be dangerous
+          /<iframe|<object|<embed|<style|<meta|<link|<img|<video|<audio|<svg/gi
         ];
         
         // Additional security checks
@@ -2222,19 +2254,31 @@ const server = createServer(async (request, response) => {
         
         for (const pattern of dangerousPatterns) {
           if (pattern.test(content)) {
+            console.warn('Blocked potentially dangerous file content:', pattern.toString());
             return sendJson(response, 400, { error: "File contains potentially dangerous content" });
           }
         }
         
-        // Check file extension against allowed types
-        const allowedExtensions = ['.txt', '.md', '.json', '.csv', '.xml'];
-        const fileExtension = filename.toLowerCase();
-        const isAllowedExtension = allowedExtensions.some(ext => fileExtension.endsWith(ext));
+        // Additional security: Check for Unicode normalization issues
+        if (content.normalize('NFKC') !== content) {
+          return sendJson(response, 400, { error: "File contains potentially dangerous Unicode characters" });
+        }
+        
+        // Validate file name and path
+        if (!filename || typeof filename !== 'string' || filename.length > 200 || filename.includes('..') || filename.includes('/') || filename.includes('\')) {
+          return sendJson(response, 400, { error: "Invalid filename" });
+        }
+        
+        // Check file extension against allowed types with enhanced security
+        const allowedExtensions = ['.txt', '.md', '.json', '.csv', '.xml', '.log'];
+        const fileExtension = extname(filename).toLowerCase();
+        const isAllowedExtension = allowedExtensions.includes(fileExtension);
         
         if (!isAllowedExtension) {
           return sendJson(response, 400, { 
             error: "File type not allowed", 
-            allowed: allowedExtensions 
+            allowed: allowedExtensions,
+            "tip": "Only text-based files are allowed for security reasons"
           });
         }
         
