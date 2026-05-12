@@ -192,6 +192,27 @@ export class AgentRegistry {
           CREATE INDEX IF NOT EXISTS idx_logs_path ON logs(path);
           CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs(createdAt);
         `);
+
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS jobs (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            progress INTEGER NOT NULL DEFAULT 0,
+            data TEXT,
+            result TEXT,
+            error TEXT,
+            createdAt TEXT NOT NULL,
+            startedAt TEXT,
+            completedAt TEXT
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+          CREATE INDEX IF NOT EXISTS idx_jobs_type ON jobs(type);
+          CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(createdAt);
+          CREATE INDEX IF NOT EXISTS idx_jobs_status_created_at ON jobs(status, createdAt);
+        `);
         
         // Enable WAL mode for better performance
         this.db.exec('PRAGMA journal_mode = WAL');
@@ -998,6 +1019,222 @@ export class AgentRegistry {
     } catch (err) {
       console.error('Error getting agent usage:', err);
       return null;
+    }
+  }
+
+  // Job management methods
+  createJob(jobData) {
+    try {
+      const { name, type, data = {} } = jobData;
+      
+      if (!name || typeof name !== 'string') {
+        throw new Error('Job name is required and must be a string');
+      }
+      
+      if (!type || typeof type !== 'string') {
+        throw new Error('Job type is required and must be a string');
+      }
+      
+      const jobId = crypto.randomUUID();
+      const now = new Date().toISOString();
+      
+      const job = {
+        id: jobId,
+        name: sanitizeContent(name, 'job name'),
+        type: sanitizeContent(type, 'job type'),
+        status: 'pending',
+        progress: 0,
+        data: data,
+        createdAt: now,
+        startedAt: null,
+        completedAt: null,
+        error: null
+      };
+      
+      const insertStmt = this.db.prepare(
+        `INSERT INTO jobs (
+          id, name, type, status, progress, data, 
+          createdAt, startedAt, completedAt, error
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      
+      insertStmt.run(
+        job.id,
+        job.name,
+        job.type,
+        job.status,
+        job.progress,
+        JSON.stringify(job.data),
+        job.createdAt,
+        job.startedAt,
+        job.completedAt,
+        job.error
+      );
+      
+      return job;
+    } catch (err) {
+      console.error('Error creating job:', err.message);
+      throw err;
+    }
+  }
+  
+  getPendingJobs(limit = 10) {
+    try {
+      const safeLimit = Math.min(Math.max(Number(limit), 1), 100);
+      
+      const rows = this.db.prepare(
+        `SELECT * FROM jobs 
+        WHERE status = 'pending' 
+        ORDER BY createdAt ASC 
+        LIMIT ?`
+      ).all(safeLimit);
+      
+      return rows.map(row => ({
+        ...row,
+        data: JSON.parse(row.data || '{}')
+      }));
+    } catch (err) {
+      console.error('Error getting pending jobs:', err.message);
+      return [];
+    }
+  }
+  
+  getJob(jobId) {
+    try {
+      if (!jobId || typeof jobId !== 'string') {
+        return null;
+      }
+      
+      const row = this.db.prepare("SELECT * FROM jobs WHERE id = ?").get(jobId);
+      
+      if (!row) {
+        return null;
+      }
+      
+      return {
+        ...row,
+        data: JSON.parse(row.data || '{}')
+      };
+    } catch (err) {
+      console.error('Error getting job:', err.message);
+      return null;
+    }
+  }
+  
+  updateJob(jobId, updates) {
+    try {
+      if (!jobId || typeof jobId !== 'string') {
+        throw new Error('Job ID is required');
+      }
+      
+      // Get current job first
+      const currentJob = this.getJob(jobId);
+      if (!currentJob) {
+        throw new Error(`Job with ID ${jobId} not found`);
+      }
+      
+      // Prepare update fields
+      const updateFields = [];
+      const updateValues = [];
+      
+      if (updates.status !== undefined) {
+        updateFields.push('status = ?');
+        updateValues.push(sanitizeContent(updates.status, 'job status'));
+      }
+      
+      if (updates.progress !== undefined) {
+        updateFields.push('progress = ?');
+        updateValues.push(Number(updates.progress));
+      }
+      
+      if (updates.data !== undefined) {
+        updateFields.push('data = ?');
+        updateValues.push(JSON.stringify(updates.data));
+      }
+      
+      if (updates.startedAt !== undefined) {
+        updateFields.push('startedAt = ?');
+        updateValues.push(updates.startedAt);
+      }
+      
+      if (updates.completedAt !== undefined) {
+        updateFields.push('completedAt = ?');
+        updateValues.push(updates.completedAt);
+      }
+      
+      if (updates.error !== undefined) {
+        updateFields.push('error = ?');
+        updateValues.push(sanitizeContent(updates.error, 'job error'));
+      }
+      
+      if (updates.result !== undefined) {
+        updateFields.push('result = ?');
+        updateValues.push(JSON.stringify(updates.result));
+      }
+      
+      if (updateFields.length === 0) {
+        return currentJob; // No updates to apply
+      }
+      
+      // Add job ID to the end for the WHERE clause
+      updateValues.push(jobId);
+      
+      const updateStmt = this.db.prepare(
+        `UPDATE jobs SET ${updateFields.join(', ')} WHERE id = ?`
+      );
+      
+      updateStmt.run(...updateValues);
+      
+      // Return updated job
+      return this.getJob(jobId);
+    } catch (err) {
+      console.error('Error updating job:', err.message);
+      throw err;
+    }
+  }
+  
+  getJobs(filters = {}) {
+    try {
+      let query = "SELECT * FROM jobs";
+      const whereConditions = [];
+      const params = [];
+      
+      if (filters.status) {
+        whereConditions.push("status = ?");
+        params.push(filters.status);
+      }
+      
+      if (filters.type) {
+        whereConditions.push("type = ?");
+        params.push(filters.type);
+      }
+      
+      if (filters.limit) {
+        const safeLimit = Math.min(Math.max(Number(filters.limit), 1), 1000);
+        if (!whereConditions.length) {
+          query += " ORDER BY createdAt DESC LIMIT ?";
+        } else {
+          query += " ORDER BY createdAt DESC LIMIT ?";
+        }
+        params.push(safeLimit);
+      } else {
+        query += " ORDER BY createdAt DESC";
+      }
+      
+      if (whereConditions.length > 0) {
+        query += " WHERE " + whereConditions.join(" AND ");
+      }
+      
+      const rows = this.db.prepare(query).all(...params);
+      
+      return rows.map(row => ({
+        ...row,
+        data: JSON.parse(row.data || '{}'),
+        result: row.result ? JSON.parse(row.result) : null
+      }));
+    } catch (err) {
+      console.error('Error getting jobs:', err.message);
+      return [];
     }
   }
 }

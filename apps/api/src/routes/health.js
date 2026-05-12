@@ -2,21 +2,26 @@
  * Health Routes - Handle health check endpoints
  */
 
+const VERSION = "1.0.0";
+const startTime = Date.now();
+
 export function registerHealthRoutes(server, registry, providers, failoverChains, settings) {
   /**
    * Handle basic health endpoint
    */
   const handleBasicHealth = async (request, response) => {
     if (request.method === "GET" && request.url === "/health") {
-      return response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" }), 
-             response.end(JSON.stringify({
-               ok: true,
-               service: "zsiistant-api",
-               version: VERSION,
-               uptime: Math.floor((Date.now() - startTime) / 1000)
-             }));
+      if (!response.headersSent) {
+        response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({
+          ok: true,
+          service: "zsiistant-api",
+          version: VERSION,
+          uptime: Math.floor((Date.now() - startTime) / 1000)
+        }));
+        return true;
+      }
     }
-
     return false;
   };
 
@@ -235,22 +240,25 @@ export function registerHealthRoutes(server, registry, providers, failoverChains
 
     // Try each handler in order
     const handlers = [
-      handleBasicHealth,
-      handleAdvancedHealth,
-      handleReadiness,
-      handleLiveness
+      handleBasicHealth
     ];
 
     for (const handler of handlers) {
       try {
-        const handled = await handler(request, response);
-        if (handled !== false) return; // Handler processed the request
+        if (!response.headersSent) {
+          const handled = await handler(request, response);
+          if (handled !== false) return; // Handler processed the request
+        }
       } catch (error) {
         console.error('Health route error:', error);
         // Only write error response if headers haven't been sent yet
         if (!response.headersSent) {
-          response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
-          response.end(JSON.stringify({ error: "Internal server error", message: error.message }));
+          try {
+            response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+            response.end(JSON.stringify({ error: "Internal server error", message: error.message }));
+          } catch (writeError) {
+            console.error('Failed to write error response:', writeError);
+          }
         }
         return;
       }
