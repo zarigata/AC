@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { mkdirSync, existsSync, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdirSync, existsSync, readFile, writeFile, rm, writeFileSync, readFileSync, rmSync } from "node:fs/promises";
 import { dirname, join, extname, basename } from "node:path";
 import { Database } from "node:sqlite";
 import { open } from "node:sqlite";
@@ -1603,7 +1603,7 @@ export class AgentRegistry {
         // Save actual file to disk with enhanced error handling
         const filePath = join(this.filesDir, fileId);
         try {
-          writeFileSync(filePath, content);
+          await writeFile(filePath, content);
         } catch (fileErr) {
           // File write failed, rollback the database record
           this.db.exec('ROLLBACK');
@@ -1731,7 +1731,7 @@ export class AgentRegistry {
       // Read file content
       const filePath = join(this.filesDir, fileId);
       if (existsSync(filePath)) {
-        processedFile.content = readFileSync(filePath, 'utf8');
+        processedFile.content = await readFile(filePath, 'utf8');
       } else {
         throw new Error('File content not found on disk');
       }
@@ -1766,7 +1766,7 @@ export class AgentRegistry {
       // Delete file from disk
       const filePath = join(this.filesDir, fileId);
       if (existsSync(filePath)) {
-        rmSync(filePath, { force: true });
+        await rm(filePath, { force: true });
       }
       
       // Delete file record from database
