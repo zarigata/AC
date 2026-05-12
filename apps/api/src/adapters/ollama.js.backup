@@ -34,15 +34,13 @@ export class OllamaAdapter {
         throw new Error('Invalid protocol: only http and https are supported');
       }
       
-      // Comprehensive hostname validation with enhanced security
+      // Comprehensive hostname validation
       const hostname = url.hostname;
       
       // Check for dangerous hostname patterns
       const dangerousPatterns = [
         /^.*\.internal$/, /^.*\.local$/, /^.*\.lan$/,
-        /^.*\.(test|staging|dev)\.internal$/, /\.(development|staging)\./,
-        /^.*\.internal\.[a-zA-Z]{2,}$/, /^.*\.corp\.[a-zA-Z]{2,}$/, /^.*\.company\.[a-zA-Z]{2,}$/,
-        /^.*\.priv\.[a-zA-Z]{2,}$/, /^.*\.home\.[a-zA-Z]{2,}$/
+        /^.*\.(test|staging|dev)\.internal$/, /\.(development|staging)\./
       ];
       
       if (dangerousPatterns.some(pattern => pattern.test(hostname))) {
@@ -51,9 +49,8 @@ export class OllamaAdapter {
       
       // Allow specific safe patterns
       const allowedPatterns = [
-        /^(localhost|127\.0\.0\.1|0\.0\.0\.0)$/,
+        /^(localhost|127\.0\.0\.1)$/,
         /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/, // IPv4
-        /^\[([0-9a-fA-F:]+)\]$/, // IPv6 in brackets
         /^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$/, // Public domain
         /^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}\.[a-zA-Z]{2,}$/ // Subdomain
       ];
@@ -61,16 +58,6 @@ export class OllamaAdapter {
       const isAllowed = allowedPatterns.some(pattern => pattern.test(hostname));
       if (!isAllowed) {
         throw new Error('Invalid hostname: only localhost, IP addresses, or valid public domains are allowed');
-      }
-      
-      // Additional security: check for hostname length and valid characters
-      if (hostname.length > 253) {
-        throw new Error('Hostname too long');
-      }
-      
-      // Check for valid hostname characters
-      if (!/^[a-zA-Z0-9.-]+$/.test(hostname.replace(/\[|\]/g, ''))) {
-        throw new Error('Hostname contains invalid characters');
       }
       
       // Port validation with security bounds
@@ -97,26 +84,11 @@ export class OllamaAdapter {
         throw new Error('URL contains credentials - security risk');
       }
       
-      // Validate path is simple and safe with comprehensive checking
+      // Validate path is simple and safe
       if (url.pathname && url.pathname !== '/') {
-        const dangerousPathChars = ['<', '>', '"', "'", '{', '}', '[', ']', '|', '\\', '^', ';', '?', '#', '%'];
+        const dangerousPathChars = ['<', '>', '"', "'', '{', '}', '[', ']', '|', '\\', '^'];
         if (dangerousPathChars.some(char => url.pathname.includes(char))) {
           throw new Error('URL contains dangerous characters in path');
-        }
-        
-        // Check for path traversal attempts
-        if (url.pathname.includes('../') || url.pathname.startsWith('./') || url.pathname.includes('/../')) {
-          throw new Error('URL contains path traversal attempts');
-        }
-        
-        // Check for excessively long paths
-        if (url.pathname.length > 1024) {
-          throw new Error('URL path too long');
-        }
-        
-        // Check for encoded characters that might be suspicious
-        if (/%3C|%3E|%22|%27|%7B|%7D|%5B|%5D|%7C|%5C|%60|%3B|%3F|%23|%25/.test(url.pathname)) {
-          throw new Error('URL contains suspicious encoded characters');
         }
       }
     } catch (err) {

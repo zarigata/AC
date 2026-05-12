@@ -170,7 +170,7 @@ const ensureString = (value, field, min, max) => {
     [/SELECT\s+/gi, /INSERT\s+/gi, /UPDATE\s+/gi, /DELETE\s+/gi],
     [/DROP\s+/gi, /CREATE\s+/gi, /ALTER\s+/gi, /;\s*--/g],
     [/\x00/g, /[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]/g],
-    /[\u0000-\u001F\u007F-\u009F]/g, /\.\./g
+    [/[\u0000-\u001F\u007F-\u009F]/g], [/\.\./g]
   ];
   
   for (const group of patternGroups) {
