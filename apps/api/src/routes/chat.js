@@ -5,13 +5,18 @@
 import { applyRateLimit } from "../middleware/security.js";
 import { createProvider } from "../adapters/ollama.js";
 import { readRequestBody } from "../middleware/requestHandler.js";
+import { sessionManager } from "../database/sessionManager.js";
 
 export function registerChatRoutes(server, registry, providers, failoverChains, settings) {
   /**
    * Handle direct chat provider requests (no agent needed)
+   * Skip session-related endpoints as they have their own handlers
    */
   const handleDirectChat = async (request, response) => {
     if (request.method !== "POST" || !request.url?.startsWith("/api/chat")) return false;
+    
+    // Skip session endpoints - they have their own handlers
+    if (request.url?.startsWith("/api/chat/sessions")) return false;
 
     try {
       // Apply rate limiting for direct chat
@@ -20,6 +25,45 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
       }
       
       const body = await readRequestBody(request);
+      
+      // Session handling
+      let sessionId = null;
+      let session = null;
+      
+      // Check for session ID in header or body
+      sessionId = request.headers['x-session-id'] || body.sessionId;
+      
+      if (sessionId) {
+        try {
+          session = await sessionManager.getSession(sessionId);
+          if (!session) {
+            response.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+            response.end(JSON.stringify({ error: "Session not found" }));
+            return true;
+          }
+        } catch (error) {
+          console.error('Error loading session:', error);
+          response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+          response.end(JSON.stringify({ error: "Failed to load session" }));
+          return true;
+        }
+      } else {
+        // Create new session
+        const userId = request.headers['x-user-id'] || `user_${request.socket.remoteAddress}`;
+        try {
+          session = await sessionManager.createSession(userId, {
+            title: body.title || 'New Chat',
+            agentId: body.agentId || null,
+            metadata: body.metadata || {}
+          });
+          sessionId = session.id;
+        } catch (error) {
+          console.error('Error creating session:', error);
+          response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+          response.end(JSON.stringify({ error: "Failed to create session" }));
+          return true;
+        }
+      }
       
       // Validate provider name with enhanced security
       if (!body.provider || typeof body.provider !== 'string' || body.provider.length > 80 || body.provider.length < 1) {
@@ -118,11 +162,30 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
         try {
           if (provider.health && provider.chatStream) {
             // For failover chains, they handle streaming themselves
-            await provider.chatStream(messages, {
+            
+            // Save user message to session first
+            const userMessageData = {
+              role: 'user',
+              content: body.messages[body.messages.length - 1].content
+            };
+            await sessionManager.saveMessage(sessionId, userMessageData, {
+              metadata: {
+                provider: providerName,
+                model: body.model,
+                temperature: body.temperature,
+                maxTokens: body.maxTokens
+              }
+            });
+            
+            let accumulatedContent = "";
+            
+            await provider.chatStream(body.messages, {
               model: body.model,
               temperature: body.temperature,
               maxTokens: body.maxTokens,
-            }, (chunk) => {
+            }, async (chunk) => {
+              accumulatedContent += chunk.content || "";
+              
               // Send SSE event with failover metadata if present
               const eventData = JSON.stringify({
                 ...chunk,
@@ -130,11 +193,29 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
                 timestamp: Date.now()
               });
               response.write(`data: ${eventData}\n\n`);
-            }, (finalResult) => {
+            }, async (finalResult) => {
+              // Save assistant response to session
+              const assistantMessageData = {
+                role: 'assistant',
+                content: finalResult.content || accumulatedContent,
+                tokensUsed: finalResult.tokensOut,
+                responseTimeMs: finalResult.duration
+              };
+              await sessionManager.saveMessage(sessionId, assistantMessageData, {
+                metadata: {
+                  provider: providerName,
+                  model: finalResult.model,
+                  tokensIn: finalResult.tokensIn,
+                  tokensOut: finalResult.tokensOut
+                }
+              });
+              
               // Send final event with failover metadata if present
               const eventData = JSON.stringify({
                 ...finalResult,
                 provider: providerName,
+                sessionId: sessionId,
+                sessionTitle: session.title,
                 timestamp: Date.now()
               });
               response.write(`data: ${eventData}\n\n`);
@@ -142,15 +223,30 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
             });
           } else {
             // For regular providers, use the old method
+            
+            // Save user message to session first
+            const userMessageData = {
+              role: 'user',
+              content: body.messages[body.messages.length - 1].content
+            };
+            await sessionManager.saveMessage(sessionId, userMessageData, {
+              metadata: {
+                provider: providerName,
+                model: body.model,
+                temperature: body.temperature,
+                maxTokens: body.maxTokens
+              }
+            });
+            
             let accumulatedContent = "";
             let accumulatedTokensIn = 0;
             let accumulatedTokensOut = 0;
             
-            await provider.chatStream(messages, {
+            await provider.chatStream(body.messages, {
               model: body.model,
               temperature: body.temperature,
               maxTokens: body.maxTokens,
-            }, (chunk) => {
+            }, async (chunk) => {
               accumulatedContent += chunk.content || "";
               accumulatedTokensIn += chunk.tokensIn || 0;
               accumulatedTokensOut += chunk.tokensOut || 0;
@@ -164,11 +260,29 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
                 duration: chunk.duration || 0,
                 model: chunk.model || body.model || providerName,
                 provider: providerName,
-                done: chunk.done || false
+                done: chunk.done || false,
+                sessionId: sessionId,
+                sessionTitle: session.title
               });
               
               response.write(`data: ${eventData}\n\n`);
-            }, (finalResult) => {
+            }, async (finalResult) => {
+              // Save assistant response to session
+              const assistantMessageData = {
+                role: 'assistant',
+                content: finalResult.content || accumulatedContent,
+                tokensUsed: finalResult.tokensOut,
+                responseTimeMs: finalResult.duration
+              };
+              await sessionManager.saveMessage(sessionId, assistantMessageData, {
+                metadata: {
+                  provider: providerName,
+                  model: finalResult.model,
+                  tokensIn: finalResult.tokensIn,
+                  tokensOut: finalResult.tokensOut
+                }
+              });
+              
               // Send final event
               const eventData = JSON.stringify({
                 content: finalResult.content || "",
@@ -179,7 +293,9 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
                 model: finalResult.model || body.model || providerName,
                 provider: providerName,
                 done: true,
-                final: true
+                final: true,
+                sessionId: sessionId,
+                sessionTitle: session.title
               });
               
               response.write(`data: ${eventData}\n\n`);
@@ -201,11 +317,43 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
 
       // Regular (non-streaming) request
       try {
-        const result = await provider.chat(messages, {
+        // Save user message to session
+        const userMessageData = {
+          role: 'user',
+          content: body.messages[body.messages.length - 1].content
+        };
+        await sessionManager.saveMessage(sessionId, userMessageData, {
+          metadata: {
+            provider: providerName,
+            model: body.model,
+            temperature: body.temperature,
+            maxTokens: body.maxTokens
+          }
+        });
+        
+        const result = await provider.chat(body.messages, {
           model: body.model,
           temperature: body.temperature,
           maxTokens: body.maxTokens,
         });
+        
+        // Save assistant response to session
+        const assistantMessageData = {
+          role: 'assistant',
+          content: result.content,
+          tokensUsed: result.tokensOut,
+          responseTimeMs: result.duration
+        };
+        await sessionManager.saveMessage(sessionId, assistantMessageData, {
+          metadata: {
+            provider: providerName,
+            model: result.model,
+            tokensIn: result.tokensIn,
+            tokensOut: result.tokensOut
+          }
+        });
+        
+        // Include session ID in response for client to maintain context
         response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         response.end(JSON.stringify({
           content: result.content,
@@ -214,6 +362,8 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
           duration: result.duration,
           model: result.model,
           provider: providerName,
+          sessionId: sessionId,
+          sessionTitle: session.title
         }));
         return true;
       } catch (e) {
@@ -392,7 +542,21 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
             role: m.role,
             content: m.content
           })) : 
-          [{ role: "user", content: userMessage }];
+          [];
+        
+        // Add system prompt if defined for this agent
+        if (agent.systemPrompt && agent.systemPrompt.trim()) {
+          history.unshift({
+            role: "system",
+            content: agent.systemPrompt.trim()
+          });
+        }
+        
+        // Add user message
+        history.push({
+          role: "user",
+          content: userMessage
+        });
 
         // Call provider (default to ollama, agent can override)
         const chatProvider = providers[agent.provider?.toLowerCase()] || providers.ollama;
@@ -500,6 +664,14 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
         role: m.role,
         content: m.content
       }));
+      
+      // Add system prompt if defined for this agent (at the beginning of the conversation)
+      if (agent.systemPrompt && agent.systemPrompt.trim()) {
+        history.unshift({
+          role: "system",
+          content: agent.systemPrompt.trim()
+        });
+      }
 
       // Call provider (default to ollama, agent can override)
       const chatProvider = createProvider(agent.provider?.toLowerCase()) || createProvider('ollama');
@@ -582,5 +754,151 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
 
     // If no handler matched, let the main server handle it
     return false;
+  });
+
+  // === Session Management Endpoints ===
+
+  // GET /api/chat/sessions - List user's sessions
+  server.on('request', async (req, res) => {
+    if (req.method === "GET" && req.url?.startsWith("/api/chat/sessions")) {
+      try {
+        // Apply rate limiting
+        if (!applyRateLimit(req, res)) {
+          return true;
+        }
+
+        // Generate a user ID from the client IP for demonstration
+        // In production, this would come from authentication
+        const userId = req.headers['x-user-id'] || `user_${req.socket.remoteAddress}`;
+        
+        const sessions = await sessionManager.getUserSessions(userId, 20);
+        
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ success: true, sessions }));
+        return true;
+      } catch (error) {
+        console.error('Error getting sessions:', error);
+        res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "Failed to get sessions" }));
+        return true;
+      }
+    }
+  });
+
+  // GET /api/chat/sessions/:sessionId - Get specific session
+  server.on('request', async (req, res) => {
+    if (req.method === "GET" && req.url?.startsWith("/api/chat/sessions/")) {
+      try {
+        const sessionId = req.url.split('/').pop();
+        
+        // Apply rate limiting
+        if (!applyRateLimit(req, res)) {
+          return true;
+        }
+        
+        const session = await sessionManager.getSession(sessionId);
+        
+        if (!session) {
+          res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ error: "Session not found" }));
+          return true;
+        }
+        
+        // Get messages for this session
+        const messages = await sessionManager.getMessages(sessionId);
+        
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ success: true, session, messages }));
+        return true;
+      } catch (error) {
+        console.error('Error getting session:', error);
+        res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "Failed to get session" }));
+        return true;
+      }
+    }
+  });
+
+  // POST /api/chat/sessions - Create new session
+  server.on('request', async (req, res) => {
+    if (req.method === "POST" && req.url?.startsWith("/api/chat/sessions")) {
+      try {
+        // Apply rate limiting
+        if (!applyRateLimit(req, res)) {
+          return true;
+        }
+
+        const body = await readRequestBody(req);
+        const userId = req.headers['x-user-id'] || `user_${req.socket.remoteAddress}`;
+        
+        const session = await sessionManager.createSession(userId, {
+          title: body.title || 'New Chat',
+          agentId: body.agentId || null,
+          metadata: body.metadata || {}
+        });
+        
+        res.writeHead(201, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ success: true, session }));
+        return true;
+      } catch (error) {
+        console.error('Error creating session:', error);
+        res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "Failed to create session" }));
+        return true;
+      }
+    }
+  });
+
+  // DELETE /api/chat/sessions/:sessionId - Delete session
+  server.on('request', async (req, res) => {
+    if (req.method === "DELETE" && req.url?.startsWith("/api/chat/sessions/")) {
+      try {
+        const sessionId = req.url.split('/').pop();
+        
+        // Apply rate limiting
+        if (!applyRateLimit(req, res)) {
+          return true;
+        }
+        
+        await sessionManager.deleteSession(sessionId);
+        
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ success: true, message: 'Session deleted' }));
+        return true;
+      } catch (error) {
+        console.error('Error deleting session:', error);
+        res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "Failed to delete session" }));
+        return true;
+      }
+    }
+  });
+
+  // PATCH /api/chat/sessions/:sessionId - Update session
+  server.on('request', async (req, res) => {
+    if (req.method === "PATCH" && req.url?.startsWith("/api/chat/sessions/")) {
+      try {
+        const sessionId = req.url.split('/').pop();
+        
+        // Apply rate limiting
+        if (!applyRateLimit(req, res)) {
+          return true;
+        }
+        
+        const body = await readRequestBody(req);
+        await sessionManager.updateSession(sessionId, body);
+        
+        const session = await sessionManager.getSession(sessionId);
+        
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ success: true, session }));
+        return true;
+      } catch (error) {
+        console.error('Error updating session:', error);
+        res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "Failed to update session" }));
+        return true;
+      }
+    }
   });
 }

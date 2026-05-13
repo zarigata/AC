@@ -15,7 +15,7 @@ const createAgentSchema = z.object({
   peerAccess: z.boolean().optional().default(false),
   // Optional fields for backward compatibility
   description: z.string().max(500).optional().nullable(),
-  systemPrompt: z.string().optional().nullable(),
+  systemPrompt: z.string().max(2000).optional().nullable(),
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().min(1).max(32000).optional(),
   enabled: z.boolean().optional(),
@@ -32,7 +32,7 @@ const updateAgentSchema = z.object({
   peerAccess: z.boolean().optional(),
   // Optional fields for backward compatibility
   description: z.string().max(500).optional().nullable(),
-  systemPrompt: z.string().optional().nullable(),
+  systemPrompt: z.string().max(2000).optional().nullable(),
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().min(1).max(32000).optional(),
   enabled: z.boolean().optional(),

@@ -86,7 +86,7 @@ function createRateLimiter(config = {}) {
   return async (req, res, next) => {
     try {
       // Skip rate limiting for health endpoints
-      if (finalConfig.skipPaths.some(path => req.path.startsWith(path))) {
+      if (finalConfig.skipPaths.some(path => (req.url || req.path || '').startsWith(path))) {
         return next();
       }
 

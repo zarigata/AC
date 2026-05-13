@@ -5,8 +5,15 @@
 import {
   getProviderReadinessSummary,
   listProviderConnections,
-  listProviders
-} from "../../../packages/shared/src/index.js";
+  listProviders,
+  providerStatusValues,
+  providerCategoryValues,
+  providerReadinessValues,
+  firstWaveProviderIds,
+  providerCatalog
+} from "../shared/simpleShared.js";
+
+// The imported functions are already available - no need to redefine them
 
 import { createFailoverChain } from "../adapters/failover.js";
 

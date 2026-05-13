@@ -84,6 +84,7 @@ export const parseAgent = (agent) => {
     id: agent.id,
     name: ensureString(agent.name, "name", 2, 80),
     purpose: ensureString(agent.purpose, "purpose", 10, 240),
+    systemPrompt: agent.systemPrompt ? ensureString(agent.systemPrompt, "systemPrompt", 0, 2000) : null,
     provider: getProviderById(agent.provider).id,
     model: ensureString(agent.model, "model", 2, 120),
     isolationMode: ensureEnum(agent.isolationMode, "isolationMode", isolationModeValues),
@@ -105,6 +106,7 @@ export const parseCreateAgentInput = (input) => {
   return {
     name: ensureString(input.name, "name", 2, 80),
     purpose: ensureString(input.purpose, "purpose", 10, 240),
+    systemPrompt: input.systemPrompt ? ensureString(input.systemPrompt, "systemPrompt", 0, 2000) : null,
     provider: provider.id,
     model: ensureString(input.model, "model", 2, 120),
     isolationMode: ensureEnum(input.isolationMode, "isolationMode", isolationModeValues),

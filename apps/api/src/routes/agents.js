@@ -5,7 +5,7 @@
 import { sanitizeError, applyRateLimit } from "../middleware/security.js";
 import { readRequestBody } from "../middleware/requestHandler.js";
 import { createAgentSchema, updateAgentSchema } from "../middleware/validationMiddleware.js";
-import { parseCreateAgentInput } from "../../../packages/shared/src/index.js";
+import { parseCreateAgentInput } from "../shared/simpleShared.js";
 export function registerAgentRoutes(server, registry, providers, failoverChains, settings) {
   // Agent ID validation pattern
   const agentIdPattern = /^[a-zA-Z0-9-]+$/;
@@ -16,6 +16,11 @@ export function registerAgentRoutes(server, registry, providers, failoverChains,
   const handleSingleAgent = async (request, response) => {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
     const agentMatch = url.pathname.match(/^\/api\/agents\/([\w-]+)$/);
+    
+    // If the URL has more path after the agent ID, this handler shouldn't process it
+    if (agentMatch && url.pathname.length > agentMatch[0].length) {
+      return false;
+    }
 
     if (!agentMatch) return false;
 
@@ -88,6 +93,11 @@ export function registerAgentRoutes(server, registry, providers, failoverChains,
         if (body.purpose && (typeof body.purpose !== 'string' || body.purpose.length > 240)) {
           return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
                  response.end(JSON.stringify({ error: "Invalid agent purpose" }));
+        }
+        
+        if (body.systemPrompt && (typeof body.systemPrompt !== 'string' || body.systemPrompt.length > 2000)) {
+          return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
+                 response.end(JSON.stringify({ error: "Invalid systemPrompt: must be no more than 2000 characters" }));
         }
         
         if (body.maxConcurrentTasks && (!Number.isInteger(body.maxConcurrentTasks) || body.maxConcurrentTasks < 1 || body.maxConcurrentTasks > 32)) {
@@ -297,6 +307,9 @@ export function registerAgentRoutes(server, registry, providers, failoverChains,
    */
   const handleCreateAgent = async (request, response) => {
     if (request.method !== "POST" || !request.url?.startsWith("/api/agents")) return false;
+    
+    // Only match exact /api/agents endpoint, not /api/agents/{id} or /api/agents/{id}/chat
+    if (request.url !== "/api/agents" && !request.url?.startsWith("/api/agents?")) return false;
 
     try {
       // Apply rate limiting for agent creation

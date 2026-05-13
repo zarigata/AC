@@ -49,7 +49,7 @@ function parseOrigins(origins) {
  * @returns {boolean} True if origin is allowed
  */
 function isOriginAllowed(origin, allowedOrigins) {
-  if (!origin || origin === 'null' || origin === undefined) return true;
+  if (!origin || origin === 'null' || !String(origin).trim()) return true;
   
   return allowedOrigins.includes('*') || allowedOrigins.includes(origin);
 }
@@ -71,7 +71,7 @@ function getCorsHeaders(req, config = DEFAULT_CONFIG) {
     headers['Access-Control-Allow-Headers'] = config.allowedHeaders;
     headers['Access-Control-Max-Age'] = config.maxAge.toString();
     
-    if (isOriginAllowed(origin, allowedOrigins)) {
+    if (origin && isOriginAllowed(origin, allowedOrigins)) {
       headers['Access-Control-Allow-Origin'] = origin;
       if (config.allowCredentials) {
         headers['Access-Control-Allow-Credentials'] = 'true';
@@ -84,7 +84,7 @@ function getCorsHeaders(req, config = DEFAULT_CONFIG) {
   }
   
   // Handle regular requests
-  if (isOriginAllowed(origin, allowedOrigins)) {
+  if (origin && isOriginAllowed(origin, allowedOrigins)) {
     headers['Access-Control-Allow-Origin'] = origin;
     
     if (config.allowCredentials) {

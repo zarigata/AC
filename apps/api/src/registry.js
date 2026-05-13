@@ -112,6 +112,7 @@ export class AgentRegistry {
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             purpose TEXT NOT NULL,
+            systemPrompt TEXT DEFAULT NULL,
             status TEXT NOT NULL,
             provider TEXT NOT NULL,
             model TEXT NOT NULL,
@@ -269,6 +270,7 @@ export class AgentRegistry {
       validateInput(input, {
         name: { required: true, type: 'string', minLength: 2, maxLength: 80 },
         purpose: { required: true, type: 'string', minLength: 10, maxLength: 240 },
+        systemPrompt: { required: false, type: 'string', minLength: 0, maxLength: 2000 },
         provider: { required: true, type: 'string', minLength: 2, maxLength: 80 },
         model: { required: true, type: 'string', minLength: 2, maxLength: 120 },
         isolationMode: { required: true, type: 'string', enum: ['isolated', 'selective', 'mesh'] },
@@ -297,6 +299,7 @@ export class AgentRegistry {
         status: "idle",
         createdAt: timestamp,
         updatedAt: timestamp,
+        systemPrompt: input.systemPrompt || null,
         ...parsed
       };
 
@@ -310,9 +313,9 @@ export class AgentRegistry {
         const insertStmt = this.db.prepare(
           `
             INSERT INTO agents (
-              id, name, purpose, status, provider, model, isolationMode,
+              id, name, purpose, systemPrompt, status, provider, model, isolationMode,
               maxConcurrentTasks, peerAccess, createdAt, updatedAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `
         );
 
@@ -320,6 +323,7 @@ export class AgentRegistry {
           agent.id,
           agent.name,
           agent.purpose,
+          agent.systemPrompt,
           agent.status,
           agent.provider,
           agent.model,
@@ -402,7 +406,7 @@ export class AgentRegistry {
       const existing = this.getAgent(id);
       if (!existing) return null;
 
-      const allowed = ["name", "purpose", "status", "provider", "model", "isolationMode", "maxConcurrentTasks", "peerAccess"];
+      const allowed = ["name", "purpose", "systemPrompt", "status", "provider", "model", "isolationMode", "maxConcurrentTasks", "peerAccess"];
       const fields = [];
       const values = [];
 
@@ -426,6 +430,10 @@ export class AgentRegistry {
           
           if (key === "purpose" && (typeof value !== "string" || value.length > 240)) {
             throw new Error(`Invalid ${key} value`);
+          }
+          
+          if (key === "systemPrompt" && (typeof value !== "string" || value.length > 2000)) {
+            throw new Error(`Invalid ${key} value: must be no more than 2000 characters`);
           }
           
           fields.push(`${key} = ?`);
