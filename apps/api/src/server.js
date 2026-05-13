@@ -13,6 +13,8 @@ import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerProviderRoutes } from "./routes/providers.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { globalErrorHandler, notFoundHandler, requestLogger } from "./middleware/errorMiddleware.js";
+import createRateLimiter from "./middleware/rateLimiter.js";
+import createAuthMiddleware from "./middleware/authMiddleware.js";
 
 
 import { settings, serverState, initializeServer, startServer, getServerStatus } from "./config/serverConfig.js";
@@ -62,17 +64,63 @@ async function main() {
 
     console.log(`Registered ${routeHandlers.length} route handler(s)`);
 
+    // Initialize rate limiter
+    const rateLimiter = createRateLimiter({
+      ipWindowMs: 15 * 60 * 1000, // 15 minutes
+      ipMaxRequests: 100, // max requests per IP per window
+      apiKeyWindowMs: 60 * 1000, // 1 minute  
+      apiKeyMaxRequests: 60 // max requests per API key per window
+    });
+    console.log('Rate limiter initialized');
+
+    // Initialize authentication middleware
+    const authMiddleware = createAuthMiddleware({
+      jwtSecret: process.env.ZSIISTANT_JWT_SECRET || 'your-secret-key-change-in-production',
+      jwtExpiresIn: '24h'
+    });
+    console.log('Authentication middleware initialized');
+
     // Single request dispatcher that runs handlers sequentially
     server.on('request', async (req, res) => {
       try {
+        // Apply rate limiter middleware
+        try {
+          await new Promise((resolve, reject) => {
+            rateLimiter(req, res, (err) => {
+              if (err) {
+                reject(err);
+              } else {
+                resolve();
+              }
+            });
+          });
+        } catch (err) {
+          // Rate limiter already sent response, so we're done
+          return;
+        }
 
-        
+        // Apply authentication middleware
+        try {
+          await new Promise((resolve, reject) => {
+            authMiddleware(req, res, (err) => {
+              if (err) {
+                reject(err);
+              } else {
+                resolve();
+              }
+            });
+          });
+        } catch (err) {
+          // Authentication middleware already sent response, so we're done
+          return;
+        }
+
         // Log request
         if (typeof requestLogger === 'function') {
           requestLogger(req, res, () => {});
         }
-            
-            // Run each route handler sequentially until one handles the request
+        
+        // Run each route handler sequentially until one handles the request
         for (const handler of routeHandlers) {
           if (res.headersSent) break;
           try {

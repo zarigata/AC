@@ -2,6 +2,10 @@
  * Chat Routes - Handle all chat-related API endpoints
  */
 
+import { applyRateLimit } from "../middleware/security.js";
+import { createProvider } from "../adapters/ollama.js";
+import { readRequestBody } from "../middleware/requestHandler.js";
+
 export function registerChatRoutes(server, registry, providers, failoverChains, settings) {
   /**
    * Handle direct chat provider requests (no agent needed)
@@ -10,20 +14,93 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
     if (request.method !== "POST" || !request.url?.startsWith("/api/chat")) return false;
 
     try {
+      // Apply rate limiting for direct chat
+      if (!applyRateLimit(request, response)) {
+        return true; // Rate limit exceeded, response already sent
+      }
+      
       const body = await readRequestBody(request);
-      const providerName = body.provider || DEFAULT_PROVIDER;
-      const provider = getProvider(providerName);
-      if (!provider) {
+      
+      // Validate provider name with enhanced security
+      if (!body.provider || typeof body.provider !== 'string' || body.provider.length > 80 || body.provider.length < 1) {
         response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        response.end(JSON.stringify({ error: `Provider '${providerName}' not configured. Available: ${Object.keys(providers).concat(Object.keys(failoverChains)).join(', ')}` }));
+        response.end(JSON.stringify({ error: "Invalid provider name" }));
+        return true;
+      }
+      
+      // Sanitize provider name to prevent injection
+      const providerName = body.provider.trim();
+      const provider = createProvider(providerName);
+      if (!provider) {
+        // Don't expose all available providers for security reasons
+        response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ error: `Provider '${providerName}' not configured` }));
         return true;
       }
 
-      const messages = body.messages || [{ role: "user", content: body.message || "" }];
-      if (!messages.length || !messages[messages.length - 1]?.content?.trim()) {
-        response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        response.end(JSON.stringify({ error: "Message is required" }));
-        return true;
+      // Validate messages array with enhanced security
+      if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
+        if (!body.message || typeof body.message !== 'string' || body.message.trim().length === 0) {
+          response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+          response.end(JSON.stringify({ error: "Message or messages array is required" }));
+          return true;
+        }
+        // Convert single message to array format
+        body.messages = [{ role: "user", content: body.message }];
+      } else {
+        // Validate each message in the array
+        if (body.messages.length > 100) {
+          response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+          response.end(JSON.stringify({ error: "Messages array cannot exceed 100 messages" }));
+          return true;
+        }
+        
+        for (let i = 0; i < body.messages.length; i++) {
+          const msg = body.messages[i];
+          if (!msg || typeof msg !== 'object') {
+            response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+            response.end(JSON.stringify({ error: `Message ${i} must be an object` }));
+            return true;
+          }
+          
+          if (!msg.role || !['user', 'assistant', 'system'].includes(msg.role)) {
+            response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+            response.end(JSON.stringify({ error: `Invalid role in message ${i}: ${msg.role}` }));
+            return true;
+          }
+          
+          if (!msg.content || typeof msg.content !== 'string' || msg.content.trim().length === 0) {
+            response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+            response.end(JSON.stringify({ error: `Message ${i} content is required` }));
+            return true;
+          }
+          
+          // Enhanced security: Check for potentially dangerous content
+          const dangerousPatterns = [
+            /<script[^>]*>.*?<\/script>/gi,
+            /javascript:/gi,
+            /eval\(/gi,
+            /exec\(/gi,
+            /Function\(/gi,
+            /on\w+\s*=/gi,
+            /SELECT\s+/gi,
+            /INSERT\s+/gi,
+            /UPDATE\s+/gi,
+            /DELETE\s+/gi,
+            /DROP\s+/gi,
+            /CREATE\s+/gi,
+            /ALTER\s+/gi,
+            /;\s*--/g
+          ];
+          
+          for (const pattern of dangerousPatterns) {
+            if (pattern.test(msg.content)) {
+              response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+              response.end(JSON.stringify({ error: `Message ${i} contains potentially dangerous content` }));
+              return true;
+            }
+          }
+        }
       }
 
       // Check if streaming is requested
@@ -162,6 +239,57 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
     if (!chatMatch) return false;
 
     const agentId = chatMatch[1];
+    
+    // Apply rate limiting for agent chat
+    if (!applyRateLimit(request, response)) {
+      return true; // Rate limit exceeded, response already sent
+    }
+    
+    // Enhanced agent ID validation with comprehensive security checks
+    if (!agentId || typeof agentId !== 'string' || agentId.length > 64 || agentId.length < 1) {
+      response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ error: "Invalid agent ID format" }));
+      return true;
+    }
+    
+    // Check for SQL injection patterns
+    const sqlKeywords = ['select', 'insert', 'update', 'delete', 'drop', 'create', 'alter', 'union', 'exec', 'execute', 'script', 'javascript', 'iframe'];
+    const dangerousPatterns = [
+      /;\s*--/,
+      /'\s*or\s*1=1/i,
+      /\b(and|or)\s*\d+=\d+/i,
+      /\b(and|or)\s*'\s*=/i,
+      /<script[^>]*>/i,
+      /javascript:/i,
+      /<iframe/i
+    ];
+    
+    const lowerAgentId = agentId.toLowerCase();
+    for (const keyword of sqlKeywords) {
+      if (lowerAgentId.includes(keyword)) {
+        response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ error: "Invalid agent ID: contains potentially malicious content" }));
+        return true;
+      }
+    }
+    
+    for (const pattern of dangerousPatterns) {
+      if (pattern.test(agentId)) {
+        response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ error: "Invalid agent ID: contains potentially malicious content" }));
+        return true;
+      }
+    }
+    
+    // Check for potentially dangerous agent IDs
+    if (agentId.toLowerCase().includes('admin') || 
+        agentId.toLowerCase().includes('system') || 
+        agentId.toLowerCase().includes('root')) {
+      response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ error: "Invalid agent ID: reserved name" }));
+      return true;
+    }
+    
     const agent = registry.getAgent(agentId);
     if (!agent) {
       response.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
@@ -171,11 +299,60 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
 
     try {
       const body = await readRequestBody(request);
-      const userMessage = body.message || body.content || "";
-      if (!userMessage.trim()) {
+      
+      // Validate user message with enhanced security
+      let userMessage;
+      if (body.message) {
+        if (typeof body.message !== 'string' || body.message.trim().length === 0) {
+          response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+          response.end(JSON.stringify({ error: "Message must be a non-empty string" }));
+          return true;
+        }
+        userMessage = body.message.trim();
+      } else if (body.content) {
+        if (typeof body.content !== 'string' || body.content.trim().length === 0) {
+          response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+          response.end(JSON.stringify({ error: "Content must be a non-empty string" }));
+          return true;
+        }
+        userMessage = body.content.trim();
+      } else {
         response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        response.end(JSON.stringify({ error: "Message is required" }));
+        response.end(JSON.stringify({ error: "Message or content is required" }));
         return true;
+      }
+      
+      // Enhanced security: Check message length and content
+      if (userMessage.length > 16000) {
+        response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ error: "Message too long: maximum 16000 characters allowed" }));
+        return true;
+      }
+      
+      // Enhanced security: Check for potentially dangerous content
+      const dangerousPatterns = [
+        /<script[^>]*>.*?<\/script>/gi,
+        /javascript:/gi,
+        /eval\(/gi,
+        /exec\(/gi,
+        /Function\(/gi,
+        /on\w+\s*=/gi,
+        /SELECT\s+/gi,
+        /INSERT\s+/gi,
+        /UPDATE\s+/gi,
+        /DELETE\s+/gi,
+        /DROP\s+/gi,
+        /CREATE\s+/gi,
+        /ALTER\s+/gi,
+        /;\s*--/g
+      ];
+      
+      for (const pattern of dangerousPatterns) {
+        if (pattern.test(userMessage)) {
+          response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+          response.end(JSON.stringify({ error: "Message contains potentially dangerous content" }));
+          return true;
+        }
       }
 
       // Check if streaming is requested
@@ -218,7 +395,7 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
           [{ role: "user", content: userMessage }];
 
         // Call provider (default to ollama, agent can override)
-        const chatProvider = providers[agent.provider?.toLowerCase()] || providers[DEFAULT_PROVIDER];
+        const chatProvider = providers[agent.provider?.toLowerCase()] || providers.ollama;
         if (!chatProvider) {
           const eventData = JSON.stringify({
             error: `No provider configured for agent '${agent.name}' (tried '${agent.provider}')`,
@@ -325,7 +502,7 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
       }));
 
       // Call provider (default to ollama, agent can override)
-      const chatProvider = getProvider(agent.provider?.toLowerCase()) || getProvider(DEFAULT_PROVIDER);
+      const chatProvider = createProvider(agent.provider?.toLowerCase()) || createProvider('ollama');
       if (!chatProvider) {
         response.writeHead(502, { "Content-Type": "application/json; charset=utf-8" });
         response.end(JSON.stringify({ error: `No provider configured for agent '${agent.name}' (tried '${agent.provider}')` }));

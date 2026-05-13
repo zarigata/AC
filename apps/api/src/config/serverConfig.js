@@ -59,11 +59,7 @@ export const initServerConfig = () => {
  * Create and configure HTTP server
  */
 export const createServerInstance = (port, host) => {
-  const server = createServer((req, res) => {
-    // Default 404 handler
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Not found' }));
-  });
+  const server = createServer();
   
   // WebSocket upgrade handler
   server.on('upgrade', (request, socket, head) => {
@@ -261,6 +257,16 @@ export const initializeServer = async (registry) => {
   applyRateLimitMiddleware(server, registry);
   
   // Setup error handling
+  const setupErrorHandling = (server) => {
+    server.on('error', (error) => {
+      if (error.code === 'EADDRINUSE') {
+        console.error(`Port ${config.port} is already in use`);
+        process.exit(1);
+      } else {
+        console.error('Server error:', error);
+      }
+    });
+  };
   setupErrorHandling(server);
   
   // Setup job processor
@@ -344,7 +350,6 @@ export default {
   initializeRateLimiting,
   setupJobProcessor,
   applyRateLimitMiddleware,
-  setupErrorHandling,
   setupGracefulShutdown,
   initializeServer,
   startServer,

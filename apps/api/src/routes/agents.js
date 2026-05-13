@@ -2,6 +2,10 @@
  * Agent Routes - Handle all agent-related API endpoints
  */
 
+import { sanitizeError, applyRateLimit } from "../middleware/security.js";
+import { readRequestBody } from "../middleware/requestHandler.js";
+import { createAgentSchema, updateAgentSchema } from "../middleware/validationMiddleware.js";
+import { parseCreateAgentInput } from "../../../packages/shared/src/index.js";
 export function registerAgentRoutes(server, registry, providers, failoverChains, settings) {
   // Agent ID validation pattern
   const agentIdPattern = /^[a-zA-Z0-9-]+$/;
@@ -56,6 +60,11 @@ export function registerAgentRoutes(server, registry, providers, failoverChains,
         agentId.toLowerCase().includes('root')) {
       return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
              response.end(JSON.stringify({ error: "Invalid agent ID: reserved name" }));
+    }
+
+    // Apply rate limiting for agent access
+    if (!applyRateLimit(request, response)) {
+      return true; // Rate limit exceeded, response already sent
     }
 
     if (request.method === "GET") {
@@ -290,21 +299,48 @@ export function registerAgentRoutes(server, registry, providers, failoverChains,
     if (request.method !== "POST" || !request.url?.startsWith("/api/agents")) return false;
 
     try {
+      // Apply rate limiting for agent creation
+      if (!applyRateLimit(request, response)) {
+        return true; // Rate limit exceeded, response already sent
+      }
+      
       const body = await readRequestBody(request);
       console.log('DEBUG: Received request body:', body);
       
       // Handle both string and object responses from readRequestBody
       let parsedBody;
+      if (body === null) {
+        console.log('DEBUG: Empty request body');
+        return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
+               response.end(JSON.stringify({ error: "Empty request body" }));
+      }
       if (typeof body === 'string') {
         try {
-          parsedBody = JSON.parse(body);
+          // Enhanced security: Use safer JSON parsing with prototype protection
+          parsedBody = JSON.parse(body, (key, value) => {
+            // Filter out prototype pollution attempts
+            if (key === '__proto__' || key === 'constructor' || key === 'prototype' ||
+                key === '__defineGetter__' || key === '__defineSetter__' || 
+                key === '__lookupGetter__' || key === '__lookupSetter__') {
+              return undefined;
+            }
+            return value;
+          });
           console.log('DEBUG: Parsed string body:', parsedBody);
         } catch (jsonErr) {
           console.log('DEBUG: JSON parse error:', jsonErr.message);
           return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
                  response.end(JSON.stringify({ error: "Invalid JSON format" }));
         }
-      } else if (typeof body === 'object') {
+      } else if (body !== null && typeof body === 'object') {
+        // Enhanced security: Check for prototype pollution in object
+        const suspiciousProps = ['__proto__', 'constructor', 'prototype', '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__'];
+        for (const prop of suspiciousProps) {
+          if (Object.prototype.hasOwnProperty.call(body, prop)) {
+            return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
+                   response.end(JSON.stringify({ error: "Invalid request body: contains suspicious properties" }));
+          }
+        }
         parsedBody = body;
         console.log('DEBUG: Received object body:', parsedBody);
       } else {
@@ -319,8 +355,37 @@ export function registerAgentRoutes(server, registry, providers, failoverChains,
                response.end(JSON.stringify({ error: "Request body must be an object" }));
       }
       
-      // Validate basic structure before calling parseCreateAgentInput
-      const requiredFields = ['name', 'purpose', 'provider', 'model', 'isolationMode', 'maxConcurrentTasks', 'peerAccess'];
+      console.log('DEBUG: Body before validation:', parsedBody);
+      
+      // Apply Zod validation for agent creation
+      try {
+        console.log('DEBUG: Starting validation with schema:', createAgentSchema);
+        const validatedBody = createAgentSchema.parse(parsedBody);
+        parsedBody = validatedBody;
+        console.log('DEBUG: Validation successful! Validated body:', validatedBody);
+      } catch (validationError) {
+        console.log('DEBUG: Validation failed:', validationError);
+        if (validationError.errors && Array.isArray(validationError.errors)) {
+          const errorDetails = validationError.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            code: err.code,
+          }));
+          return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
+                 response.end(JSON.stringify({ 
+                   error: "Validation failed", 
+                   details: errorDetails,
+                   message: "The request contains invalid or missing data fields." 
+                 }));
+        } else {
+          console.log('DEBUG: Validation error without errors array:', validationError);
+          return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
+                 response.end(JSON.stringify({ error: "Validation failed", message: validationError.message || "Invalid input data" }));
+        }
+      }
+      
+      // Validate basic structure after Zod validation
+      const requiredFields = ['name', 'model']; // Only these are required by Zod schema
       for (const field of requiredFields) {
         if (!(field in parsedBody)) {
           console.log('DEBUG: Missing field:', field);
@@ -382,37 +447,52 @@ export function registerAgentRoutes(server, registry, providers, failoverChains,
       }
       
       console.log('DEBUG: Calling parseCreateAgentInput with:', parsedBody);
-      const payload = parseCreateAgentInput(parsedBody);
-      console.log('DEBUG: Parsed payload:', payload);
       
-      console.log('DEBUG: Calling registry.createAgent with:', payload);
-      const agent = registry.createAgent(payload);
-      console.log('DEBUG: Created agent:', agent);
-      
-      console.log('DEBUG: Calling sendJson with 201 and agent object');
-      return response.writeHead(201, { "Content-Type": "application/json; charset=utf-8" }), 
-             response.end(JSON.stringify({ agent }));
-    } catch (err) {
-      // Comprehensive error message sanitization
-      let errorMessage = "Invalid request data";
-      
-      // Log detailed error for debugging (sanitized)
-      const safeErrorMessage = sanitizeError(err.message || "Unknown error");
-      console.log('Agent creation error:', safeErrorMessage);
-      
-      // Provide specific but safe error messages
-      if (err.message && err.message.includes('database')) {
-        errorMessage = "Database operation failed";
-      } else if (err.message && err.message.includes('reserved')) {
-        errorMessage = "Invalid agent name: name not available";
-      } else if (err.message && err.message.includes('validation')) {
-        errorMessage = "Input validation failed";
-      } else if (err.message && err.message.includes('security')) {
-        errorMessage = "Security validation failed";
+      // Validate parsed body before calling parseCreateAgentInput
+      if (!parsedBody || typeof parsedBody !== 'object') {
+        console.log('DEBUG: Parsed body is not an object');
+        return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
+               response.end(JSON.stringify({ error: "Parsed body must be an object" }));
       }
       
-      return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
-             response.end(JSON.stringify({ error: errorMessage }));
+      try {
+        const payload = parseCreateAgentInput(parsedBody);
+        console.log('DEBUG: Parsed payload:', payload);
+        
+        // Create agent using registry
+        const agent = registry.createAgent(payload);
+        console.log('DEBUG: Created agent:', agent);
+        
+        console.log('DEBUG: Calling sendJson with 201 and agent object');
+        return response.writeHead(201, { "Content-Type": "application/json; charset=utf-8" }), 
+               response.end(JSON.stringify({ agent }));
+      } catch (err) {
+        // Comprehensive error message sanitization
+        let errorMessage = "Invalid request data";
+        
+        // Log detailed error for debugging (sanitized)
+        const safeErrorMessage = sanitizeError(err.message || "Unknown error");
+        console.log('Agent creation error:', safeErrorMessage);
+        
+        // Provide specific but safe error messages
+        if (err.message && err.message.includes('database')) {
+          errorMessage = "Database operation failed";
+        } else if (err.message && err.message.includes('reserved')) {
+          errorMessage = "Invalid agent name: name not available";
+        } else if (err.message && err.message.includes('validation')) {
+          errorMessage = "Input validation failed";
+        } else if (err.message && err.message.includes('security')) {
+          errorMessage = "Security validation failed";
+        }
+        
+        return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
+               response.end(JSON.stringify({ error: errorMessage }));
+      }
+    } catch (err) {
+      // Handle any unexpected errors in the main try block
+      console.error('Unexpected error in agent creation:', err);
+      response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ error: "Internal server error" }));
     }
   };
 

@@ -38,7 +38,11 @@ export const readRequestBody = async (request) => {
     
     await Promise.race([readPromise, timeoutPromise]);
     
-    if (!raw || raw.trim().length === 0) return {};
+    // Delay empty body check until after JSON parsing
+    
+    if (!raw || raw.trim().length === 0) {
+      return {};
+    }
     
     try {
       // Use safer JSON parsing with enhanced prototype protection
@@ -126,18 +130,34 @@ export const sendJson = (response, statusCode, payload) => {
     finalPayload = { error: 'Internal server error - invalid status code' };
   }
   
+  // Enhanced security: Define allowed origins explicitly
+  const ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:4000",
+    "http://localhost:5000",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:4000",
+    "http://127.0.0.1:5000",
+    "null", // Allow requests without origin header
+    undefined // Allow requests without origin header
+  ];
+  
   const headers = {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, X-Content-Type-Options",
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "strict-origin-when-cross-origin"
   };
   
-  if (origin && origin !== 'null' && origin !== undefined) {
+  // Secure CORS headers with explicit origin validation
+  if (origin && origin !== 'null' && origin !== undefined && ALLOWED_ORIGINS.includes(origin)) {
     headers["Access-Control-Allow-Origin"] = origin;
     headers["Access-Control-Allow-Credentials"] = "true";
+  } else if (origin === 'null' || origin === undefined) {
+    // Allow requests without origin for local development/testing
+    headers["Access-Control-Allow-Origin"] = "*";
   }
   
   try {
@@ -167,15 +187,34 @@ export const sendJson = (response, statusCode, payload) => {
 
 export const sendError = (response, statusCode, errorType, message, details = null) => {
   const origin = response.getHeader('origin');
+  
+  // Enhanced security: Define allowed origins explicitly
+  const ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:4000",
+    "http://localhost:5000",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:4000",
+    "http://127.0.0.1:5000",
+    "null", // Allow requests without origin header
+    undefined // Allow requests without origin header
+  ];
+  
   const headers = {
     "Content-Type": "application/json; charset=utf-8",
     "X-Content-Type-Options": "nosniff",
-    "X-Frame-Options": "DENY"
+    "X-Frame-Options": "DENY",
+    "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With"
   };
   
-  if (origin && origin !== 'null' && origin !== undefined) {
+  // Secure CORS headers with explicit origin validation
+  if (origin && origin !== 'null' && origin !== undefined && ALLOWED_ORIGINS.includes(origin)) {
     headers["Access-Control-Allow-Origin"] = origin;
     headers["Access-Control-Allow-Credentials"] = "true";
+  } else if (origin === 'null' || origin === undefined) {
+    // Allow requests without origin for local development/testing
+    headers["Access-Control-Allow-Origin"] = "*";
   }
   
   const errorResponse = {

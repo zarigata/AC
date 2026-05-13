@@ -6,7 +6,7 @@ services:
       - "4000:4000"
     volumes:
       - ./apps/api/src:/app/apps/api/src
-      - ./packages/shared/src:/app/packages/shared/src
+      - ./packages/shared/src:/app/apps/packages/shared/src
       - ./data:/app/data
     environment:
       - PORT=4000

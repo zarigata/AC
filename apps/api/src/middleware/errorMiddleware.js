@@ -125,11 +125,23 @@ export const globalErrorHandler = (err, req, res, next) => {
     'X-Error-ID': errorResponse.requestId
   };
 
-  // Add CORS headers if applicable
+  // Add CORS headers with security validation
   const origin = req.headers.origin;
-  if (origin && origin !== 'null' && origin !== undefined) {
+  const ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:4000",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:4000",
+    "http://localhost:5000",
+    "http://127.0.0.1:5000"
+  ];
+  
+  if (origin && origin !== 'null' && origin !== undefined && ALLOWED_ORIGINS.includes(origin)) {
     headers['Access-Control-Allow-Origin'] = origin;
     headers['Access-Control-Allow-Credentials'] = 'true';
+  } else if (origin === 'null' || origin === undefined) {
+    // Allow requests without origin for local development/testing
+    headers['Access-Control-Allow-Origin'] = '*';
   }
 
   // Send error response
@@ -210,7 +222,7 @@ export const requestLogger = (req, res, next) => {
     return originalSend.call(this, data);
   };
   
-  next();
+  if (typeof next === 'function') next();
 };
 
 /**

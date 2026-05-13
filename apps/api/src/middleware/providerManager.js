@@ -117,7 +117,7 @@ export const initOllamaProvider = () => {
 /**
  * Initialize all providers
  */
-export const initializeProviders = () => {
+export const initializeProviders = async () => {
   // Initialize Ollama as primary
   try {
     const ollamaConfig = initOllamaProvider();

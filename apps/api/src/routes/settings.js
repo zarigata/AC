@@ -12,7 +12,7 @@ export function registerSettingsRoutes(server, registry, providers, failoverChai
       response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
       response.end(JSON.stringify({
         ...settings,
-        providers: listProviders().length // Update providers count dynamically
+        providers: Object.keys(providers).length // Update providers count dynamically
       }));
       return true;
     }
@@ -29,7 +29,7 @@ export function registerSettingsRoutes(server, registry, providers, failoverChai
         }
         
         const updates = {};
-        const originalSettings = { ...settings, providers: listProviders().length };
+        const originalSettings = { ...settings, providers: Object.keys(providers).length };
         
         // Validate and process each setting update
         if (body.defaultModel !== undefined) {
@@ -163,7 +163,7 @@ export function registerSettingsRoutes(server, registry, providers, failoverChai
         currentStep: 'welcome',
         nextSteps: ['agent-creation', 'preset-selection', 'configuration', 'testing'],
         data: {
-          availableProviders: listProviders(),
+          availableProviders: Object.keys(providers),
           availablePresets: presets.filter(p => p.isActive),
           systemInfo: {
             version: VERSION,
