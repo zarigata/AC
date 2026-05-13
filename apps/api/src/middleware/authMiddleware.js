@@ -69,7 +69,13 @@ const DEFAULT_CONFIG = {
     '/docs',
     '/docs/',
     '/static',
-    '/static/'
+    '/static/',
+    '/api/webhooks',
+    '/api/webhooks/',
+    '/api/webhooks/telegram',
+    '/api/webhooks/telegram-default',
+    '/api/webhooks/discord',
+    '/api/webhooks/discord-default'
   ]
 };
 

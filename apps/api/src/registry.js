@@ -1544,4 +1544,209 @@ export class AgentRegistry {
       return false;
     }
   }
+
+  // Preset CRUD Methods
+  
+  getAllPresets(filters = {}) {
+    try {
+      let query = "SELECT * FROM presets";
+      const whereConditions = [];
+      const params = [];
+      
+      if (filters.enabled !== undefined) {
+        whereConditions.push("enabled = ?");
+        params.push(filters.enabled ? 1 : 0);
+      }
+      
+      if (filters.category) {
+        whereConditions.push("category = ?");
+        params.push(filters.category);
+      }
+      
+      if (filters.isSystem !== undefined) {
+        whereConditions.push("isSystem = ?");
+        params.push(filters.isSystem ? 1 : 0);
+      }
+      
+      if (filters.isFeatured !== undefined) {
+        whereConditions.push("isFeatured = ?");
+        params.push(filters.isFeatured ? 1 : 0);
+      }
+      
+      if (whereConditions.length > 0) {
+        query += " WHERE " + whereConditions.join(" AND ");
+      }
+      
+      query += " ORDER BY orderIndex, name";
+      
+      const rows = this.db.prepare(query).all(...params);
+      return rows.map(row => ({
+        ...row,
+        configTemplate: JSON.parse(row.configTemplate || '{}'),
+        tags: row.tags ? JSON.parse(row.tags) : []
+      }));
+    } catch (err) {
+      console.error('Error getting presets:', err.message);
+      return [];
+    }
+  }
+  
+  getPresetById(id) {
+    try {
+      const stmt = this.db.prepare('SELECT * FROM presets WHERE id = ?');
+      const row = stmt.get(id);
+      
+      if (!row) {
+        return null;
+      }
+      
+      return {
+        ...row,
+        configTemplate: JSON.parse(row.configTemplate || '{}'),
+        tags: row.tags ? JSON.parse(row.tags) : []
+      };
+    } catch (err) {
+      console.error('Error getting preset:', err.message);
+      return null;
+    }
+  }
+  
+  createPreset(preset) {
+    try {
+      if (!preset || typeof preset !== 'object') {
+        throw new Error('Preset data is required and must be an object');
+      }
+      
+      if (!preset.name || typeof preset.name !== 'string') {
+        throw new Error('Preset name is required');
+      }
+      
+      if (!preset.description || typeof preset.description !== 'string') {
+        throw new Error('Preset description is required');
+      }
+      
+      if (!preset.configTemplate || typeof preset.configTemplate !== 'object') {
+        throw new Error('Preset configTemplate is required and must be an object');
+      }
+      
+      const insertStmt = this.db.prepare(
+        `
+          INSERT INTO presets (
+            id, name, description, configTemplate, icon, category, 
+            isSystem, isFeatured, orderIndex, tags, enabled, createdAt, updatedAt
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `
+      );
+      
+      const result = insertStmt.run(
+        preset.id,
+        preset.name,
+        preset.description,
+        JSON.stringify(preset.configTemplate),
+        preset.icon,
+        preset.category,
+        preset.isSystem ? 1 : 0,
+        preset.isFeatured ? 1 : 0,
+        preset.orderIndex,
+        JSON.stringify(preset.tags),
+        preset.enabled ? 1 : 0,
+        preset.createdAt,
+        preset.updatedAt
+      );
+      
+      if (result.changes === 0) {
+        throw new Error('Failed to create preset');
+      }
+      
+      return this.getPresetById(preset.id);
+    } catch (err) {
+      console.error('Error creating preset:', err.message);
+      throw err;
+    }
+  }
+  
+  updatePreset(id, updates) {
+    try {
+      if (!id || typeof id !== 'string') {
+        throw new Error('Preset ID is required');
+      }
+      
+      if (!updates || typeof updates !== 'object') {
+        throw new Error('Update data is required and must be an object');
+      }
+      
+      // Get current preset first
+      const currentPreset = this.getPresetById(id);
+      if (!currentPreset) {
+        throw new Error(`Preset with ID ${id} not found`);
+      }
+      
+      // Prepare update fields
+      const updateFields = [];
+      const updateValues = [];
+      
+      const allowedFields = ['name', 'description', 'configTemplate', 'icon', 'category', 'isSystem', 'isFeatured', 'orderIndex', 'tags', 'enabled'];
+      
+      for (const field of allowedFields) {
+        if (updates[field] !== undefined) {
+          updateFields.push(`${field} = ?`);
+          
+          switch (field) {
+            case 'configTemplate':
+              updateValues.push(JSON.stringify(updates[field]));
+              break;
+            case 'tags':
+              updateValues.push(JSON.stringify(updates[field]));
+              break;
+            case 'isSystem':
+            case 'isFeatured':
+            case 'enabled':
+              updateValues.push(updates[field] ? 1 : 0);
+              break;
+            default:
+              updateValues.push(updates[field]);
+          }
+        }
+      }
+      
+      if (updateFields.length === 0) {
+        return currentPreset; // No updates to apply
+      }
+      
+      updateFields.push('updatedAt = ?');
+      updateValues.push(new Date().toISOString());
+      updateValues.push(id); // For WHERE clause
+      
+      const updateStmt = this.db.prepare(
+        `UPDATE presets SET ${updateFields.join(', ')} WHERE id = ?`
+      );
+      
+      updateStmt.run(...updateValues);
+      
+      return this.getPresetById(id);
+    } catch (err) {
+      console.error('Error updating preset:', err.message);
+      throw err;
+    }
+  }
+  
+  deletePreset(id) {
+    try {
+      if (!id || typeof id !== 'string') {
+        throw new Error('Preset ID is required and must be a string');
+      }
+      
+      const deleteStmt = this.db.prepare('DELETE FROM presets WHERE id = ?');
+      const result = deleteStmt.run(id);
+      
+      if (result.changes === 0) {
+        throw new Error(`Preset with ID ${id} not found`);
+      }
+      
+      return true;
+    } catch (err) {
+      console.error('Error deleting preset:', err.message);
+      throw err;
+    }
+  }
 }

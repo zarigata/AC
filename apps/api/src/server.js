@@ -16,6 +16,9 @@ import { registerToolRoutes } from "./routes/tools.js";
 import { registerJobRoutes } from "./routes/jobs.js";
 import { registerTokenRoutes } from "./routes/tokenRoutes.js";
 import { registerMemoryRoutes } from "./routes/memory.js";
+import { registerWebhookRoutes } from "./routes/webhooks.js";
+import { registerPresetRoutes } from "./routes/presets.js";
+import { webhookManager } from "./adapters/webhookManager.js";
 import { globalErrorHandler, notFoundHandler, requestLogger } from "./middleware/errorMiddleware.js";
 import createRateLimiter from "./middleware/rateLimiter.js";
 import createAuthMiddleware from "./middleware/authMiddleware.js";
@@ -84,6 +87,12 @@ async function main() {
     registerJobRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     registerTokenRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     registerMemoryRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    // Register webhook routes and get the handler function
+    const webhookHandler = registerWebhookRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    if (typeof webhookHandler === 'function') {
+      routeHandlers.push(webhookHandler);
+    }
+    registerPresetRoutes(routeServer, registry);
 
     console.log(`Registered ${routeHandlers.length} route handler(s)`);
     
@@ -95,6 +104,15 @@ async function main() {
       console.log("Tool system initialized successfully");
     } catch (toolErr) {
       console.error("Tool system initialization error (non-fatal):", toolErr.message);
+    }
+
+    // Initialize webhook manager
+    console.log("Initializing webhook manager...");
+    try {
+      await webhookManager.start();
+      console.log("Webhook manager initialized successfully");
+    } catch (webhookErr) {
+      console.error("Webhook manager initialization error (non-fatal):", webhookErr.message);
     }
 
     // Initialize rate limiter

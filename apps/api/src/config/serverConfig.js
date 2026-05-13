@@ -21,6 +21,7 @@ import { readRequestBody, sendJson, sendError, handleError } from "../middleware
 import { handleWebSocketUpgrade, broadcastMessage, broadcastAgentStatus } from "../middleware/webSocketHandler.js";
 import { startJobProcessor } from "../middleware/jobProcessor.js";
 import { initializeProviders } from "../middleware/providerManager.js";
+import { webhookManager } from "../adapters/webhookManager.js";
 
 // Settings object that can be updated at runtime
 export const settings = {
@@ -186,16 +187,22 @@ export const applyRateLimitMiddleware = (server, registry) => {
  * Graceful shutdown handler
  */
 export const setupGracefulShutdown = (server, registry) => {
-  const shutdown = (signal) => {
+  const shutdown = async (signal) => {
     console.log(`\nReceived ${signal}, starting graceful shutdown...`);
     
-    server.close((err) => {
-      if (err) {
-        console.error('Error closing server:', err);
-        process.exit(1);
-      }
-      
-      console.log('Server closed successfully');
+    try {
+      // Close server
+      await new Promise((resolve, reject) => {
+        server.close((err) => {
+          if (err) {
+            console.error('Error closing server:', err);
+            reject(err);
+          } else {
+            console.log('Server closed successfully');
+            resolve();
+          }
+        });
+      });
       
       // Stop job processor
       if (serverState.jobProcessorCleanup) {
@@ -217,8 +224,19 @@ export const setupGracefulShutdown = (server, registry) => {
         }
       }
       
+      // Stop webhook manager
+      try {
+        await webhookManager.stop();
+        console.log('Webhook manager stopped');
+      } catch (webhookErr) {
+        console.error('Error stopping webhook manager:', webhookErr);
+      }
+      
       process.exit(0);
-    });
+    } catch (error) {
+      console.error('Graceful shutdown failed:', error);
+      process.exit(1);
+    }
     
     // Force exit after 10 seconds if graceful shutdown doesn't complete
     setTimeout(() => {
@@ -228,8 +246,19 @@ export const setupGracefulShutdown = (server, registry) => {
   };
   
   // Handle shutdown signals
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => {
+    shutdown('SIGINT').catch(error => {
+      console.error('Error during SIGINT shutdown:', error);
+      process.exit(1);
+    });
+  });
+  
+  process.on('SIGTERM', () => {
+    shutdown('SIGTERM').catch(error => {
+      console.error('Error during SIGTERM shutdown:', error);
+      process.exit(1);
+    });
+  });
 };
 
 /**
