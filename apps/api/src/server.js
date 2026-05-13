@@ -15,6 +15,7 @@ import { registerHealthRoutes } from "./routes/health.js";
 import { globalErrorHandler, notFoundHandler, requestLogger } from "./middleware/errorMiddleware.js";
 import createRateLimiter from "./middleware/rateLimiter.js";
 import createAuthMiddleware from "./middleware/authMiddleware.js";
+import createCorsMiddleware from "./middleware/corsMiddleware.js";
 
 
 import { settings, serverState, initializeServer, startServer, getServerStatus } from "./config/serverConfig.js";
@@ -73,6 +74,15 @@ async function main() {
     });
     console.log('Rate limiter initialized');
 
+    // Initialize CORS middleware
+    const corsMiddleware = createCorsMiddleware({
+      allowedOrigins: process.env.ZSIISTANT_CORS_ORIGINS || 'http://localhost:3000,http://localhost:4000,http://127.0.0.1:3000,http://127.0.0.1:4000,http://localhost:5000,http://127.0.0.1:5000',
+      allowCredentials: true,
+      allowedMethods: 'GET, POST, PATCH, DELETE, OPTIONS, HEAD',
+      allowedHeaders: 'Content-Type, Authorization, X-Requested-With, X-API-Key, X-Content-Type-Options'
+    });
+    console.log('CORS middleware initialized');
+
     // Initialize authentication middleware
     const authMiddleware = createAuthMiddleware({
       jwtSecret: process.env.ZSIISTANT_JWT_SECRET || 'your-secret-key-change-in-production',
@@ -83,6 +93,9 @@ async function main() {
     // Single request dispatcher that runs handlers sequentially
     server.on('request', async (req, res) => {
       try {
+        // Apply CORS middleware first
+        corsMiddleware(req, res, () => {});
+        
         // Apply rate limiter middleware
         try {
           await new Promise((resolve, reject) => {
