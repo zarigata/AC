@@ -119,6 +119,7 @@ export class AgentRegistry {
             isolationMode TEXT NOT NULL,
             maxConcurrentTasks INTEGER NOT NULL,
             peerAccess INTEGER NOT NULL,
+            toolsConfig TEXT DEFAULT NULL, -- JSON config defining available tools
             createdAt TEXT NOT NULL,
             updatedAt TEXT NOT NULL
           );
@@ -126,6 +127,23 @@ export class AgentRegistry {
           CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
           CREATE INDEX IF NOT EXISTS idx_agents_provider ON agents(provider);
           CREATE INDEX IF NOT EXISTS idx_agents_created_at ON agents(createdAt);
+          
+          CREATE TABLE IF NOT EXISTS agent_tools (
+            id TEXT PRIMARY KEY,
+            agentId TEXT NOT NULL,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL, -- 'web_search', 'exec', 'read', 'write', 'calculate', etc.
+            description TEXT NOT NULL,
+            config TEXT DEFAULT NULL, -- JSON configuration for the tool
+            enabled BOOLEAN NOT NULL DEFAULT 1,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL,
+            FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_agent_tools_agent ON agent_tools(agentId);
+          CREATE INDEX IF NOT EXISTS idx_agent_tools_type ON agent_tools(type);
+          CREATE INDEX IF NOT EXISTS idx_agent_tools_enabled ON agent_tools(enabled);
         `);
 
         this.db.exec(`
@@ -271,6 +289,7 @@ export class AgentRegistry {
         name: { required: true, type: 'string', minLength: 2, maxLength: 80 },
         purpose: { required: true, type: 'string', minLength: 10, maxLength: 240 },
         systemPrompt: { required: false, type: 'string', minLength: 0, maxLength: 2000 },
+        toolsConfig: { required: false, type: 'object' },
         provider: { required: true, type: 'string', minLength: 2, maxLength: 80 },
         model: { required: true, type: 'string', minLength: 2, maxLength: 120 },
         isolationMode: { required: true, type: 'string', enum: ['isolated', 'selective', 'mesh'] },
@@ -300,6 +319,7 @@ export class AgentRegistry {
         createdAt: timestamp,
         updatedAt: timestamp,
         systemPrompt: input.systemPrompt || null,
+        toolsConfig: input.toolsConfig ? JSON.stringify(input.toolsConfig) : null,
         ...parsed
       };
 
@@ -406,7 +426,7 @@ export class AgentRegistry {
       const existing = this.getAgent(id);
       if (!existing) return null;
 
-      const allowed = ["name", "purpose", "systemPrompt", "status", "provider", "model", "isolationMode", "maxConcurrentTasks", "peerAccess"];
+      const allowed = ["name", "purpose", "systemPrompt", "toolsConfig", "status", "provider", "model", "isolationMode", "maxConcurrentTasks", "peerAccess"];
       const fields = [];
       const values = [];
 
@@ -434,6 +454,14 @@ export class AgentRegistry {
           
           if (key === "systemPrompt" && (typeof value !== "string" || value.length > 2000)) {
             throw new Error(`Invalid ${key} value: must be no more than 2000 characters`);
+          }
+          
+          if (key === "toolsConfig") {
+            if (value !== null && typeof value !== "object") {
+              throw new Error(`Invalid ${key} value: must be an object or null`);
+            }
+            // Store as JSON string
+            value = value ? JSON.stringify(value) : null;
           }
           
           fields.push(`${key} = ?`);
@@ -494,6 +522,261 @@ export class AgentRegistry {
     }
   }
 
+  // Agent Tools/Skills Management Methods
+  
+  /**
+   * Get all tools for an agent
+   */
+  getAgentTools(agentId) {
+    try {
+      if (!agentId || typeof agentId !== 'string' || agentId.length > 64) {
+        return [];
+      }
+      
+      const tools = this.db
+        .prepare("SELECT * FROM agent_tools WHERE agentId = ? AND enabled = 1 ORDER BY createdAt ASC")
+        .all(agentId);
+      
+      // Parse config JSON if present
+      return tools.map(tool => ({
+        ...tool,
+        config: tool.config ? JSON.parse(tool.config) : null
+      }));
+    } catch (err) {
+      console.error('Error getting agent tools:', err);
+      return [];
+    }
+  }
+  
+  /**
+   * Add a tool to an agent
+   */
+  addAgentTool(agentId, toolData) {
+    try {
+      if (!agentId || typeof agentId !== 'string' || agentId.length > 64) {
+        throw new Error('Invalid agent ID');
+      }
+      
+      // Check if agent exists
+      const agent = this.getAgent(agentId);
+      if (!agent) {
+        throw new Error('Agent not found');
+      }
+      
+      // Validate tool data
+      if (!toolData.name || typeof toolData.name !== 'string') {
+        throw new Error('Tool name is required');
+      }
+      
+      if (!toolData.type || typeof toolData.type !== 'string') {
+        throw new Error('Tool type is required');
+      }
+      
+      const allowedTypes = ['web_search', 'exec', 'read', 'write', 'calculate', 'api_call', 'file_system', 'database'];
+      if (!allowedTypes.includes(toolData.type)) {
+        throw new Error(`Invalid tool type. Must be one of: ${allowedTypes.join(', ')}`);
+      }
+      
+      const id = crypto.randomUUID();
+      const timestamp = now();
+      const tool = {
+        id,
+        agentId,
+        name: toolData.name.trim(),
+        type: toolData.type,
+        description: toolData.description || '',
+        config: toolData.config ? JSON.stringify(toolData.config) : null,
+        enabled: toolData.enabled !== undefined ? Boolean(toolData.enabled) : true,
+        createdAt: timestamp,
+        updatedAt: timestamp
+      };
+      
+      const insertStmt = this.db.prepare(
+        "INSERT INTO agent_tools (id, agentId, name, type, description, config, enabled, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      );
+      
+      insertStmt.run(
+        tool.id, tool.agentId, tool.name, tool.type, tool.description, 
+        tool.config, tool.enabled ? 1 : 0, tool.createdAt, tool.updatedAt
+      );
+      
+      return {
+        ...tool,
+        config: tool.config ? JSON.parse(tool.config) : null
+      };
+    } catch (err) {
+      console.error('Error adding agent tool:', err);
+      throw err;
+    }
+  }
+  
+  /**
+   * Update an agent's tool
+   */
+  updateAgentTool(agentId, toolId, updates) {
+    try {
+      if (!agentId || typeof agentId !== 'string' || agentId.length > 64) {
+        throw new Error('Invalid agent ID');
+      }
+      
+      if (!toolId || typeof toolId !== 'string' || toolId.length > 64) {
+        throw new Error('Invalid tool ID');
+      }
+      
+      // Check if tool exists and belongs to agent
+      const existing = this.db.prepare("SELECT * FROM agent_tools WHERE id = ? AND agentId = ?").get(toolId, agentId);
+      if (!existing) {
+        throw new Error('Tool not found');
+      }
+      
+      const allowed = ["name", "type", "description", "config", "enabled"];
+      const fields = [];
+      const values = [];
+      
+      // Validate and sanitize updates
+      for (const key of allowed) {
+        if (key in updates) {
+          let value = updates[key];
+          
+          if (key === "name" && (typeof value !== "string" || value.length > 100)) {
+            throw new Error(`Invalid ${key} value`);
+          }
+          
+          if (key === "type") {
+            const allowedTypes = ['web_search', 'exec', 'read', 'write', 'calculate', 'api_call', 'file_system', 'database'];
+            if (!allowedTypes.includes(value)) {
+              throw new Error(`Invalid tool type. Must be one of: ${allowedTypes.join(', ')}`);
+            }
+          }
+          
+          if (key === "description" && (typeof value !== "string" || value.length > 500)) {
+            throw new Error(`Invalid ${key} value`);
+          }
+          
+          if (key === "config") {
+            if (value !== null && typeof value !== "object") {
+              throw new Error(`Invalid ${key} value: must be an object or null`);
+            }
+            value = value ? JSON.stringify(value) : null;
+          }
+          
+          if (key === "enabled") {
+            value = Boolean(value) ? 1 : 0;
+          }
+          
+          fields.push(`${key} = ?`);
+          values.push(value);
+        }
+      }
+      
+      if (fields.length === 0) return existing;
+      
+      fields.push("updatedAt = ?");
+      values.push(now());
+      values.push(toolId);
+      
+      const updateStmt = this.db.prepare(`UPDATE agent_tools SET ${fields.join(", ")} WHERE id = ?`);
+      const result = updateStmt.run(...values);
+      
+      if (result.changes === 0) {
+        throw new Error('Failed to update tool');
+      }
+      
+      // Return updated tool
+      const updated = this.db.prepare("SELECT * FROM agent_tools WHERE id = ?").get(toolId);
+      return {
+        ...updated,
+        config: updated.config ? JSON.parse(updated.config) : null
+      };
+    } catch (err) {
+      console.error('Error updating agent tool:', err);
+      throw err;
+    }
+  }
+  
+  /**
+   * Delete an agent's tool
+   */
+  deleteAgentTool(agentId, toolId) {
+    try {
+      if (!agentId || typeof agentId !== 'string' || agentId.length > 64) {
+        return false;
+      }
+      
+      if (!toolId || typeof toolId !== 'string' || toolId.length > 64) {
+        return false;
+      }
+      
+      // Check if tool exists and belongs to agent
+      const existing = this.db.prepare("SELECT * FROM agent_tools WHERE id = ? AND agentId = ?").get(toolId, agentId);
+      if (!existing) {
+        return false;
+      }
+      
+      const result = this.db.prepare("DELETE FROM agent_tools WHERE id = ? AND agentId = ?").run(toolId, agentId);
+      
+      return result.changes > 0;
+    } catch (err) {
+      console.error('Error deleting agent tool:', err);
+      return false;
+    }
+  }
+  
+  /**
+   * Get default tools configuration
+   */
+  getDefaultTools() {
+    return {
+      web_search: {
+        name: "Web Search",
+        type: "web_search",
+        description: "Search the web for information",
+        config: {
+          engine: "duckduckgo", // duckduckgo, google, bing
+          maxResults: 10,
+          timeout: 30000
+        }
+      },
+      exec: {
+        name: "Command Execution",
+        type: "exec", 
+        description: "Execute shell commands in a safe sandbox",
+        config: {
+          timeout: 30000,
+          allowedCommands: ["ls", "cat", "pwd", "whoami", "echo", "ps"],
+          workingDirectory: "/tmp"
+        }
+      },
+      read: {
+        name: "File Reader",
+        type: "read",
+        description: "Read text files from the filesystem",
+        config: {
+          allowedPaths: ["/tmp", "/home", "/app"],
+          maxSize: 1024 * 1024 // 1MB
+        }
+      },
+      write: {
+        name: "File Writer", 
+        type: "write",
+        description: "Write text files to the filesystem",
+        config: {
+          allowedPaths: ["/tmp", "/home/user", "/app/data"],
+          maxSize: 1024 * 1024 // 1MB
+        }
+      },
+      calculate: {
+        name: "Calculator",
+        type: "calculate", 
+        description: "Perform mathematical calculations",
+        config: {
+          precision: 10,
+          maxOperations: 100
+        }
+      }
+    };
+  }
+  
   listLinks() {
     try {
       return this.db

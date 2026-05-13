@@ -608,6 +608,141 @@ export function registerAgentRoutes(server, registry, providers, failoverChains,
   };
 
   /**
+   * Handle agent tools listing
+   */
+  const handleAgentTools = async (request, response) => {
+    const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+    const toolsMatch = url.pathname.match(/^\/api\/agents\/([\w-]+)\/tools$/);
+
+    if (!toolsMatch) return false;
+
+    const agentId = toolsMatch[1];
+    
+    // Validate agent ID format
+    if (!agentIdPattern.test(agentId) || agentId.length > 64) {
+      return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
+             response.end(JSON.stringify({ error: "Invalid agent ID format" }));
+    }
+
+    // Check if agent exists
+    const agent = registry.getAgent(agentId);
+    if (!agent) return response.writeHead(404, { "Content-Type": "application/json; charset=utf-8" }), 
+                  response.end(JSON.stringify({ error: "Agent not found" }));
+
+    if (request.method === "GET") {
+      const tools = registry.getAgentTools(agentId);
+      return response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" }), 
+             response.end(JSON.stringify({ tools }));
+    }
+
+    if (request.method === "POST") {
+      try {
+        const body = await readRequestBody(request);
+        
+        // Validate tool creation input
+        if (!body.name || typeof body.name !== 'string') {
+          return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
+                 response.end(JSON.stringify({ error: "Tool name is required" }));
+        }
+        
+        if (!body.type || typeof body.type !== 'string') {
+          return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
+                 response.end(JSON.stringify({ error: "Tool type is required" }));
+        }
+        
+        const tool = registry.addAgentTool(agentId, {
+          name: body.name,
+          type: body.type,
+          description: body.description || '',
+          config: body.config || null,
+          enabled: body.enabled !== undefined ? body.enabled : true
+        });
+        
+        return response.writeHead(201, { "Content-Type": "application/json; charset=utf-8" }), 
+               response.end(JSON.stringify({ tool }));
+      } catch (err) {
+        return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
+               response.end(JSON.stringify({ error: err.message || "Invalid request body" }));
+      }
+    }
+
+    return false;
+  };
+
+  /**
+   * Handle single agent tool operations
+   */
+  const handleAgentTool = async (request, response) => {
+    const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+    const toolMatch = url.pathname.match(/^\/api\/agents\/([\w-]+)\/tools\/([\w-]+)$/);
+    
+    if (!toolMatch) return false;
+    
+    const agentId = toolMatch[1];
+    const toolId = toolMatch[2];
+    
+    // Validate IDs format
+    if (!agentIdPattern.test(agentId) || agentId.length > 64 || 
+        !agentIdPattern.test(toolId) || toolId.length > 64) {
+      return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
+             response.end(JSON.stringify({ error: "Invalid ID format" }));
+    }
+
+    // Check if agent exists
+    const agent = registry.getAgent(agentId);
+    if (!agent) return response.writeHead(404, { "Content-Type": "application/json; charset=utf-8" }), 
+                  response.end(JSON.stringify({ error: "Agent not found" }));
+
+    if (request.method === "GET") {
+      const tools = registry.getAgentTools(agentId);
+      const tool = tools.find(t => t.id === toolId);
+      if (!tool) return response.writeHead(404, { "Content-Type": "application/json; charset=utf-8" }), 
+                    response.end(JSON.stringify({ error: "Tool not found" }));
+      return response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" }), 
+             response.end(JSON.stringify({ tool }));
+    }
+
+    if (request.method === "PATCH") {
+      try {
+        const body = await readRequestBody(request);
+        
+        // Validate tool update input
+        if (body.name && typeof body.name !== 'string') {
+          return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
+                 response.end(JSON.stringify({ error: "Invalid tool name" }));
+        }
+        
+        if (body.type && typeof body.type !== 'string') {
+          return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
+                 response.end(JSON.stringify({ error: "Invalid tool type" }));
+        }
+        
+        if (body.description && typeof body.description !== 'string') {
+          return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
+                 response.end(JSON.stringify({ error: "Invalid tool description" }));
+        }
+        
+        const tool = registry.updateAgentTool(agentId, toolId, body);
+        return response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" }), 
+               response.end(JSON.stringify({ tool }));
+      } catch (err) {
+        return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
+               response.end(JSON.stringify({ error: err.message || "Invalid request body" }));
+      }
+    }
+
+    if (request.method === "DELETE") {
+      const deleted = registry.deleteAgentTool(agentId, toolId);
+      if (!deleted) return response.writeHead(404, { "Content-Type": "application/json; charset=utf-8" }), 
+                    response.end(JSON.stringify({ error: "Tool not found" }));
+      return response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" }), 
+             response.end(JSON.stringify({ deleted: true }));
+    }
+
+    return false;
+  };
+
+  /**
    * Register agent routes
    */
   server.on('request', async (request, response) => {
@@ -621,7 +756,9 @@ export function registerAgentRoutes(server, registry, providers, failoverChains,
       handleCreateAgent,
       handleListAgents,
       handleAgentUsage,
-      handleAgentHistory
+      handleAgentHistory,
+      handleAgentTools,
+      handleAgentTool
     ];
 
     for (const handler of handlers) {

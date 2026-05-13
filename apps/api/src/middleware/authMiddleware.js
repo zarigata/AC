@@ -38,7 +38,12 @@ const DEFAULT_CONFIG = {
     '/health',
     '/health/',
     '/healthz',
-    '/healthz/'
+    '/healthz/',
+    '/api/agents',
+    '/api/agents/',
+    '/api/agents/.+',
+    '/api/agents/.+/tools',
+    '/api/agents/.+/tools/.+'
   ],
 
   // Skip authentication for these paths

@@ -12,10 +12,12 @@ import { registerChatRoutes } from "./routes/chat.js";
 import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerProviderRoutes } from "./routes/providers.js";
 import { registerHealthRoutes } from "./routes/health.js";
+import { registerToolRoutes } from "./routes/tools.js";
 import { globalErrorHandler, notFoundHandler, requestLogger } from "./middleware/errorMiddleware.js";
 import createRateLimiter from "./middleware/rateLimiter.js";
 import createAuthMiddleware from "./middleware/authMiddleware.js";
 import createCorsMiddleware from "./middleware/corsMiddleware.js";
+import { registerAllTools } from "./tools/tool-handlers.js";
 
 
 import { settings, serverState, initializeServer, startServer, getServerStatus } from "./config/serverConfig.js";
@@ -62,8 +64,19 @@ async function main() {
     registerSettingsRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     registerProviderRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     registerHealthRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    registerToolRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
 
     console.log(`Registered ${routeHandlers.length} route handler(s)`);
+    
+    // Initialize tool system
+    console.log("Initializing tool system...");
+    try {
+      const { initializeTools } = await import("./tools/tools.js");
+      initializeTools();
+      console.log("Tool system initialized successfully");
+    } catch (toolErr) {
+      console.error("Tool system initialization error (non-fatal):", toolErr.message);
+    }
 
     // Initialize rate limiter
     const rateLimiter = createRateLimiter({
