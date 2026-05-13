@@ -14,6 +14,7 @@ import { registerProviderRoutes } from "./routes/providers.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { globalErrorHandler, notFoundHandler, requestLogger } from "./middleware/errorMiddleware.js";
 
+
 import { settings, serverState, initializeServer, startServer, getServerStatus } from "./config/serverConfig.js";
 import { setupGracefulShutdown } from "./config/serverConfig.js";
 
@@ -27,42 +28,88 @@ async function main() {
   try {
     // Initialize server configuration
     console.log("Initializing Zsiistant server...");
-    
+
     // Initialize registry (this needs to be done first)
     const databasePath = process.env.ZSIISTANT_DB_PATH ?? new URL("../data/zsiistant.sqlite", import.meta.url).pathname;
     const registry = new AgentRegistry({ databasePath });
-    try { 
-      registry.seed(); 
+    try {
+      registry.seed();
       console.log("Registry seeded successfully");
-    } catch (seedErr) { 
-      console.error("Seed error (non-fatal):", seedErr.message); 
+    } catch (seedErr) {
+      console.error("Seed error (non-fatal):", seedErr.message);
     }
-    
+
     // Initialize server with all components
     const { server, config, providers } = await initializeServer(registry);
-    
-    // Register modular route handlers
+
+    // Collect route handlers into an array for sequential processing
+    const routeHandlers = [];
+    const makeRouteRegistrar = () => ({
+      on(event, handler) {
+        if (event === 'request') routeHandlers.push(handler);
+      }
+    });
+
+    const routeServer = makeRouteRegistrar();
+
+    // Register modular route handlers onto our pseudo-server
     console.log("Registering route handlers...");
-    registerAgentRoutes(server, registry, providers, serverState.failoverChains || {}, settings);
-    registerChatRoutes(server, registry, providers, serverState.failoverChains || {}, settings);
-    registerSettingsRoutes(server, registry, providers, serverState.failoverChains || {}, settings);
-    registerProviderRoutes(server, registry, providers, serverState.failoverChains || {}, settings);
-    registerHealthRoutes(server, registry, providers, serverState.failoverChains || {}, settings);
-    
-    // Apply request logging middleware
-    server.on('request', requestLogger);
-    
-    // Apply global error handler as the final middleware
+    registerAgentRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    registerChatRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    registerSettingsRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    registerProviderRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    registerHealthRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+
+    console.log(`Registered ${routeHandlers.length} route handler(s)`);
+
+    // Single request dispatcher that runs handlers sequentially
+    server.on('request', async (req, res) => {
+      try {
+
+        
+        // Log request
+        if (typeof requestLogger === 'function') {
+          requestLogger(req, res, () => {});
+        }
+            
+            // Run each route handler sequentially until one handles the request
+        for (const handler of routeHandlers) {
+          if (res.headersSent) break;
+          try {
+            await handler(req, res);
+          } catch (err) {
+            console.error('Route handler error:', err.message);
+            if (!res.headersSent) {
+              // Use the global error handler for consistent error formatting
+              globalErrorHandler(err, req, res, () => {});
+            }
+            return;
+          }
+        }
+        
+        // If no handler responded, send 404
+        if (!res.headersSent) {
+          notFoundHandler(req, res);
+        }
+      } catch (err) {
+        console.error('Request dispatcher error:', err);
+        if (!res.headersSent) {
+          globalErrorHandler(err, req, res, () => {});
+        }
+      }
+    });
+
+    // Apply global error handler
     server.on('error', globalErrorHandler);
-    
+
     // Start server
     console.log("Starting server...");
     await startServer(server, config);
-    
+
     console.log("Zsiistant server started successfully");
-    
+
     return { server, registry, providers };
-    
+
   } catch (error) {
     console.error("Failed to start server:", error);
     process.exit(1);
