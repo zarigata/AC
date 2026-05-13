@@ -5,6 +5,9 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { inspect } from 'node:util';
 
+// Import sendError from requestHandler.js
+import { sendError } from './requestHandler.js';
+
 // Security helper functions
 export const sanitizeError = (error) => {
   if (!error) return 'Unknown error';
