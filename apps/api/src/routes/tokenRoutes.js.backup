@@ -1,0 +1,396 @@
+/**
+ * Token Usage Tracking Routes - API endpoints for token usage management
+ */
+
+import { z } from "zod";
+import TokenManager from "../token/tokenManager.js";
+
+/**
+ * Validation schemas
+ */
+const sessionUsageSchema = z.object({
+  sessionId: z.string().min(1).max(64)
+});
+
+const agentUsageSchema = z.object({
+  agentId: z.string().min(1).max(64),
+  timeRange: z.enum(['1d', '7d', '30d', '90d']).optional().default('7d')
+});
+
+const systemUsageSchema = z.object({
+  timeRange: z.enum(['1d', '7d', '30d', '90d']).optional().default('7d')
+});
+
+const messageTokenSchema = z.object({
+  messageId: z.string().min(1).max(64),
+  tokensIn: z.number().min(0).max(1000000),
+  tokensOut: z.number().min(0).max(1000000)
+});
+
+const resetTokenSchema = z.object({
+  sessionId: z.string().min(1).max(64).optional(),
+  messageId: z.string().min(1).max(64).optional()
+}).refine(data => data.sessionId || data.messageId, {
+  message: "Either sessionId or messageId must be provided"
+});
+
+/**
+ * Register token usage tracking routes
+ */
+export function registerTokenRoutes(server, registry, providers, failoverChains, settings) {
+  const tokenManager = new TokenManager(registry);
+
+  /**
+   * Get session token usage statistics
+   * GET /api/tokens/sessions/:sessionId
+   */
+  server.on('request', async (req, res) => {
+    if (req.method === 'GET' && req.url === '/api/tokens/sessions') {
+      try {
+        // Get query parameters
+        const url = new URL(req.url, `http://${req.headers.host}`);
+        const sessionId = url.searchParams.get('sessionId');
+        
+        if (!sessionId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'sessionId parameter is required' }));
+          return;
+        }
+        
+        // Validate session belongs to this agent
+        const session = registry.getSession(sessionId);
+        if (!session) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Session not found' }));
+          return;
+        }
+        
+        const usage = await tokenManager.getSessionUsage(sessionId);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          data: usage
+        }));
+        
+      } catch (error) {
+        console.error('Error getting session token usage:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Internal server error' }));
+      }
+    }
+  });
+
+  /**
+   * Get agent token usage statistics
+   * GET /api/tokens/agents/:agentId
+   */
+  server.on('request', async (req, res) => {
+    if (req.method === 'GET' && req.url.startsWith('/api/tokens/agents/')) {
+      try {
+        const agentId = req.url.split('/')[3];
+        const url = new URL(req.url, `http://${req.headers.host}`);
+        const timeRange = url.searchParams.get('timeRange') || '7d';
+        
+        // Validate agent exists
+        const agent = registry.getAgent(agentId);
+        if (!agent) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Agent not found' }));
+          return;
+        }
+        
+        const usage = await tokenManager.getAgentUsage(agentId, timeRange);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          data: usage
+        }));
+        
+      } catch (error) {
+        console.error('Error getting agent token usage:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Internal server error' }));
+      }
+    }
+  });
+
+  /**
+   * Get system-wide token usage statistics
+   * GET /api/tokens/system
+   */
+  server.on('request', async (req, res) => {
+    if (req.method === 'GET' && req.url === '/api/tokens/system') {
+      try {
+        const url = new URL(req.url, `http://${req.headers.host}`);
+        const timeRange = url.searchParams.get('timeRange') || '7d';
+        
+        const usage = await tokenManager.getSystemUsage(timeRange);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          data: usage
+        }));
+        
+      } catch (error) {
+        console.error('Error getting system token usage:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Internal server error' }));
+      }
+    }
+  });
+
+  /**
+   * Get usage statistics and analytics
+   * GET /api/tokens/stats
+   */
+  server.on('request', async (req, res) => {
+    if (req.method === 'GET' && req.url === '/api/tokens/stats') {
+      try {
+        const url = new URL(req.url, `http://${req.headers.host}`);
+        const timeRange = url.searchParams.get('timeRange') || '7d';
+        
+        const stats = await tokenManager.getUsageStats(timeRange);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          data: stats
+        }));
+        
+      } catch (error) {
+        console.error('Error getting token stats:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Internal server error' }));
+      }
+    }
+  });
+
+  /**
+   * Update message token counts
+   * PATCH /api/tokens/messages/:messageId
+   */
+  server.on('request', async (req, res) => {
+    if (req.method === 'PATCH' && req.url.startsWith('/api/tokens/messages/')) {
+      try {
+        const messageId = req.url.split('/')[3];
+        
+        // Parse request body
+        let body;
+        try {
+          body = await new Promise((resolve, reject) => {
+            let data = '';
+            req.on('data', chunk => data += chunk);
+            req.on('end', () => resolve(data ? JSON.parse(data) : {}));
+          });
+        } catch (parseError) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid JSON in request body' }));
+          return;
+        }
+        
+        // Validate input
+        const validation = messageTokenSchema.safeParse({
+          messageId,
+          ...body
+        });
+        
+        if (!validation.success) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid input data', details: validation.error.details }));
+          return;
+        }
+        
+        const { tokensIn, tokensOut } = validation.data;
+        
+        // Update message token counts
+        const updateStmt = registry.db.prepare(
+          "UPDATE messages SET tokensIn = ?, tokensOut = ? WHERE id = ?"
+        );
+        
+        const result = updateStmt.run(tokensIn, tokensOut, messageId);
+        
+        if (result.changes === 0) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Message not found' }));
+          return;
+        }
+        
+        // Recalculate session and agent usage
+        const message = registry.db.prepare("SELECT * FROM messages WHERE id = ?").get(messageId);
+        const session = registry.getSession(message.sessionId);
+        
+        if (session) {
+          await tokenManager.getSessionUsage(session.id);
+          await tokenManager.getAgentUsage(session.agentId);
+        }
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          data: { messageId, tokensIn, tokensOut }
+        }));
+        
+      } catch (error) {
+        console.error('Error updating message token counts:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Internal server error' }));
+      }
+    }
+  });
+
+  /**
+   * Get model pricing information
+   * GET /api/tokens/pricing
+   */
+  server.on('request', async (req, res) => {
+    if (req.method === 'GET' && req.url === '/api/tokens/pricing') {
+      try {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          data: {
+            pricing: tokenManager.pricing,
+            models: Object.keys(tokenManager.pricing)
+          }
+        }));
+        
+      } catch (error) {
+        console.error('Error getting pricing information:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Internal server error' }));
+      }
+    }
+  });
+
+  /**
+   * Reset token usage (for debugging/testing)
+   * DELETE /api/tokens/reset
+   */
+  server.on('request', async (req, res) => {
+    if (req.method === 'DELETE' && req.url === '/api/tokens/reset') {
+      try {
+        // Parse request body
+        let body = {};
+        try {
+          body = await new Promise((resolve, reject) => {
+            let data = '';
+            req.on('data', chunk => data += chunk);
+            req.on('end', () => resolve(data ? JSON.parse(data) : {}));
+          });
+        } catch (parseError) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid JSON in request body' }));
+          return;
+        }
+        
+        // Validate input
+        const validation = resetTokenSchema.safeParse(body);
+        
+        if (!validation.success) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid input data', details: validation.error.details }));
+          return;
+        }
+        
+        const { sessionId, messageId } = validation.data;
+        
+        // Reset token usage
+        const success = await tokenManager.resetTokenUsage(sessionId, messageId);
+        
+        if (!success) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'No matching sessions or messages found' }));
+          return;
+        }
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          data: { 
+            sessionId, 
+            messageId,
+            message: 'Token usage reset successfully'
+          }
+        }));
+        
+      } catch (error) {
+        console.error('Error resetting token usage:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Internal server error' }));
+      }
+    }
+  });
+
+  /**
+   * Get cost estimation for a message
+   * POST /api/tokens/estimate-cost
+   */
+  server.on('request', async (req, res) => {
+    if (req.method === 'POST' && req.url === '/api/tokens/estimate-cost') {
+      try {
+        // Parse request body
+        let body;
+        try {
+          body = await new Promise((resolve, reject) => {
+            let data = '';
+            req.on('data', chunk => data += chunk);
+            req.on('end', () => resolve(data ? JSON.parse(data) : {}));
+          });
+        } catch (parseError) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid JSON in request body' }));
+          return;
+        }
+        
+        // Validate input
+        const inputSchema = z.object({
+          content: z.string().min(1),
+          role: z.enum(['user', 'assistant', 'system']).optional().default('user'),
+          model: z.string().optional().default('default')
+        });
+        
+        const validation = inputSchema.safeParse(body);
+        
+        if (!validation.success) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid input data', details: validation.error.details }));
+          return;
+        }
+        
+        const { content, role, model } = validation.data;
+        
+        // Estimate token counts
+        const tokensIn = tokenManager.countTokens(content);
+        const tokensOut = role === 'assistant' ? tokenManager.countTokens(content) : 0; // Estimate for assistant responses
+        
+        // Calculate cost
+        const cost = tokenManager.calculateCost(tokensIn, tokensOut, model);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          data: {
+            content,
+            role,
+            model,
+            estimatedTokens: {
+              input: tokensIn,
+              output: tokensOut
+            },
+            cost
+          }
+        }));
+        
+      } catch (error) {
+        console.error('Error estimating cost:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Internal server error' }));
+      }
+    }
+  });
+
+  console.log('Token usage tracking routes registered');
+}

@@ -6,8 +6,11 @@ import { applyRateLimit } from "../middleware/security.js";
 import { createProvider } from "../adapters/ollama.js";
 import { readRequestBody } from "../middleware/requestHandler.js";
 import { sessionManager } from "../database/sessionManager.js";
+import TokenManager from "../token/tokenManager.js";
 
 export function registerChatRoutes(server, registry, providers, failoverChains, settings) {
+  // Initialize token manager for this chat instance
+  const tokenManager = new TokenManager(registry);
   /**
    * Handle direct chat provider requests (no agent needed)
    * Skip session-related endpoints as they have their own handlers
