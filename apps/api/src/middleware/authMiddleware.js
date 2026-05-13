@@ -5,8 +5,7 @@
  */
 
 import { createHash } from 'node:crypto';
-// TODO: Add jsonwebtoken import when package is available
-// import jwt from 'jsonwebtoken';
+import jwt from 'jsonwebtoken';
 
 /**
  * Authentication configuration
@@ -66,36 +65,109 @@ const DEFAULT_CONFIG = {
 const apiKeyStore = new Map();
 
 /**
- * Default API key for testing
+ * Default API key for testing (only in development)
  */
-const defaultApiKey = 'zsiistant-test-api-key-12345';
-apiKeyStore.set(defaultApiKey, {
-  name: 'Test API Key',
-  created: new Date(),
-  active: true
-});
+const defaultApiKey = process.env.NODE_ENV === 'development' ? 'zsiistant-test-api-key-12345' : null;
+if (defaultApiKey) {
+  apiKeyStore.set(defaultApiKey, {
+    name: 'Development Test API Key',
+    created: new Date(),
+    active: true,
+    note: 'This key is only available in development mode'
+  });
+  console.log('⚠️  Development API key loaded - not for production use');
+}
 
 /**
- * Generate a JWT token (placeholder - requires jsonwebtoken package)
+ * Generate a JWT token
  * @param {Object} payload - Token payload
  * @param {string} secret - JWT secret
  * @param {string} expiresIn - Token expiration time
  * @returns {string} JWT token
  */
 function generateJWT(payload, secret, expiresIn) {
-  // TODO: Implement when jsonwebtoken is available
-  throw new Error('JWT support not available - install jsonwebtoken package');
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Invalid JWT payload');
+  }
+  
+  if (!secret || typeof secret !== 'string' || secret.length < 32) {
+    throw new Error('JWT secret must be at least 32 characters');
+  }
+  
+  // Add standard JWT claims
+  const jwtPayload = {
+    ...payload,
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + (expiresIn ? parseTimeToSeconds(expiresIn) : 86400),
+    iss: 'zsiistant',
+    sub: payload.userId || payload.sub || 'anonymous'
+  };
+  
+  try {
+    return jwt.sign(jwtPayload, secret, { algorithm: 'HS256' });
+  } catch (err) {
+    console.error('JWT generation error:', err);
+    throw new Error('Failed to generate JWT token');
+  }
 }
 
 /**
- * Verify a JWT token (placeholder - requires jsonwebtoken package)
+ * Verify a JWT token
  * @param {string} token - JWT token
  * @param {string} secret - JWT secret
  * @returns {Object} Decoded token payload
  */
 function verifyJWT(token, secret) {
-  // TODO: Implement when jsonwebtoken is available
-  throw new Error('JWT support not available - install jsonwebtoken package');
+  if (!token || typeof token !== 'string') {
+    throw new Error('Invalid JWT token');
+  }
+  
+  if (!secret || typeof secret !== 'string' || secret.length < 32) {
+    throw new Error('Invalid JWT secret');
+  }
+  
+  try {
+    const decoded = jwt.verify(token, secret, { algorithms: ['HS256'] });
+    return decoded;
+  } catch (err) {
+    if (err.name === 'JsonWebTokenError') {
+      throw new Error('Invalid JWT token');
+    } else if (err.name === 'TokenExpiredError') {
+      throw new Error('JWT token has expired');
+    } else if (err.name === 'NotBeforeError') {
+      throw new Error('JWT token not active yet');
+    } else {
+      throw new Error('JWT verification failed');
+    }
+  }
+}
+
+/**
+ * Parse time string to seconds
+ * @param {string} timeStr - Time string (e.g., '24h', '1d', '30m')
+ * @returns {number} Seconds
+ */
+function parseTimeToSeconds(timeStr) {
+  if (typeof timeStr !== 'string') {
+    return 86400; // Default 24 hours
+  }
+  
+  const match = timeStr.match(/^\s*(\d+)\s*(s|m|h|d)?\s*$/i);
+  if (!match) {
+    return 86400; // Default 24 hours
+  }
+  
+  const value = parseInt(match[1], 10);
+  const unit = match[2] ? match[2].toLowerCase() : 'h';
+  
+  const multipliers = {
+    's': 1,
+    'm': 60,
+    'h': 3600,
+    'd': 86400
+  };
+  
+  return value * (multipliers[unit] || 3600); // Default to hours
 }
 
 /**
@@ -210,23 +282,36 @@ function createAuthMiddleware(config = {}) {
       let authenticated = false;
       let authInfo = {};
 
-      // Only API key authentication is supported for now
-      // TODO: Add JWT support when jsonwebtoken is available
+      // API key authentication
       if (apiKey) {
         const keyInfo = validateApiKey(apiKey);
         if (keyInfo) {
           authenticated = true;
           authInfo = {
             type: 'api_key',
-            keyId: apiKey, // In production, use a hashed or truncated version
+            keyId: apiKey.substring(0, 8) + '...', // Truncate for security in logs
             keyName: keyInfo.name
           };
         }
       }
-
-      // JWT authentication is not available yet
-      if (token) {
-        // JWT support not available - install jsonwebtoken package
+      
+      // JWT authentication
+      if (token && !authenticated) {
+        try {
+          const decoded = verifyJWT(token, finalConfig.jwtSecret);
+          authenticated = true;
+          authInfo = {
+            type: 'jwt',
+            userId: decoded.sub,
+            payload: {
+              iat: decoded.iat,
+              exp: decoded.exp,
+              iss: decoded.iss
+            }
+          };
+        } catch (jwtError) {
+          console.warn('JWT verification failed:', jwtError.message);
+        }
       }
 
       // If not authenticated, return 401

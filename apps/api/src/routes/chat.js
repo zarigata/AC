@@ -7,10 +7,13 @@ import { createProvider } from "../adapters/ollama.js";
 import { readRequestBody } from "../middleware/requestHandler.js";
 import { sessionManager } from "../database/sessionManager.js";
 import TokenManager from "../token/tokenManager.js";
+import { MemoryManager } from "../memory/memoryManager.js";
 
 export function registerChatRoutes(server, registry, providers, failoverChains, settings) {
   // Initialize token manager for this chat instance
   const tokenManager = new TokenManager(registry);
+  // Initialize memory manager for context window management
+  const memoryManager = new MemoryManager(registry);
   /**
    * Handle direct chat provider requests (no agent needed)
    * Skip session-related endpoints as they have their own handlers
@@ -182,7 +185,22 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
             
             let accumulatedContent = "";
             
-            await provider.chatStream(body.messages, {
+            // Get context window from memory manager
+            const contextWindow = await memoryManager.getContextWindow('default', sessionId);
+            
+            // Add user message to context window
+            const userMessage = {
+              id: `msg_${Date.now()}`,
+              role: 'user',
+              content: body.messages[body.messages.length - 1].content,
+              timestamp: new Date().toISOString()
+            };
+            await memoryManager.addMessageToContext('default', sessionId, userMessage);
+            
+            // Use context window for provider call
+            const messagesForProvider = [...contextWindow, userMessage];
+            
+            await provider.chatStream(messagesForProvider, {
               model: body.model,
               temperature: body.temperature,
               maxTokens: body.maxTokens,
@@ -204,6 +222,15 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
                 tokensUsed: finalResult.tokensOut,
                 responseTimeMs: finalResult.duration
               };
+              
+              // Add assistant response to context window
+              const assistantMessage = {
+                id: `msg_${Date.now()}`,
+                role: 'assistant',
+                content: finalResult.content || accumulatedContent,
+                timestamp: new Date().toISOString()
+              };
+              await memoryManager.addMessageToContext('default', sessionId, assistantMessage);
               await sessionManager.saveMessage(sessionId, assistantMessageData, {
                 metadata: {
                   provider: providerName,
@@ -320,21 +347,22 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
 
       // Regular (non-streaming) request
       try {
-        // Save user message to session
-        const userMessageData = {
-          role: 'user',
-          content: body.messages[body.messages.length - 1].content
-        };
-        await sessionManager.saveMessage(sessionId, userMessageData, {
-          metadata: {
-            provider: providerName,
-            model: body.model,
-            temperature: body.temperature,
-            maxTokens: body.maxTokens
-          }
-        });
+        // Get context window from memory manager
+        const contextWindow = await memoryManager.getContextWindow('default', sessionId);
         
-        const result = await provider.chat(body.messages, {
+        // Add user message to context window
+        const userMessage = {
+          id: `msg_${Date.now()}`,
+          role: 'user',
+          content: body.messages[body.messages.length - 1].content,
+          timestamp: new Date().toISOString()
+        };
+        await memoryManager.addMessageToContext('default', sessionId, userMessage);
+        
+        // Use context window for provider call
+        const messagesForProvider = [...contextWindow, userMessage];
+        
+        const result = await provider.chat(messagesForProvider, {
           model: body.model,
           temperature: body.temperature,
           maxTokens: body.maxTokens,
@@ -527,7 +555,7 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
           const sessions = registry.listSessions(agentId);
           session = sessions.length > 0 ? sessions[0] : registry.createSession(agentId, { title: "Chat" });
           
-          // Save user message
+          // Save user message to registry
           registry.createMessage(agentId, session.id, {
             role: "user",
             content: userMessage,
@@ -539,27 +567,28 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
           // Continue with streaming anyway, use fresh history
         }
         
-        // Build message history (if session available, otherwise start fresh)
-        const history = session ? 
-          (registry.listMessages(agentId, session.id).messages || []).map((m) => ({
-            role: m.role,
-            content: m.content
-          })) : 
-          [];
+        // Get context window from memory manager
+        const contextWindow = await memoryManager.getCompleteContext(agentId, session?.id);
         
         // Add system prompt if defined for this agent
         if (agent.systemPrompt && agent.systemPrompt.trim()) {
-          history.unshift({
+          contextWindow.unshift({
             role: "system",
             content: agent.systemPrompt.trim()
           });
         }
         
-        // Add user message
-        history.push({
+        // Add user message to context window
+        const userMessageObj = {
+          id: `msg_${Date.now()}`,
           role: "user",
-          content: userMessage
-        });
+          content: userMessage,
+          timestamp: new Date().toISOString()
+        };
+        await memoryManager.addMessageToContext(agentId, session?.id, userMessageObj);
+        
+        // Use context window for provider call
+        const history = [...contextWindow, userMessageObj];
 
         // Call provider (default to ollama, agent can override)
         const chatProvider = providers[agent.provider?.toLowerCase()] || providers.ollama;
@@ -614,6 +643,15 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
                     tokensOut: finalResult.tokensOut,
                     model: finalResult.model
                   });
+                  
+                  // Add assistant response to context window
+                  const assistantMessage = {
+                    id: `msg_${Date.now()}`,
+                    role: "assistant",
+                    content: finalResult.content,
+                    timestamp: new Date().toISOString()
+                  };
+                  await memoryManager.addMessageToContext(agentId, session.id, assistantMessage);
                 } catch (msgErr) {
                   console.error('Failed to save assistant message:', msgErr.message);
                   // Don't break streaming for this error
@@ -662,19 +700,19 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
         tokensIn: 0
       });
 
-      // Build message history for provider
-      const history = (registry.listMessages(agentId, session.id).messages || []).map((m) => ({
-        role: m.role,
-        content: m.content
-      }));
+      // Get context window from memory manager
+      const contextWindow = await memoryManager.getCompleteContext(agentId, session.id);
       
       // Add system prompt if defined for this agent (at the beginning of the conversation)
       if (agent.systemPrompt && agent.systemPrompt.trim()) {
-        history.unshift({
+        contextWindow.unshift({
           role: "system",
           content: agent.systemPrompt.trim()
         });
       }
+      
+      // Use context window for provider call
+      const history = [...contextWindow];
 
       // Call provider (default to ollama, agent can override)
       const chatProvider = createProvider(agent.provider?.toLowerCase()) || createProvider('ollama');
@@ -712,6 +750,15 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
         tokensOut: result.tokensOut,
         model: result.model
       });
+      
+      // Add assistant response to context window
+      const assistantMessage = {
+        id: `msg_${Date.now()}`,
+        role: "assistant",
+        content: result.content,
+        timestamp: new Date().toISOString()
+      };
+      await memoryManager.addMessageToContext(agentId, session.id, assistantMessage);
 
       response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
       response.end(JSON.stringify({

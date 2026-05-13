@@ -21,7 +21,7 @@ export const ERROR_TYPES = {
 };
 
 /**
- * Create standardized error response object
+ * Create standardized error response object with enhanced security
  */
 export const createErrorResponse = (error, request) => {
   const errorInfo = {
@@ -29,41 +29,52 @@ export const createErrorResponse = (error, request) => {
     requestId: global.crypto?.randomUUID?.() || require('node:crypto').randomUUID(),
     path: request.url,
     method: request.method,
-    userAgent: request.headers['user-agent'],
-    ip: request.socket?.remoteAddress || 'unknown'
+    userAgent: request.headers['user-agent'] ? request.headers['user-agent'].substring(0, 100) : 'unknown',
+    ip: request.socket?.remoteAddress ? maskIP(request.socket.remoteAddress) : 'unknown'
   };
 
   // Determine error type and status
   let errorType = ERROR_TYPES.SERVER_ERROR;
-  let errorMessage = error.message || 'An unexpected error occurred';
+  let errorMessage = 'An unexpected error occurred';
   let errorDetails = null;
 
-  // Classify error based on message or type
-  if (error.name === 'ValidationError' || error.message?.toLowerCase().includes('validation')) {
+  // Sanitize error message for production
+  const rawErrorMessage = error.message || 'An unexpected error occurred';
+  if (process.env.NODE_ENV === 'development') {
+    errorMessage = rawErrorMessage;
+  } else {
+    errorMessage = getSafeErrorMessage(rawErrorMessage);
+  }
+
+  // Classify error based on message or type (using sanitized messages)
+  const errorName = error.name || '';
+  const errorLower = rawErrorMessage.toLowerCase();
+  
+  if (errorName === 'ValidationError' || errorLower.includes('validation')) {
     errorType = ERROR_TYPES.VALIDATION_ERROR;
-  } else if (error.name === 'UnauthorizedError' || error.message?.toLowerCase().includes('unauthorized')) {
+  } else if (errorName === 'UnauthorizedError' || errorLower.includes('unauthorized')) {
     errorType = ERROR_TYPES.AUTHENTICATION_ERROR;
-  } else if (error.name === 'ForbiddenError' || error.message?.toLowerCase().includes('forbidden')) {
+  } else if (errorName === 'ForbiddenError' || errorLower.includes('forbidden')) {
     errorType = ERROR_TYPES.AUTHORIZATION_ERROR;
-  } else if (error.code === 'ENOENT' || error.message?.toLowerCase().includes('not found')) {
+  } else if (error.code === 'ENOENT' || errorLower.includes('not found')) {
     errorType = ERROR_TYPES.NOT_FOUND;
-  } else if (error.code === 'EADDRINUSE' || error.message?.toLowerCase().includes('address already in use')) {
+  } else if (error.code === 'EADDRINUSE' || errorLower.includes('address already in use')) {
     errorType = ERROR_TYPES.SERVER_ERROR;
     errorMessage = 'Server configuration error';
-  } else if (error.code === 'ECONNREFUSED' || error.message?.toLowerCase().includes('connection refused')) {
+  } else if (error.code === 'ECONNREFUSED' || errorLower.includes('connection refused')) {
     errorType = ERROR_TYPES.EXTERNAL_SERVICE_ERROR;
     errorMessage = 'External service unavailable';
-  } else if (error.code === 'ETIMEDOUT' || error.message?.toLowerCase().includes('timeout')) {
+  } else if (error.code === 'ETIMEDOUT' || errorLower.includes('timeout')) {
     errorType = ERROR_TYPES.TIMEOUT_ERROR;
   }
 
   // Add error-specific details (excluding sensitive information)
-  if (error.code) {
+  if (error.code && isSafeErrorCode(error.code)) {
     errorDetails = { code: error.code };
   }
   
   if (error.field) {
-    errorDetails = { ...errorDetails, field: error.field };
+    errorDetails = { ...errorDetails, field: maskSensitiveField(error.field) };
   }
 
   return {
@@ -74,6 +85,99 @@ export const createErrorResponse = (error, request) => {
     stack: process.env.NODE_ENV === 'development' ? sanitizeError(error.stack) : undefined
   };
 };
+
+/**
+ * Get safe error message for production
+ * @param {string} message - Original error message
+ * @returns {string} Sanitized error message
+ */
+function getSafeErrorMessage(message) {
+  if (typeof message !== 'string') return 'Internal server error';
+  
+  // List of sensitive patterns to remove or mask
+  const sensitivePatterns = [
+    /password[^\s]*[\s\w]*/gi,
+    /secret[^\s]*[\s\w]*/gi,
+    /token[^\s]*[\s\w]*/gi,
+    /key[^\s]*[\s\w]*/gi,
+    /api[_-]?key[^\s]*[\s\w]*/gi,
+    /private[_-]?key[^\s]*[\s\w]*/gi,
+    /database[_-]?password[^\s]*[\s\w]*/gi,
+    /connection[_-]?string[^\s]*[\s\w]*/gi
+  ];
+  
+  let sanitized = message;
+  
+  // Mask sensitive information
+  for (const pattern of sensitivePatterns) {
+    sanitized = sanitized.replace(pattern, '***masked***');
+  }
+  
+  // Remove potentially dangerous technical details
+  sanitized = sanitized
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, '***uuid***')
+    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '***ip***')
+    .replace(/\/[^\s]*\/([^\s]*)\/[^\s]*\//gi, '***masked***')
+    .substring(0, 500); // Limit length
+  
+  return sanitized || 'Internal server error';
+}
+
+/**
+ * Check if error code is safe to expose
+ * @param {string|number} code - Error code
+ * @returns {boolean} True if safe to expose
+ */
+function isSafeErrorCode(code) {
+  if (typeof code === 'number') return true;
+  
+  const safeCodes = [
+    'ENOENT', 'EADDRINUSE', 'ECONNREFUSED', 'ETIMEDOUT',
+    'EACCES', 'EPERM', 'EINVAL', 'ERANGE'
+  ];
+  
+  return safeCodes.includes(String(code).toUpperCase());
+}
+
+/**
+ * Mask IP address for privacy
+ * @param {string} ip - IP address
+ * @returns {string} Masked IP address
+ */
+function maskIP(ip) {
+  if (!ip || typeof ip !== 'string') return 'unknown';
+  
+  // Handle IPv4
+  if (ip.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
+    const parts = ip.split('.');
+    return `${parts[0]}.${parts[1]}.${parts[2]}.***`;
+  }
+  
+  // Handle IPv6 (simplified)
+  if (ip.includes(':')) {
+    return '***:***:***:***:***:***:***:***';
+  }
+  
+  return ip.substring(0, 8) + '***';
+}
+
+/**
+ * Mask sensitive field names
+ * @param {string} field - Field name
+ * @returns {string} Masked field name
+ */
+function maskSensitiveField(field) {
+  if (!field || typeof field !== 'string') return 'field';
+  
+  const sensitiveFields = ['password', 'secret', 'token', 'key', 'auth', 'credential'];
+  const lowerField = field.toLowerCase();
+  
+  if (sensitiveFields.some(sf => lowerField.includes(sf))) {
+    return '***sensitive_field***';
+  }
+  
+  return field.length > 20 ? field.substring(0, 10) + '***' + field.substring(field.length - 5) : field;
+}
 
 /**
  * Global error handler middleware

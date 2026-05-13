@@ -326,35 +326,48 @@ export const sanitizeJsonPayload = (payload) => {
 // Clean up old entries more efficiently with enhanced memory management
 export const cleanupRateLimitEntries = () => {
   const now = Date.now();
-  const keysToDelete = [];
   
-  // First pass: collect old entries
+  // Single pass to collect expired entries and maintain size limit
+  const activeEntries = [];
+  let expiredCount = 0;
+  
   for (const [key, data] of rateLimit.entries()) {
     if (now - data.timestamp > RATE_LIMIT_WINDOW) {
-      keysToDelete.push(key);
+      expiredCount++;
+    } else {
+      activeEntries.push({ key, data });
     }
   }
   
-  // Delete old entries in batch
-  for (const key of keysToDelete) {
-    rateLimit.delete(key);
+  // Remove expired entries
+  if (expiredCount > 0) {
+    const keysToKeep = new Set(activeEntries.map(e => e.key));
+    for (const key of rateLimit.keys()) {
+      if (!keysToKeep.has(key)) {
+        rateLimit.delete(key);
+      }
+    }
   }
   
-  // If we still have too many entries, enforce hard limit with more aggressive cleanup
-  if (rateLimit.size > MAX_RATE_LIMIT_ENTRIES) {
+  // Memory optimization: enforce maximum size with efficient cleanup
+  if (activeEntries.length > MAX_RATE_LIMIT_ENTRIES) {
     // Sort by timestamp (most recent first)
-    const sortedEntries = Array.from(rateLimit.entries())
-      .sort((a, b) => b[1].timestamp - a[1].timestamp);
+    activeEntries.sort((a, b) => b.data.timestamp - a.data.timestamp);
+    
+    // Calculate how many entries to keep (50% for better performance)
+    const keepCount = Math.floor(MAX_RATE_LIMIT_ENTRIES / 2);
+    const recentEntries = activeEntries.slice(0, keepCount);
     
     // Clear the map and repopulate with only the most recent entries
     rateLimit.clear();
-    const entriesToKeep = sortedEntries.slice(0, MAX_RATE_LIMIT_ENTRIES / 4); // Keep 25% of capacity
     
-    for (const [key, data] of entriesToKeep) {
-      rateLimit.set(key, data);
+    for (const entry of recentEntries) {
+      rateLimit.set(entry.key, entry.data);
     }
     
-    console.log(`Rate limit memory optimization: removed ${rateLimit.size - entriesToKeep.length} entries to stay under limit`);
+    console.log(`Rate limit memory optimization: kept ${keepCount} of ${activeEntries.length} entries (${expiredCount} expired)`);
+  } else if (expiredCount > 0) {
+    console.log(`Rate limit cleanup: removed ${expiredCount} expired entries, kept ${activeEntries.length} active`);
   }
 };
 
@@ -417,35 +430,48 @@ export const applyRateLimit = (request, response) => {
 export const startRateLimitCleanup = () => {
   setInterval(() => {
     const now = Date.now();
-    const keysToDelete = [];
     
-    // Batch collect keys to delete and perform size check in one pass
+    // Single pass to collect expired entries and maintain size limit
+    const activeEntries = [];
+    let expiredCount = 0;
+    
     for (const [key, data] of rateLimit.entries()) {
       if (now - data.timestamp > RATE_LIMIT_WINDOW) {
-        keysToDelete.push(key);
+        expiredCount++;
+      } else {
+        activeEntries.push({ key, data });
       }
     }
     
-    // Batch delete for better performance
-    for (const key of keysToDelete) {
-      rateLimit.delete(key);
+    // Remove expired entries
+    if (expiredCount > 0) {
+      const keysToKeep = new Set(activeEntries.map(e => e.key));
+      for (const key of rateLimit.keys()) {
+        if (!keysToKeep.has(key)) {
+          rateLimit.delete(key);
+        }
+      }
     }
     
     // Memory optimization: enforce maximum size with efficient cleanup
-    if (rateLimit.size > MAX_REQUESTS_PER_MINUTE * 15) {
+    if (activeEntries.length > MAX_REQUESTS_PER_MINUTE * 15) {
       // Sort by timestamp and keep most recent entries
-      const sortedEntries = Array.from(rateLimit.entries())
-        .sort((a, b) => b[1].timestamp - a[1].timestamp);
+      activeEntries.sort((a, b) => b.data.timestamp - a.data.timestamp);
+      
+      // Calculate how many entries to keep (75% for better performance)
+      const keepCount = Math.floor(MAX_REQUESTS_PER_MINUTE * 10);
+      const recentEntries = activeEntries.slice(0, keepCount);
       
       // Clear and repopulate with recent entries
       rateLimit.clear();
-      const entriesToKeep = sortedEntries.slice(0, MAX_REQUESTS_PER_MINUTE * 10);
       
-      for (const [key, data] of entriesToKeep) {
-        rateLimit.set(key, data);
+      for (const entry of recentEntries) {
+        rateLimit.set(entry.key, entry.data);
       }
       
-      console.log(`Rate limit cleanup: removed ${rateLimit.size - entriesToKeep.length} old entries`);
+      console.log(`Rate limit cleanup: kept ${keepCount} of ${activeEntries.length} entries (${expiredCount} expired)`);
+    } else if (expiredCount > 0) {
+      console.log(`Rate limit cleanup: removed ${expiredCount} expired entries, kept ${activeEntries.length} active`);
     }
   }, CONN_CLEANUP_INTERVAL);
 };

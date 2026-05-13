@@ -15,6 +15,7 @@ import { registerHealthRoutes } from "./routes/health.js";
 import { registerToolRoutes } from "./routes/tools.js";
 import { registerJobRoutes } from "./routes/jobs.js";
 import { registerTokenRoutes } from "./routes/tokenRoutes.js";
+import { registerMemoryRoutes } from "./routes/memory.js";
 import { globalErrorHandler, notFoundHandler, requestLogger } from "./middleware/errorMiddleware.js";
 import createRateLimiter from "./middleware/rateLimiter.js";
 import createAuthMiddleware from "./middleware/authMiddleware.js";
@@ -82,6 +83,7 @@ async function main() {
     registerToolRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     registerJobRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     registerTokenRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    registerMemoryRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
 
     console.log(`Registered ${routeHandlers.length} route handler(s)`);
     

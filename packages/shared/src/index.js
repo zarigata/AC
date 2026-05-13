@@ -195,6 +195,38 @@ const ensureString = (value, field, min, max) => {
   return normalized;
 };
 
+/**
+ * Enhanced ensureString with additional security checks
+ * @param {string} value - Value to validate
+ * @param {string} field - Field name for error messages
+ * @param {number} min - Minimum length
+ * @param {number} max - Maximum length
+ * @param {Object} options - Additional validation options
+ * @returns {string} Validated and sanitized string
+ */
+const ensureStringEnhanced = (value, field, min, max, options = {}) => {
+  const normalized = ensureString(value, field, min, max);
+  
+  // Additional security: Check for other dangerous content
+  if (options.noHTML && /<[^>]*>/.test(normalized)) {
+    throw new Error(`${field} contains HTML tags which are not allowed.`);
+  }
+  
+  if (options.noSQL && /[;'"`]/.test(normalized)) {
+    throw new Error(`${field} contains potentially dangerous SQL characters.`);
+  }
+  
+  if (options.noScripts && /(?:javascript:|data:|<script)/i.test(normalized)) {
+    throw new Error(`${field} contains potentially dangerous script content.`);
+  }
+  
+  if (options.noPaths && /(?:\.\.|\/\.\.|\.\.)/.test(normalized)) {
+    throw new Error(`${field} contains potentially dangerous path sequences.`);
+  }
+  
+  return normalized;
+};
+
 const ensureBoolean = (value, field) => {
   if (typeof value !== "boolean") {
     throw new Error(`${field} must be a boolean.`);
@@ -339,13 +371,28 @@ export const parseCreateAgentInput = (input) => {
     throw new Error('Agent input must be an object');
   }
   
-  const provider = getProviderById(ensureString(input.provider, "provider", 2, 80));
+  // Enhanced validation with security checks
+  const provider = getProviderById(
+    ensureStringEnhanced(input.provider, "provider", 2, 80, { noSQL: true })
+  );
 
   return {
-    name: ensureString(input.name, "name", 2, 80),
-    purpose: ensureString(input.purpose, "purpose", 10, 240),
+    name: ensureStringEnhanced(input.name, "name", 2, 80, { 
+      noHTML: true, 
+      noSQL: true, 
+      noScripts: true,
+      noPaths: true
+    }),
+    purpose: ensureStringEnhanced(input.purpose, "purpose", 10, 240, { 
+      noHTML: true, 
+      noSQL: true,
+      noScripts: true
+    }),
     provider: provider.id,
-    model: ensureString(input.model, "model", 2, 120),
+    model: ensureStringEnhanced(input.model, "model", 2, 120, { 
+      noSQL: true,
+      noPaths: true
+    }),
     isolationMode: ensureEnum(input.isolationMode, "isolationMode", isolationModeValues),
     maxConcurrentTasks: ensureInteger(input.maxConcurrentTasks, "maxConcurrentTasks", 1, 32),
     peerAccess: ensureBoolean(input.peerAccess, "peerAccess")
