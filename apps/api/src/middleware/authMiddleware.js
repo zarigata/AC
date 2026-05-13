@@ -12,8 +12,13 @@ import jwt from 'jsonwebtoken';
  * Can be customized via environment variables or settings
  */
 const DEFAULT_CONFIG = {
-  // JWT settings
-  jwtSecret: process.env.ZSIISTANT_JWT_SECRET || 'your-secret-key-change-in-production',
+  // JWT settings - CRITICAL: Must use proper secret in production
+  jwtSecret: process.env.ZSIISTANT_JWT_SECRET || 
+    (process.env.NODE_ENV === 'production' ? 
+      (() => {
+        throw new Error('JWT_SECRET is required in production environment');
+      })() : 
+      'development-secret-key-change-in-production'),
   jwtExpiresIn: process.env.ZSIISTANT_JWT_EXPIRES_IN || '24h',
   
   // API Key settings
@@ -29,7 +34,17 @@ const DEFAULT_CONFIG = {
     '/api/settings',
     '/api/settings/',
     '/api/providers',
-    '/api/providers/'
+    '/api/providers/',
+    '/api/tokens',
+    '/api/tokens/',
+    '/api/jobs',
+    '/api/jobs/',
+    '/api/memory',
+    '/api/memory/',
+    '/api/webhooks',
+    '/api/webhooks/',
+    '/api/presets',
+    '/api/presets/'
   ],
   
   // Public routes (no authentication required)

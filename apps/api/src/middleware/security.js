@@ -289,9 +289,23 @@ const ALLOWED_ORIGINS = [
   "http://localhost:4000",
   "http://127.0.0.1:3000",
   "http://127.0.0.1:4000",
+  "http://localhost:5000",
+  "http://127.0.0.1:5000",
   "null", // Allow requests without origin header (local testing)
   undefined // Allow requests without origin header
 ];
+
+// Enhanced security: Allow dynamic origins from environment variable
+if (process.env.ZSIISTANT_ALLOWED_ORIGINS) {
+  try {
+    const dynamicOrigins = JSON.parse(process.env.ZSIISTANT_ALLOWED_ORIGINS);
+    if (Array.isArray(dynamicOrigins)) {
+      ALLOWED_ORIGINS.push(...dynamicOrigins);
+    }
+  } catch (err) {
+    console.warn('Invalid ZSIISTANT_ALLOWED_ORIGINS format, using default origins');
+  }
+}
 
 export const isOriginAllowed = (origin) => {
   // Allow requests without origin for local development/testing
@@ -430,48 +444,51 @@ export const applyRateLimit = (request, response) => {
 export const startRateLimitCleanup = () => {
   setInterval(() => {
     const now = Date.now();
+    const cleanupStart = performance.now();
     
-    // Single pass to collect expired entries and maintain size limit
+    // More efficient single pass cleanup
+    const keysToDelete = [];
     const activeEntries = [];
     let expiredCount = 0;
     
+    // First pass: identify entries to keep/delete
     for (const [key, data] of rateLimit.entries()) {
       if (now - data.timestamp > RATE_LIMIT_WINDOW) {
+        keysToDelete.push(key);
         expiredCount++;
       } else {
         activeEntries.push({ key, data });
       }
     }
     
-    // Remove expired entries
-    if (expiredCount > 0) {
-      const keysToKeep = new Set(activeEntries.map(e => e.key));
-      for (const key of rateLimit.keys()) {
-        if (!keysToKeep.has(key)) {
-          rateLimit.delete(key);
-        }
+    // Second pass: remove expired entries in batch
+    if (keysToDelete.length > 0) {
+      for (const key of keysToDelete) {
+        rateLimit.delete(key);
       }
     }
     
     // Memory optimization: enforce maximum size with efficient cleanup
-    if (activeEntries.length > MAX_REQUESTS_PER_MINUTE * 15) {
-      // Sort by timestamp and keep most recent entries
+    if (activeEntries.length > MAX_RATE_LIMIT_ENTRIES) {
+      // Sort by timestamp (most recent first) using a more efficient method
       activeEntries.sort((a, b) => b.data.timestamp - a.data.timestamp);
       
-      // Calculate how many entries to keep (75% for better performance)
-      const keepCount = Math.floor(MAX_REQUESTS_PER_MINUTE * 10);
+      // Calculate how many entries to keep (60% for better performance)
+      const keepCount = Math.floor(MAX_RATE_LIMIT_ENTRIES * 0.6);
       const recentEntries = activeEntries.slice(0, keepCount);
       
-      // Clear and repopulate with recent entries
+      // Clear and repopulate with only recent entries
       rateLimit.clear();
       
       for (const entry of recentEntries) {
         rateLimit.set(entry.key, entry.data);
       }
       
-      console.log(`Rate limit cleanup: kept ${keepCount} of ${activeEntries.length} entries (${expiredCount} expired)`);
+      const cleanupTime = (performance.now() - cleanupStart).toFixed(2);
+      console.log(`Rate limit cleanup: kept ${keepCount} of ${activeEntries.length} entries (${expiredCount} expired) in ${cleanupTime}ms`);
     } else if (expiredCount > 0) {
-      console.log(`Rate limit cleanup: removed ${expiredCount} expired entries, kept ${activeEntries.length} active`);
+      const cleanupTime = (performance.now() - cleanupStart).toFixed(2);
+      console.log(`Rate limit cleanup: removed ${expiredCount} expired entries in ${cleanupTime}ms`);
     }
   }, CONN_CLEANUP_INTERVAL);
 };

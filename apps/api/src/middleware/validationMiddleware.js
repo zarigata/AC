@@ -4,18 +4,59 @@
 
 import { z } from "zod";
 
+// Enhanced security validation functions
+const sanitizeInput = (input, fieldName) => {
+  if (typeof input !== 'string') return input;
+  
+  // Remove potentially dangerous characters
+  let sanitized = input
+    .replace(/[\x00-\x1F\x7F-\x9F]/g, '') // Remove control characters
+    .replace(/\s+/g, ' ').trim(); // Normalize whitespace
+  
+  // Check for dangerous patterns
+  const dangerousPatterns = [
+    /<script[^>]*>.*?<\/script>/gi,
+    /javascript:/gi,
+    /eval\(/gi,
+    /exec\(/gi,
+    /Function\(/gi,
+    /on\w+\s*=/gi,
+    /SELECT\s+/gi,
+    /INSERT\s+/gi,
+    /UPDATE\s+/gi,
+    /DELETE\s+/gi,
+    /DROP\s+/gi,
+    /CREATE\s+/gi,
+    /ALTER\s+/gi,
+    /;\s*--/g,
+    /\b(union|select|insert|update|delete|drop|create|alter)\b/gi
+  ];
+  
+  for (const pattern of dangerousPatterns) {
+    if (pattern.test(sanitized)) {
+      throw new Error(`Invalid ${fieldName}: contains potentially dangerous content`);
+    }
+  }
+  
+  return sanitized;
+};
+
+// Enhanced string validation with security checks
+const secureString = (min, max, fieldName) => 
+  z.string().min(min).max(max).transform(val => sanitizeInput(val, fieldName));
+
 // Agent schemas
 const createAgentSchema = z.object({
-  name: z.string().min(2).max(80),
-  purpose: z.string().min(10).max(240),
-  provider: z.string().min(2).max(80),
-  model: z.string().min(2).max(120),
+  name: secureString(2, 80, "name"),
+  purpose: secureString(10, 240, "purpose"),
+  provider: secureString(2, 80, "provider"),
+  model: secureString(2, 120, "model"),
   isolationMode: z.enum(["isolated", "selective", "mesh"]).optional().default("isolated"),
   maxConcurrentTasks: z.number().min(1).max(32).optional().default(4),
   peerAccess: z.boolean().optional().default(false),
   // Optional fields for backward compatibility
-  description: z.string().max(500).optional().nullable(),
-  systemPrompt: z.string().max(2000).optional().nullable(),
+  description: z.string().max(500).optional().nullable().transform(val => val ? sanitizeInput(val, "description") : val),
+  systemPrompt: z.string().max(2000).optional().nullable().transform(val => val ? sanitizeInput(val, "systemPrompt") : val),
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().min(1).max(32000).optional(),
   enabled: z.boolean().optional(),
@@ -23,16 +64,16 @@ const createAgentSchema = z.object({
 });
 
 const updateAgentSchema = z.object({
-  name: z.string().min(2).max(80).optional(),
-  purpose: z.string().min(10).max(240).optional(),
-  provider: z.string().min(2).max(80).optional(),
-  model: z.string().min(2).max(120).optional(),
+  name: secureString(2, 80, "name").optional(),
+  purpose: secureString(10, 240, "purpose").optional(),
+  provider: secureString(2, 80, "provider").optional(),
+  model: secureString(2, 120, "model").optional(),
   isolationMode: z.enum(["strict", "moderate", "lenient"]).optional(),
   maxConcurrentTasks: z.number().min(1).max(32).optional(),
   peerAccess: z.boolean().optional(),
   // Optional fields for backward compatibility
-  description: z.string().max(500).optional().nullable(),
-  systemPrompt: z.string().max(2000).optional().nullable(),
+  description: z.string().max(500).optional().nullable().transform(val => val ? sanitizeInput(val, "description") : val),
+  systemPrompt: z.string().max(2000).optional().nullable().transform(val => val ? sanitizeInput(val, "systemPrompt") : val),
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().min(1).max(32000).optional(),
   enabled: z.boolean().optional(),
@@ -41,15 +82,15 @@ const updateAgentSchema = z.object({
 
 // Chat schemas
 const sendMessageSchema = z.object({
-  message: z.string().min(1).max(16000),
-  sessionId: z.string().min(1).max(100).optional(),
+  message: z.string().min(1).max(16000).transform(val => sanitizeInput(val, "message")),
+  sessionId: z.string().min(1).max(100).optional().transform(val => val ? sanitizeInput(val, "sessionId") : val),
   stream: z.boolean().optional().default(false),
   tools: z.array(z.string()).optional().default([]),
 });
 
 const createChatSessionSchema = z.object({
-  agentId: z.string().min(1).max(100),
-  initialMessage: z.string().optional(),
+  agentId: z.string().min(1).max(100).transform(val => sanitizeInput(val, "agentId")),
+  initialMessage: z.string().optional().transform(val => val ? sanitizeInput(val, "initialMessage") : val),
   metadata: z.record(z.any()).optional(),
 });
 

@@ -103,7 +103,10 @@ function getSafeErrorMessage(message) {
     /api[_-]?key[^\s]*[\s\w]*/gi,
     /private[_-]?key[^\s]*[\s\w]*/gi,
     /database[_-]?password[^\s]*[\s\w]*/gi,
-    /connection[_-]?string[^\s]*[\s\w]*/gi
+    /connection[_-]?string[^\s]*[\s\w]*/gi,
+    /jwt[^\s]*[\s\w]*/gi,
+    /auth[^\s]*[\s\w]*/gi,
+    /credential[^\s]*[\s\w]*/gi
   ];
   
   let sanitized = message;
@@ -118,6 +121,7 @@ function getSafeErrorMessage(message) {
     .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, '***uuid***')
     .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '***ip***')
     .replace(/\/[^\s]*\/([^\s]*)\/[^\s]*\//gi, '***masked***')
+    .replace(/[a-zA-Z0-9]{32,}/g, '***long-string***') // Mask very long strings that might be tokens
     .substring(0, 500); // Limit length
   
   return sanitized || 'Internal server error';
