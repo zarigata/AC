@@ -83,7 +83,7 @@ import {
   parseAgent,
   parseCreateAgentInput,
   parseCreateLinkInput
-} from "../../../packages/shared/src/index.js";
+} from "./shared/simpleShared.js";
 
 const now = () => new Date().toISOString();
 
