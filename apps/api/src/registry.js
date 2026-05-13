@@ -1528,4 +1528,20 @@ export class AgentRegistry {
       return [];
     }
   }
+
+  deleteJob(jobId) {
+    try {
+      if (!jobId || typeof jobId !== 'string') {
+        throw new Error('Job ID is required and must be a string');
+      }
+      
+      const deleteStmt = this.db.prepare('DELETE FROM jobs WHERE id = ?');
+      const result = deleteStmt.run(jobId);
+      
+      return result.changes > 0;
+    } catch (err) {
+      console.error('Error deleting job:', err.message);
+      return false;
+    }
+  }
 }
