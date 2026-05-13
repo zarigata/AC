@@ -77,7 +77,7 @@ export const broadcastAgentStatus = (registry) => {
         status: 'active',
         model: agent.model,
         isolationMode: agent.isolationMode,
-        concurrentTasks: 0, // TODO: Implement getCurrentTaskCount
+        concurrentTasks: 0, // TODO: Add actual task tracking implementation
         lastActivity: Date.now()
       })),
       systemStats: {

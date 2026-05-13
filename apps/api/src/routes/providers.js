@@ -15,7 +15,7 @@ export function registerProviderRoutes(server, registry, providers, failoverChai
         summary.failoverChains = Object.keys(failoverChains).map(chainName => ({
           name: chainName,
           providerCount: failoverChains[chainName].failoverChain.length,
-          healthy: true, // TODO: Add actual health check
+          healthy: true, // TODO: Implement provider health endpoint
           default: chainName === DEFAULT_FAILOVER_CHAIN
         }));
         
