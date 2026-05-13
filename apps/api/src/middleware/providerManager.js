@@ -16,6 +16,7 @@ import {
 // The imported functions are already available - no need to redefine them
 
 import { createFailoverChain } from "../adapters/failover.js";
+import { FAILOVER_CONFIG, isFailoverEnabled, getFailoverChain } from "../config/failoverConfig.js";
 
 // Multi-provider setup — primary is Ollama (local), fallbacks configured via env
 const providers = {};
@@ -24,71 +25,81 @@ const DEFAULT_PROVIDER = process.env.DEFAULT_PROVIDER || "ollama";
 
 // Failover chain configuration
 const failoverChains = {};
-const DEFAULT_FAILOVER_CHAIN = process.env.DEFAULT_FAILOVER_CHAIN || "default";
+let DEFAULT_FAILOVER_CHAIN = process.env.DEFAULT_FAILOVER_CHAIN || "default";
 
 /**
- * Initialize default failover chain if configured
+ * Initialize failover chains with enhanced health monitoring
  */
 export const initFailoverChains = () => {
-  // Check for failover chain configuration in environment variables
-  const failoverConfigEnv = process.env.FAILOVER_CONFIG;
-  
-  if (failoverConfigEnv) {
-    try {
-      const config = JSON.parse(failoverConfigEnv);
-      
-      // Initialize each configured failover chain
-      for (const [chainName, chainConfig] of Object.entries(config)) {
-        try {
-          const failoverChain = createFailoverChain(chainConfig);
-          failoverChains[chainName] = failoverChain;
-          console.log(`Initialized failover chain '${chainName}' with ${chainConfig.chain.length} providers`);
-        } catch (err) {
-          console.error(`Failed to initialize failover chain '${chainName}':`, err.message);
+  // Use failover configuration if available and enabled
+  if (isFailoverEnabled() && FAILOVER_CONFIG.chains) {
+    console.log('Initializing failover chains from configuration...');
+    
+    // Initialize each configured failover chain
+    for (const [chainName, chainConfig] of Object.entries(FAILOVER_CONFIG.chains)) {
+      try {
+        // Validate chain configuration
+        if (!chainConfig.chain || !Array.isArray(chainConfig.chain) || chainConfig.chain.length === 0) {
+          throw new Error(`Invalid chain configuration for '${chainName}'`);
         }
+        
+        // Validate each provider in the chain
+        for (const provider of chainConfig.chain) {
+          if (!provider.name || !provider.config) {
+            throw new Error(`Invalid provider configuration in chain '${chainName}'`);
+          }
+        }
+        
+        const failoverChain = createFailoverChain(chainConfig);
+        failoverChains[chainName] = failoverChain;
+        console.log(`✅ Initialized failover chain '${chainName}' with ${chainConfig.chain.length} providers`);
+        
+      } catch (err) {
+        console.error(`❌ Failed to initialize failover chain '${chainName}':`, err.message);
       }
-      
-      // Set default failover chain if specified
-      if (config.default) {
-        DEFAULT_FAILOVER_CHAIN = config.default;
+    }
+    
+    // Set default failover chain if specified
+    if (FAILOVER_CONFIG.default) {
+      DEFAULT_FAILOVER_CHAIN = FAILOVER_CONFIG.default;
+      console.log(`📋 Default failover chain set to: ${DEFAULT_FAILOVER_CHAIN}`);
+    }
+  } else {
+    console.log('⚠️  Failover disabled or no configuration available, using individual providers');
+    
+    // Auto-detect failover chain from available providers
+    const availableProviders = [];
+    
+    // Always add ollama as primary if available
+    if (providers.ollama) {
+      availableProviders.push({ name: 'ollama', config: { ...providers.ollama } });
+    }
+    
+    // Add other providers if they have API keys configured
+    for (const name of providerNames.slice(1)) {
+      if (providers[name]) {
+        availableProviders.push({ name, config: { ...providers[name] } });
       }
-    } catch (err) {
-      console.error('Failed to parse FAILOVER_CONFIG:', err.message);
     }
-  }
-  
-  // Auto-detect failover chain from available providers
-  const availableProviders = [];
-  
-  // Always add ollama as primary if available
-  if (providers.ollama) {
-    availableProviders.push({ name: 'ollama', config: providers.ollama });
-  }
-  
-  // Add other providers if they have API keys configured
-  for (const name of providerNames.slice(1)) {
-    if (providers[name]) {
-      availableProviders.push({ name, config: providers[name] });
-    }
-  }
-  
-  // Create a default failover chain if we have multiple providers
-  if (availableProviders.length > 1) {
-    try {
-      const defaultChain = createFailoverChain(availableProviders);
-      failoverChains[DEFAULT_FAILOVER_CHAIN] = defaultChain;
-      console.log(`Auto-created default failover chain with ${availableProviders.length} providers`);
-    } catch (err) {
-      console.error('Failed to auto-create failover chain:', err.message);
-    }
-  } else if (availableProviders.length === 1) {
-    // Create a single-provider failover chain for consistency
-    try {
-      const singleChain = createFailoverChain(availableProviders);
-      failoverChains[DEFAULT_FAILOVER_CHAIN] = singleChain;
-      console.log(`Created single-provider failover chain with ${availableProviders.length} provider`);
-    } catch (err) {
-      console.error('Failed to create single-provider failover chain:', err.message);
+    
+    // Create a default failover chain if we have multiple providers
+    if (availableProviders.length > 1) {
+      try {
+        const defaultChain = createFailoverChain({ chain: availableProviders });
+        failoverChains[DEFAULT_FAILOVER_CHAIN] = defaultChain;
+        console.log(`🔄 Auto-created default failover chain with ${availableProviders.length} providers`);
+      } catch (err) {
+        console.error('❌ Failed to auto-create failover chain:', err.message);
+      }
+    } else if (availableProviders.length === 1) {
+      // Create a single-provider failover chain for consistency
+      try {
+        const singleChain = createFailoverChain({ chain: availableProviders });
+        failoverChains[DEFAULT_FAILOVER_CHAIN] = singleChain;
+        console.log(`🔧 Created single-provider failover chain with ${availableProviders.length} provider`);
+      } catch (err) {
+        console.error('❌ Failed to create single-provider failover chain:', err.message);
+      }
     }
   }
 };

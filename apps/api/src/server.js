@@ -22,6 +22,7 @@ import { registerAllTools } from "./tools/tool-handlers.js";
 
 import { settings, serverState, initializeServer, startServer, getServerStatus } from "./config/serverConfig.js";
 import { setupGracefulShutdown } from "./config/serverConfig.js";
+import { FAILOVER_CONFIG, isFailoverEnabled } from "./config/failoverConfig.js";
 
 // Set global server start time for uptime calculations
 global.serverStartTime = Date.now();
@@ -46,6 +47,18 @@ async function main() {
 
     // Initialize server with all components
     const { server, config, providers } = await initializeServer(registry);
+    
+    // Load failover configuration if enabled
+    if (isFailoverEnabled()) {
+      console.log('🔄 Failover chains configured and ready');
+      
+      // Log configured failover chains
+      for (const [chainName, chainConfig] of Object.entries(FAILOVER_CONFIG.chains)) {
+        console.log(`📋 Failover chain '${chainName}': ${chainConfig.chain.map(p => p.name).join(' → ')}`);
+      }
+    } else {
+      console.log('⚠️  Failover disabled');
+    }
 
     // Collect route handlers into an array for sequential processing
     const routeHandlers = [];
