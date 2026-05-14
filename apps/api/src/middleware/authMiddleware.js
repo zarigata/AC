@@ -80,9 +80,7 @@ const DEFAULT_CONFIG = {
     '/api/webhooks/telegram',
     '/api/webhooks/telegram-default',
     '/api/webhooks/discord',
-    '/api/webhooks/discord-default',
-    '/api/chat',
-    '/api/chat/'
+    '/api/webhooks/discord-default'
   ]
 };
 
