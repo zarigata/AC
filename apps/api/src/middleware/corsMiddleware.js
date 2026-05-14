@@ -1,15 +1,18 @@
 /**
  * CORS Middleware for Zsiistant API
- * Provides configurable CORS headers based on environment settings
+ * Provides configurable CORS headers based on runtime settings or environment variables
  */
+
+// Runtime settings object (will be updated via settings API)
+let runtimeSettings = null;
 
 /**
  * Default CORS configuration with enhanced security
- * Can be overridden via environment variables
+ * Can be overridden via environment variables or runtime settings
  */
 const DEFAULT_CONFIG = {
   // Allowed origins - can be single origin, comma-separated list, or '*'
-  // In production, must be explicitly set via environment variable
+  // In production, must be explicitly set via environment variable or runtime settings
   allowedOrigins: process.env.ZSIISTANT_CORS_ORIGINS || 
     (process.env.NODE_ENV === 'production' ? 
       (process.env.ZSIISTANT_CORS_ORIGINS ? 
@@ -37,6 +40,26 @@ const DEFAULT_CONFIG = {
   allowAllOrigins: process.env.NODE_ENV === 'development' && 
     (process.env.ZSIISTANT_CORS_ALLOW_ALL === 'true' || false)
 };
+
+/**
+ * Update runtime settings for CORS configuration
+ * @param {Object} settings - Runtime settings object
+ */
+export function updateRuntimeSettings(settings) {
+  runtimeSettings = settings;
+  console.log('CORS runtime settings updated');
+}
+
+/**
+ * Get current CORS configuration from runtime settings or defaults
+ * @returns {Object} CORS configuration
+ */
+function getCurrentConfig() {
+  if (runtimeSettings && runtimeSettings.cors) {
+    return { ...DEFAULT_CONFIG, ...runtimeSettings.cors };
+  }
+  return { ...DEFAULT_CONFIG };
+}
 
 /**
  * Parse origins from string to array with validation
@@ -142,7 +165,7 @@ function isOriginAllowed(origin, allowedOrigins) {
  * @param {Object} config - CORS configuration
  * @returns {Object} CORS headers object
  */
-function getCorsHeaders(req, config = DEFAULT_CONFIG) {
+function getCorsHeaders(req, config = getCurrentConfig()) {
   const headers = {};
   const origin = req.headers.origin;
   const allowedOrigins = parseOrigins(config.allowedOrigins);
@@ -249,7 +272,9 @@ function validateOriginString(origin) {
  * @returns {Function} Express-style middleware function
  */
 function createCorsMiddleware(config = {}) {
-  const finalConfig = { ...DEFAULT_CONFIG, ...config };
+  // Use runtime settings if available, otherwise use provided config or defaults
+  const currentConfig = getCurrentConfig();
+  const finalConfig = { ...currentConfig, ...config };
   
   // Validate configuration on startup
   const configErrors = validateCorsConfig(finalConfig);
@@ -344,7 +369,7 @@ function validateCorsConfig(config) {
  * @returns {Object} Current CORS configuration
  */
 function getCorsConfig() {
-  return { ...DEFAULT_CONFIG };
+  return getCurrentConfig();
 }
 
 /**
@@ -359,7 +384,12 @@ function updateCorsConfig(newConfig) {
     return false;
   }
   
+  // Update both DEFAULT_CONFIG and runtime settings if available
   Object.assign(DEFAULT_CONFIG, newConfig);
+  if (runtimeSettings && runtimeSettings.cors) {
+    Object.assign(runtimeSettings.cors, newConfig);
+  }
+  
   return true;
 }
 

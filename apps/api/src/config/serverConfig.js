@@ -30,7 +30,21 @@ export const settings = {
   maxAgents: 100,
   supportedIsolationModes: ["isolated", "selective", "mesh"],
   supportedLinkModes: ["observe", "message", "delegate"],
-  providers: 0 // Will be updated after initialization
+  providers: 0, // Will be updated after initialization
+  cors: {
+    allowedOrigins: process.env.ZSIISTANT_CORS_ORIGINS || 
+      (process.env.NODE_ENV === 'production' ? 
+        (process.env.ZSIISTANT_CORS_ORIGINS ? process.env.ZSIISTANT_CORS_ORIGINS : '') : 
+        'http://localhost:3000,http://localhost:4000,http://127.0.0.1:3000,http://127.0.0.1:4000,http://localhost:5000,http://127.0.0.1:5000'),
+    allowedMethods: process.env.ZSIISTANT_CORS_METHODS || 'GET, POST, PATCH, DELETE, OPTIONS, HEAD',
+    allowedHeaders: process.env.ZSIISTANT_CORS_HEADERS || 'Content-Type, Authorization, X-Requested-With, X-API-Key, X-Content-Type-Options',
+    exposedHeaders: process.env.ZSIISTANT_CORS_EXPOSED_HEADERS || '',
+    maxAge: parseInt(process.env.ZSIISTANT_CORS_MAX_AGE) || 86400,
+    allowCredentials: process.env.NODE_ENV === 'production' ? 
+      (process.env.ZSIISTANT_CORS_CREDENTIALS === 'true' && process.env.ZSIISTANT_CORS_ORIGINS) : true,
+    allowAllOrigins: process.env.NODE_ENV === 'development' && 
+      (process.env.ZSIISTANT_CORS_ALLOW_ALL === 'true' || false)
+  }
 };
 
 // Global server state

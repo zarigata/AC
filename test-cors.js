@@ -31,18 +31,22 @@ async function curlCommand(args, options = {}) {
     });
     
     curl.on('close', (code) => {
-      // Parse headers from curl verbose output
+      // Parse HTTP headers from curl output
+      // Find the end of HTTP headers (\r\n\r\n)
       const headerEnd = stdout.indexOf('\r\n\r\n');
       if (headerEnd > 0) {
         const headerText = stdout.substring(0, headerEnd);
         const bodyText = stdout.substring(headerEnd + 4);
         
-        // Parse headers
+        // Parse only HTTP status line and headers, ignore JSON body
         const headerLines = headerText.split('\n');
         headerLines.forEach(line => {
-          const match = line.match(/^(.+?):\s*(.+)$/);
-          if (match) {
-            headers[match[1].trim()] = match[2].trim();
+          // Skip HTTP status line (starts with HTTP/)
+          if (!line.startsWith('HTTP/') && line.trim() !== '') {
+            const match = line.match(/^(.+?):\s*(.+)$/);
+            if (match) {
+              headers[match[1].trim()] = match[2].trim();
+            }
           }
         });
         

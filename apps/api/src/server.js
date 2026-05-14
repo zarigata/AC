@@ -126,11 +126,18 @@ async function main() {
 
     // Initialize CORS middleware
     const corsMiddleware = createCorsMiddleware({
-      allowedOrigins: process.env.ZSIISTANT_CORS_ORIGINS || 'http://localhost:3000,http://localhost:4000,http://127.0.0.1:3000,http://127.0.0.1:4000,http://localhost:5000,http://127.0.0.1:5000',
-      allowCredentials: true,
-      allowedMethods: 'GET, POST, PATCH, DELETE, OPTIONS, HEAD',
-      allowedHeaders: 'Content-Type, Authorization, X-Requested-With, X-API-Key, X-Content-Type-Options'
+      allowedOrigins: settings.cors?.allowedOrigins || process.env.ZSIISTANT_CORS_ORIGINS || 'http://localhost:3000,http://localhost:4000,http://127.0.0.1:3000,http://127.0.0.1:4000,http://localhost:5000,http://127.0.0.1:5000',
+      allowCredentials: settings.cors?.allowCredentials !== undefined ? settings.cors.allowCredentials : true,
+      allowedMethods: settings.cors?.allowedMethods || 'GET, POST, PATCH, DELETE, OPTIONS, HEAD',
+      allowedHeaders: settings.cors?.allowedHeaders || 'Content-Type, Authorization, X-Requested-With, X-API-Key, X-Content-Type-Options',
+      exposedHeaders: settings.cors?.exposedHeaders || '',
+      maxAge: settings.cors?.maxAge || 86400,
+      allowAllOrigins: settings.cors?.allowAllOrigins || false
     });
+    
+    // Update runtime settings for CORS
+    const { updateRuntimeSettings } = await import("./middleware/corsMiddleware.js");
+    updateRuntimeSettings(settings);
     console.log('CORS middleware initialized');
 
     // Initialize authentication middleware

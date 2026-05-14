@@ -117,6 +117,90 @@ export function registerSettingsRoutes(server, registry, providers, failoverChai
           updates.providers = body.providers;
         }
         
+        // CORS settings configuration
+        if (body.cors !== undefined) {
+          if (typeof body.cors !== 'object') {
+            response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+            response.end(JSON.stringify({ error: "CORS settings must be an object" }));
+            return true;
+          }
+          
+          const corsUpdates = {};
+          
+          // Validate allowedOrigins
+          if (body.cors.allowedOrigins !== undefined) {
+            if (typeof body.cors.allowedOrigins !== 'string') {
+              response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+              response.end(JSON.stringify({ error: "CORS allowedOrigins must be a string" }));
+              return true;
+            }
+            corsUpdates.allowedOrigins = body.cors.allowedOrigins;
+          }
+          
+          // Validate allowedMethods
+          if (body.cors.allowedMethods !== undefined) {
+            if (typeof body.cors.allowedMethods !== 'string') {
+              response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+              response.end(JSON.stringify({ error: "CORS allowedMethods must be a string" }));
+              return true;
+            }
+            corsUpdates.allowedMethods = body.cors.allowedMethods;
+          }
+          
+          // Validate allowedHeaders
+          if (body.cors.allowedHeaders !== undefined) {
+            if (typeof body.cors.allowedHeaders !== 'string') {
+              response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+              response.end(JSON.stringify({ error: "CORS allowedHeaders must be a string" }));
+              return true;
+            }
+            corsUpdates.allowedHeaders = body.cors.allowedHeaders;
+          }
+          
+          // Validate exposedHeaders
+          if (body.cors.exposedHeaders !== undefined) {
+            if (typeof body.cors.exposedHeaders !== 'string') {
+              response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+              response.end(JSON.stringify({ error: "CORS exposedHeaders must be a string" }));
+              return true;
+            }
+            corsUpdates.exposedHeaders = body.cors.exposedHeaders;
+          }
+          
+          // Validate maxAge
+          if (body.cors.maxAge !== undefined) {
+            if (!Number.isInteger(body.cors.maxAge) || body.cors.maxAge < 0 || body.cors.maxAge > 86400) {
+              response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+              response.end(JSON.stringify({ error: "CORS maxAge must be an integer between 0 and 86400" }));
+              return true;
+            }
+            corsUpdates.maxAge = body.cors.maxAge;
+          }
+          
+          // Validate allowCredentials
+          if (body.cors.allowCredentials !== undefined) {
+            if (typeof body.cors.allowCredentials !== 'boolean') {
+              response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+              response.end(JSON.stringify({ error: "CORS allowCredentials must be a boolean" }));
+              return true;
+            }
+            corsUpdates.allowCredentials = body.cors.allowCredentials;
+          }
+          
+          // Validate allowAllOrigins
+          if (body.cors.allowAllOrigins !== undefined) {
+            if (typeof body.cors.allowAllOrigins !== 'boolean') {
+              response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+              response.end(JSON.stringify({ error: "CORS allowAllOrigins must be a boolean" }));
+              return true;
+            }
+            corsUpdates.allowAllOrigins = body.cors.allowAllOrigins;
+          }
+          
+          // Apply CORS updates
+          updates.cors = corsUpdates;
+        }
+        
         // If no valid updates provided, return error
         if (Object.keys(updates).length === 0) {
           response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
