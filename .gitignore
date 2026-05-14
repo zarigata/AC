@@ -2,7 +2,13 @@ node_modules
 dist
 .DS_Store
 *.log
+*.backup
+*.fixed
+*.bak
 apps/api/data
-memory
-AGENTS.md
 data/
+memory.db
+memory/
+AGENTS.md
+tests/debug/
+tests/archived/
