@@ -54,6 +54,7 @@ export class SessionManager {
   constructor() {
     this.db = null;
     this.initialized = false;
+    this.tokenManager = null; // Will be initialized when registry is available
   }
 
   /**
@@ -76,8 +77,31 @@ export class SessionManager {
     // Create schema if needed
     await this.db.exec(SCHEMA);
 
+    // Initialize TokenManager with registry reference when available
+    if (global.registry) {
+      this.tokenManager = new TokenManager(global.registry);
+    } else {
+      // Fallback for basic token counting without registry
+      this.tokenManager = {
+        countTokens: (text) => {
+          if (!text || typeof text !== 'string') return 0;
+          return Math.ceil(text.length / 4); // Simple approximation
+        }
+      };
+    }
+
     this.initialized = true;
     console.log("SessionManager initialized with token tracking support");
+  }
+
+  /**
+   * Set the registry reference for token management
+   */
+  setRegistry(registry) {
+    if (registry && this.tokenManager === null) {
+      this.tokenManager = new TokenManager(registry);
+      console.log("TokenManager initialized with registry");
+    }
   }
 
   /**
@@ -158,8 +182,40 @@ export class SessionManager {
     const messageId = "msg_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
     const now = new Date().toISOString();
 
-    const tokensIn = message.tokensIn || 0;
-    const tokensOut = message.tokensOut || 0;
+    // Calculate tokens using TokenManager
+    let tokensIn = 0;
+    let tokensOut = 0;
+    
+    try {
+      if (this.tokenManager && this.tokenManager.processMessage) {
+        // Process the message to get token counts
+        const processedMessage = await this.tokenManager.processMessage({
+          id: messageId,
+          sessionId,
+          role: message.role,
+          content: message.content,
+          model: options.metadata?.model || "default"
+        }, options.metadata?.model);
+        
+        tokensIn = processedMessage.tokensIn || 0;
+        tokensOut = processedMessage.tokensOut || 0;
+      } else {
+        // Fallback to simple token counting
+        tokensIn = this.tokenManager ? this.tokenManager.countTokens(message.content) : Math.ceil(message.content.length / 4);
+        tokensOut = 0; // Will be calculated when we get the response
+      }
+      
+      // Update the message with token info for return
+      message.tokensIn = tokensIn;
+      message.tokensOut = tokensOut;
+      message.id = messageId;
+      
+    } catch (error) {
+      console.error('Error calculating tokens for message:', error);
+      // Fall back to simple token counting
+      tokensIn = this.tokenManager ? this.tokenManager.countTokens(message.content) : Math.ceil(message.content.length / 4);
+      tokensOut = 0;
+    }
 
     await this.db.run(`
       INSERT INTO chat_messages (id, session_id, role, content, tokensIn, tokensOut, model, createdAt)
@@ -316,3 +372,8 @@ export class SessionManager {
 
 // Export singleton instance
 export const sessionManager = new SessionManager();
+
+// Set global reference for registry access
+if (global.registry) {
+  sessionManager.setRegistry(global.registry);
+}

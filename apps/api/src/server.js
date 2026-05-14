@@ -53,6 +53,9 @@ async function main() {
     } catch (seedErr) {
       console.error("Seed error (non-fatal):", seedErr.message);
     }
+    
+    // Set global registry reference for session manager token tracking
+    global.registry = registry;
 
     // Initialize server with all components
     const { server, config, providers } = await initializeServer(registry);
