@@ -40,21 +40,21 @@ export const sendJson = (response, statusCode, payload) => {
     if (finalPayload === null || finalPayload === undefined) {
       finalPayload = { error: 'No payload provided' };
     }
-  
-  const headers = {
-    "Content-Type": "application/json; charset=utf-8",
-    "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
-    "X-Content-Type-Options": "nosniff",
-    "X-Frame-Options": "DENY",
-    "Referrer-Policy": "strict-origin-when-cross-origin"
-  };
-  
-  if (origin && isOriginAllowed(origin)) {
-    headers["Access-Control-Allow-Origin"] = origin;
-    headers["Access-Control-Allow-Credentials"] = "true";
-  }
-  
+    
+    const headers = {
+      "Content-Type": "application/json; charset=utf-8",
+      "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "Referrer-Policy": "strict-origin-when-cross-origin"
+    };
+    
+    if (origin && isOriginAllowed(origin)) {
+      headers["Access-Control-Allow-Origin"] = origin;
+      headers["Access-Control-Allow-Credentials"] = "true";
+    }
+    
     // Handle circular references in payload with enhanced error handling
     const getCircularReplacer = () => {
       const seen = new WeakSet();
@@ -88,6 +88,11 @@ export const sendJson = (response, statusCode, payload) => {
       response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
       response.end(JSON.stringify({ error: 'Internal server error - response generation failed' }));
     }
+  } catch (err) {
+    console.error('Failed to send JSON response:', err);
+    response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify({ error: 'Internal server error - response generation failed' }));
+  }
 };
 
 /**

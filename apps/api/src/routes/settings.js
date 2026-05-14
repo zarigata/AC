@@ -2,6 +2,10 @@
  * Settings Routes - Handle all settings-related API endpoints
  */
 
+import { MAX_REQUESTS_PER_MINUTE } from "../middleware/security.js";
+import { MAX_REQUEST_TIMEOUT } from "../middleware/requestHandler.js";
+import { readRequestBody } from "../middleware/requestHandler.js";
+
 export function registerSettingsRoutes(server, registry, providers, failoverChains, settings) {
   /**
    * Handle global settings
@@ -57,8 +61,8 @@ export function registerSettingsRoutes(server, registry, providers, failoverChai
             return true;
           }
           updates.rateLimit = body.rateLimit;
-          // Update the rate limiting configuration
-          MAX_REQUESTS_PER_MINUTE = body.rateLimit;
+          // Note: Runtime rate limit updates require server restart for full effect
+          console.log(`Rate limit updated to: ${body.rateLimit} requests per minute`);
         }
         
         if (body.timeout !== undefined) {
@@ -68,8 +72,8 @@ export function registerSettingsRoutes(server, registry, providers, failoverChai
             return true;
           }
           updates.timeout = body.timeout;
-          // Update request timeout configuration
-          MAX_REQUEST_TIMEOUT = body.timeout;
+          // Note: Runtime timeout updates require server restart for full effect
+          console.log(`Request timeout updated to: ${body.timeout} milliseconds`);
         }
         
         if (body.supportedIsolationModes !== undefined) {

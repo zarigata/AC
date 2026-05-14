@@ -4,19 +4,18 @@
 
 import { UserManager } from "../database/userManager.js";
 import createAuthMiddleware from "../middleware/authMiddleware.js";
-
-const userManager = new UserManager(process.env.ZSIISTANT_DB_PATH ?? new URL("../data/zsiistant.sqlite", import.meta.url).pathname);
+import { readRequestBody, sendJson, sendError } from "../utils/responses.js";
 
 /**
  * Authentication routes configuration
  */
-export function registerAuthRoutes(server) {
+export function registerAuthRoutes(server, userManager) {
   // POST /api/auth/register - Register new user
   server.on('request', async (req, res) => {
     if (req.url === '/api/auth/register' && req.method === 'POST') {
       try {
-        const body = await getRequestBody(req);
-        const { username, email, password } = JSON.parse(body);
+        const body = await readRequestBody(req);
+        const { username, email, password } = body;
 
         // Validate input
         if (!username || !email || !password) {
@@ -41,7 +40,7 @@ export function registerAuthRoutes(server) {
         const refreshToken = await userManager.createRefreshToken(user.id);
 
         // Success response
-        sendResponse(res, 201, {
+        sendJson(res, 201, {
           success: true,
           message: 'User registered successfully',
           user: {
@@ -68,8 +67,8 @@ export function registerAuthRoutes(server) {
   server.on('request', async (req, res) => {
     if (req.url === '/api/auth/login' && req.method === 'POST') {
       try {
-        const body = await getRequestBody(req);
-        const { username, password } = JSON.parse(body);
+        const body = await readRequestBody(req);
+        const { username, password } = body;
 
         // Validate input
         if (!username || !password) {
@@ -85,7 +84,7 @@ export function registerAuthRoutes(server) {
         const refreshToken = await userManager.createRefreshToken(user.id);
 
         // Success response
-        sendResponse(res, 200, {
+        sendJson(res, 200, {
           success: true,
           message: 'Login successful',
           user: {
@@ -112,8 +111,8 @@ export function registerAuthRoutes(server) {
   server.on('request', async (req, res) => {
     if (req.url === '/api/auth/refresh' && req.method === 'POST') {
       try {
-        const body = await getRequestBody(req);
-        const { refresh_token } = JSON.parse(body);
+        const body = await readRequestBody(req);
+        const { refresh_token } = body;
 
         if (!refresh_token) {
           sendError(res, 400, 'Refresh token is required');
@@ -123,7 +122,7 @@ export function registerAuthRoutes(server) {
         // Refresh access token
         const newAccessToken = await userManager.refreshAccessToken(refresh_token);
 
-        sendResponse(res, 200, {
+        sendJson(res, 200, {
           success: true,
           message: 'Token refreshed successfully',
           access_token: newAccessToken,
@@ -140,21 +139,21 @@ export function registerAuthRoutes(server) {
   server.on('request', async (req, res) => {
     if (req.url === '/api/auth/logout' && req.method === 'POST') {
       try {
-        const body = await getRequestBody(req);
-        const { refresh_token } = JSON.parse(body) || {};
+        const body = await readRequestBody(req);
+        const { refresh_token } = body || {};
 
         if (refresh_token) {
           await userManager.revokeRefreshToken(refresh_token);
         }
 
-        sendResponse(res, 200, {
+        sendJson(res, 200, {
           success: true,
           message: 'Logout successful'
         });
       } catch (error) {
         console.error('Logout error:', error);
         // Still return success even if token revocation fails
-        sendResponse(res, 200, {
+        sendJson(res, 200, {
           success: true,
           message: 'Logout successful'
         });
@@ -173,7 +172,7 @@ export function registerAuthRoutes(server) {
           const user = await userManager.getUserById(userId);
           
           if (user) {
-            sendResponse(res, 200, {
+            sendJson(res, 200, {
               success: true,
               user: {
                 id: user.id,
@@ -211,7 +210,7 @@ export function registerAuthRoutes(server) {
           }
 
           const users = await userManager.getAllUsers();
-          sendResponse(res, 200, {
+          sendJson(res, 200, {
             success: true,
             users,
             total: users.length
@@ -226,37 +225,7 @@ export function registerAuthRoutes(server) {
 }
 
 // Helper functions
-function getRequestBody(req) {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', chunk => {
-      body += chunk.toString();
-    });
-    req.on('end', () => resolve(body));
-    req.on('error', reject);
-  });
-}
 
-function sendResponse(res, statusCode, data) {
-  res.writeHead(statusCode, {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key'
-  });
-  res.end(JSON.stringify(data, null, 2));
-}
 
-function sendError(res, statusCode, message) {
-  res.writeHead(statusCode, {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key'
-  });
-  res.end(JSON.stringify({
-    success: false,
-    error: message,
-    timestamp: new Date().toISOString()
-  }));
-}
+
+

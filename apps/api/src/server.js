@@ -106,8 +106,6 @@ async function main() {
     }
     console.log('Registering preset routes...');
     registerPresetRoutes(routeServer, registry);
-    console.log('Registering auth routes...');
-    registerAuthRoutes(routeServer);
 
     console.log(`Registered ${routeHandlers.length} route handler(s)`);
     
@@ -164,6 +162,10 @@ async function main() {
       console.error('User manager initialization error:', userErr.message);
     }
 
+    // Register auth routes after userManager is initialized
+    console.log('Registering auth routes...');
+    registerAuthRoutes(routeServer, userManager);
+    
     // Initialize authentication middleware
     const authMiddleware = createAuthMiddleware({
       jwtSecret: process.env.ZSIISTANT_JWT_SECRET || 'your-secret-key-change-in-production',

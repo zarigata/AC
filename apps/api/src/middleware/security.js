@@ -62,7 +62,7 @@ export const sanitizeOutput = (data) => {
 // Enhanced rate limiting with better security
 const rateLimit = new Map();
 const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
-const MAX_REQUESTS_PER_MINUTE = 60;
+export const MAX_REQUESTS_PER_MINUTE = 60;
 const MAX_RATE_LIMIT_ENTRIES = 5000; // Reduced for better memory security
 const CONN_CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
