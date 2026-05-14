@@ -39,7 +39,7 @@ export class OllamaAdapter {
       
       // Check for dangerous hostname patterns
       const dangerousPatterns = [
-        /^.*\.internal$/, /^.*\.local$/, /^.*\.lan$/,
+        /^.*\.local$/, /^.*\.lan$/,
         /^.*\.(test|staging|dev)\.internal$/, /\.(development|staging)\./,
         /^.*\.internal\.[a-zA-Z]{2,}$/, /^.*\.corp\.[a-zA-Z]{2,}$/, /^.*\.company\.[a-zA-Z]{2,}$/,
         /^.*\.priv\.[a-zA-Z]{2,}$/, /^.*\.home\.[a-zA-Z]{2,}$/
@@ -51,7 +51,7 @@ export class OllamaAdapter {
       
       // Allow specific safe patterns
       const allowedPatterns = [
-        /^(localhost|127\.0\.0\.1|0\.0\.0\.0)$/,
+        /^(localhost|127\.0\.0\.1|0\.0\.0\.0|host\.docker\.internal)$/,
         /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/, // IPv4
         /^\[([0-9a-fA-F:]+)\]$/, // IPv6 in brackets
         /^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$/, // Public domain

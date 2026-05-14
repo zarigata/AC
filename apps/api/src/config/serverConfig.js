@@ -16,7 +16,7 @@ import { registerSettingsRoutes } from "../routes/settings.js";
 import { registerProviderRoutes } from "../routes/providers.js";
 import { registerHealthRoutes } from "../routes/health.js";
 
-import { applyRateLimit, cleanupRateLimitEntries, cleanupRateLimitOnExit } from "../middleware/security.js";
+import { applyRateLimit, cleanupRateLimitEntries, cleanupRateLimitOnExit, startRateLimitCleanup } from "../middleware/security.js";
 import { readRequestBody, sendJson, sendError, handleError } from "../middleware/requestHandler.js";
 import { handleWebSocketUpgrade, broadcastMessage, broadcastAgentStatus } from "../middleware/webSocketHandler.js";
 import { startJobProcessor } from "../middleware/jobProcessor.js";
@@ -139,9 +139,12 @@ export const initializeRateLimiting = () => {
     }
   }, CONN_CLEANUP_INTERVAL);
   
+  // Start rate limit cleanup
+  const rateLimitCleanupInterval = startRateLimitCleanup();
+  
   // Clean up on exit
-  process.on('SIGINT', () => cleanupRateLimitOnExit());
-  process.on('SIGTERM', () => cleanupRateLimitOnExit());
+  process.on('SIGINT', () => cleanupRateLimitOnExit(rateLimitCleanupInterval));
+  process.on('SIGTERM', () => cleanupRateLimitOnExit(rateLimitCleanupInterval));
 };
 
 /**

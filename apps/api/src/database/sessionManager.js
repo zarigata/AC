@@ -11,7 +11,7 @@ import TokenManager from "../token/tokenManager.js";
  * Chat session database schema
  */
 const SCHEMA = `
-CREATE TABLE IF NOT EXISTS sessions (
+CREATE TABLE IF NOT EXISTS chat_sessions (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     metadata TEXT DEFAULT \"{}\"
 );
 
-CREATE TABLE IF NOT EXISTS messages (
+CREATE TABLE IF NOT EXISTS chat_messages (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN (\"user\", \"assistant\", \"system\")),
@@ -35,13 +35,13 @@ CREATE TABLE IF NOT EXISTS messages (
     tokensOut INTEGER DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS session_stats (
+CREATE TABLE IF NOT EXISTS chat_session_stats (
     session_id TEXT PRIMARY KEY,
     total_messages INTEGER DEFAULT 0,
     total_tokens INTEGER DEFAULT 0,
     total_duration INTEGER DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NOT DEFAULT CURRENT_TIMESTAMP
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 `;
 
@@ -49,11 +49,9 @@ CREATE TABLE IF NOT EXISTS session_stats (
  * Session Manager class
  */
 export class SessionManager {
-  constructor(registry) {
+  constructor() {
     this.db = null;
     this.initialized = false;
-    this.registry = registry;
-    this.tokenManager = new TokenManager(registry);
   }
 
   /**
@@ -62,8 +60,11 @@ export class SessionManager {
   async initialize() {
     if (this.initialized) return;
 
+    // Use the same database path as the main application
+    const databasePath = process.env.ZSIISTANT_DB_PATH || new URL("../../data/zsiistant.sqlite", import.meta.url).pathname;
+    
     this.db = await open({
-      filename: "./chat-sessions.db",
+      filename: databasePath,
       driver: sqlite3.Database
     });
 
@@ -88,32 +89,32 @@ export class SessionManager {
 
     const sessionData = {
       id: sessionId,
-      userId,
-      title: options.title || "New Chat",
+      userId: userId,
       agentId: options.agentId || null,
+      title: options.title || "New Chat",
       status: options.status || "active",
-      metadata: options.metadata || {},
+      metadata: options.metadata ? JSON.stringify(options.metadata) : "{}",
       createdAt: now,
       updatedAt: now
     };
 
     await this.db.run(`
-      INSERT INTO sessions (id, user_id, title, agent_id, status, metadata, created_at, updated_at)
+      INSERT INTO chat_sessions (id, user_id, agent_id, title, status, metadata, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       sessionData.id,
       sessionData.userId,
-      sessionData.title,
       sessionData.agentId,
+      sessionData.title,
       sessionData.status,
-      JSON.stringify(sessionData.metadata),
+      sessionData.metadata,
       sessionData.createdAt,
       sessionData.updatedAt
     ]);
 
     // Create initial stats record
     await this.db.run(`
-      INSERT INTO session_stats (session_id, total_messages, total_tokens, total_duration, created_at, updated_at)
+      INSERT INTO chat_session_stats (session_id, total_messages, total_tokens, total_duration, created_at, updated_at)
       VALUES (?, 0, 0, 0, ?, ?)
     `, [sessionData.id, now, now]);
 
@@ -127,8 +128,8 @@ export class SessionManager {
     if (!this.initialized) await this.initialize();
 
     const session = await this.db.get(`
-      SELECT id, user_id, title, agent_id, status, metadata, created_at, updated_at
-      FROM sessions 
+      SELECT id, user_id, agent_id, title, status, metadata, created_at, updated_at
+      FROM chat_sessions 
       WHERE id = ?
     `, [sessionId]);
 
@@ -137,8 +138,8 @@ export class SessionManager {
     return {
       id: session.id,
       userId: session.user_id,
-      title: session.title,
       agentId: session.agent_id,
+      title: session.title,
       status: session.status,
       metadata: JSON.parse(session.metadata || "{}"),
       createdAt: session.created_at,
@@ -155,63 +156,51 @@ export class SessionManager {
     const messageId = "msg_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
     const now = new Date().toISOString();
 
-    // Process message through token manager
-    const processedMessage = await this.tokenManager.processMessage({
-      id: messageId,
-      sessionId,
-      role: message.role,
-      content: message.content,
-      model: options.metadata?.model || "default"
-    }, options.metadata?.model);
-
-    const messageData = {
-      id: messageId,
-      sessionId,
-      role: message.role,
-      content: message.content,
-      timestamp: now,
-      tokensUsed: processedMessage.tokensIn || 0,
-      responseTimeMs: options.responseTimeMs || 0,
-      metadata: options.metadata || {},
-      tokensIn: processedMessage.tokensIn || 0,
-      tokensOut: processedMessage.tokensOut || 0
-    };
+    const tokensIn = message.tokensIn || 0;
+    const tokensOut = message.tokensOut || 0;
 
     await this.db.run(`
-      INSERT INTO messages (id, session_id, role, content, timestamp, tokens_used, response_time_ms, metadata, tokensIn, tokensOut)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO chat_messages (id, session_id, role, content, tokensIn, tokensOut, model, createdAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `, [
-      messageData.id,
-      messageData.SessionId,
-      messageData.role,
-      messageData.content,
-      messageData.timestamp,
-      messageData.tokensUsed,
-      messageData.responseTimeMs,
-      JSON.stringify(messageData.metadata),
-      messageData.tokensIn,
-      messageData.tokensOut
+      messageId,
+      sessionId,
+      message.role,
+      message.content,
+      tokensIn,
+      tokensOut,
+      options.metadata?.model || "default",
+      now
     ]);
 
     // Update session stats
     await this.db.run(`
-      UPDATE session_stats 
+      UPDATE chat_session_stats 
       SET total_messages = total_messages + 1,
           total_tokens = total_tokens + ?,
           total_duration = total_duration + ?,
           updated_at = ?
       WHERE session_id = ?
     `, [
-      messageData.tokensIn + messageData.tokensOut,
-      messageData.responseTimeMs || 0,
+      tokensIn + tokensOut,
+      message.responseTimeMs || 0,
       now,
       sessionId
     ]);
 
     // Update session updated_at
-    await this.db.run("UPDATE sessions SET updated_at = ? WHERE id = ?", [now, sessionId]);
+    await this.db.run("UPDATE chat_sessions SET updated_at = ? WHERE id = ?", [now, sessionId]);
 
-    return messageData;
+    return {
+      id: messageId,
+      sessionId,
+      role: message.role,
+      content: message.content,
+      tokensIn,
+      tokensOut,
+      model: options.metadata?.model || "default",
+      timestamp: now
+    };
   }
 
   /**
@@ -221,10 +210,10 @@ export class SessionManager {
     if (!this.initialized) await this.initialize();
 
     const messages = await this.db.all(`
-      SELECT id, session_id, role, content, timestamp, tokens_used, response_time_ms, metadata, tokensIn, tokensOut
-      FROM messages 
+      SELECT id, session_id, role, content, tokensIn, tokensOut, model, createdAt
+      FROM chat_messages 
       WHERE session_id = ? 
-      ORDER BY timestamp ASC
+      ORDER BY createdAt ASC
     `, [sessionId]);
 
     return {
@@ -234,14 +223,92 @@ export class SessionManager {
         sessionId: msg.session_id,
         role: msg.role,
         content: msg.content,
-        timestamp: msg.timestamp,
-        tokensUsed: msg.tokens_used,
         tokensIn: msg.tokensIn || 0,
         tokensOut: msg.tokensOut || 0,
-        responseTimeMs: msg.response_time_ms,
-        metadata: JSON.parse(msg.metadata || "{}")
+        model: msg.model,
+        timestamp: msg.createdAt
       }))
     };
+  }
+
+  /**
+   * Get all sessions for a specific user
+   */
+  async getUserSessions(userId, limit = 50) {
+    if (!this.initialized) await this.initialize();
+
+    const sessions = await this.db.all(`
+      SELECT id, user_id, agent_id, title, status, metadata, created_at, updated_at
+      FROM chat_sessions 
+      WHERE user_id = ? 
+      ORDER BY updated_at DESC
+      LIMIT ?
+    `, [userId, limit]);
+
+    return sessions.map(session => ({
+      id: session.id,
+      userId: session.user_id,
+      agentId: session.agent_id,
+      title: session.title,
+      status: session.status,
+      metadata: JSON.parse(session.metadata || "{}"),
+      createdAt: session.created_at,
+      updatedAt: session.updated_at
+    }));
+  }
+
+  /**
+   * Delete a session
+   */
+  async deleteSession(sessionId) {
+    if (!this.initialized) await this.initialize();
+
+    await this.db.run("DELETE FROM chat_messages WHERE session_id = ?", [sessionId]);
+    await this.db.run("DELETE FROM chat_session_stats WHERE session_id = ?", [sessionId]);
+    await this.db.run("DELETE FROM chat_sessions WHERE id = ?", [sessionId]);
+  }
+
+  /**
+   * Update a session
+   */
+  async updateSession(sessionId, updates) {
+    if (!this.initialized) await this.initialize();
+
+    const fields = [];
+    const values = [];
+    
+    if (updates.title) {
+      fields.push("title = ?");
+      values.push(updates.title);
+    }
+    
+    if (updates.agentId !== undefined) {
+      fields.push("agent_id = ?");
+      values.push(updates.agentId);
+    }
+    
+    if (updates.status !== undefined) {
+      fields.push("status = ?");
+      values.push(updates.status);
+    }
+    
+    if (updates.metadata !== undefined) {
+      fields.push("metadata = ?");
+      values.push(JSON.stringify(updates.metadata));
+    }
+    
+    if (fields.length > 0) {
+      fields.push("updated_at = ?");
+      values.push(new Date().toISOString());
+      values.push(sessionId);
+      
+      await this.db.run(
+        `UPDATE chat_sessions SET ${fields.join(", ")} WHERE id = ?`,
+        values
+      );
+    }
+    
+    return this.getSession(sessionId);
   }
 }
 

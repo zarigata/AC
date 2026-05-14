@@ -473,7 +473,7 @@ export const applyRateLimit = (request, response) => {
 
 // Optimized rate limit cleanup with better performance
 export const startRateLimitCleanup = () => {
-  setInterval(() => {
+  return setInterval(() => {
     const now = Date.now();
     const cleanupStart = performance.now();
     
@@ -525,9 +525,9 @@ export const startRateLimitCleanup = () => {
 };
 
 // Clean up on exit
-export const cleanupRateLimitOnExit = () => {
-  if (typeof setInterval !== 'undefined') {
-    clearInterval(this.rateLimitCleanupInterval);
+export const cleanupRateLimitOnExit = (intervalId) => {
+  if (typeof clearInterval !== 'undefined' && intervalId) {
+    clearInterval(intervalId);
   }
   rateLimit.clear();
 };
