@@ -18,6 +18,8 @@ import { registerTokenRoutes } from "./routes/tokenRoutes.js";
 import { registerMemoryRoutes } from "./routes/memory.js";
 import { registerWebhookRoutes } from "./routes/webhooks.js";
 import { registerPresetRoutes } from "./routes/presets.js";
+import { registerAuthRoutes } from "./routes/auth.js";
+import { UserManager } from "./database/userManager.js";
 import { webhookManager } from "./adapters/webhookManager.js";
 import { globalErrorHandler, notFoundHandler, requestLogger } from "./middleware/errorMiddleware.js";
 import createRateLimiter from "./middleware/rateLimiter.js";
@@ -93,6 +95,7 @@ async function main() {
       routeHandlers.push(webhookHandler);
     }
     registerPresetRoutes(routeServer, registry);
+    registerAuthRoutes(routeServer);
 
     console.log(`Registered ${routeHandlers.length} route handler(s)`);
     
@@ -139,6 +142,15 @@ async function main() {
     const { updateRuntimeSettings } = await import("./middleware/corsMiddleware.js");
     updateRuntimeSettings(settings);
     console.log('CORS middleware initialized');
+
+    // Initialize user manager for authentication
+    const userManager = new UserManager(databasePath);
+    try {
+      await userManager.initialize();
+      console.log('User manager initialized successfully');
+    } catch (userErr) {
+      console.error('User manager initialization error:', userErr.message);
+    }
 
     // Initialize authentication middleware
     const authMiddleware = createAuthMiddleware({

@@ -451,25 +451,7 @@ export const applyRateLimit = (request, response) => {
       }
       
       // Validate user agent format
-      if (userAgent && !userAgent.match(/^[^<>]*$/)) {
-        sendError(response, 400, 'Invalid User Agent', 'Invalid user agent format');
-        return false;
-      }
-      
-      rateLimit.set(rateLimitKey, {
-        count: 1,
-        timestamp: timestamp,
-        userAgent: userAgent
-      });
-    }
-    
-    return true; // Request allowed
-  } catch (error) {
-    console.error('Rate limiting error:', error);
-    sendError(response, 500, 'Rate Limiting Error', 'Internal rate limiting service error');
-    return false;
-  }
-};
+      if (userAgent       if (userAgent && !userAgent.match(/^[a-zA-Z0-9\s\._\-\+\(\)\[\]\{\}:;\*\?\,\!\#@\$%\&=<>|~\\      if (userAgent && !userAgent.match(/^[a-zA-Z0-9\s\._\-\+\(\)\[\]\{\}:;\*\?\,\!\#@\$%\&=<>|~\\ !userAgent.match(/^[a-zA-Z0-9\s\._\-\+\(\)\[\]\{\}:;\*\?\,\!\#\@\$\%\      if (userAgent && !userAgent.match(/^[a-zA-Z0-9\s\._\-\+\(\)\[\]\{\}:;\*\?\,\!\#@\$%\&=<>|~\\=<>|~\\/])) {
 
 // Optimized rate limit cleanup with better performance
 export const startRateLimitCleanup = () => {
