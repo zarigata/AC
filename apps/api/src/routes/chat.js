@@ -398,6 +398,7 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
         }));
         return true;
       } catch (e) {
+        console.error('Chat handler error:', e);
         response.writeHead(502, { "Content-Type": "application/json; charset=utf-8" });
         response.end(JSON.stringify({ error: e.message }));
         return true;

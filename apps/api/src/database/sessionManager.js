@@ -27,12 +27,14 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     session_id TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN (\"user\", \"assistant\", \"system\")),
     content TEXT NOT NULL,
+    model TEXT DEFAULT \"default\",
     timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     tokens_used INTEGER DEFAULT 0,
     response_time_ms INTEGER DEFAULT 0,
     metadata TEXT DEFAULT \"{}\",
     tokensIn INTEGER DEFAULT 0,
-    tokensOut INTEGER DEFAULT 0
+    tokensOut INTEGER DEFAULT 0,
+    createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS chat_session_stats (
