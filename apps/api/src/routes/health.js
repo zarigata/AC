@@ -233,21 +233,22 @@ export function registerHealthRoutes(server, registry, providers, failoverChains
   };
 
   /**
-   * Register health routes
+   * Create health route handler
    */
-  server.on('request', async (request, response) => {
-    const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
-
+  const handleHealthRoutes = async (request, response) => {
     // Try each handler in order
     const handlers = [
-      handleBasicHealth
+      handleBasicHealth,
+      handleAdvancedHealth,
+      handleReadiness,
+      handleLiveness
     ];
 
     for (const handler of handlers) {
       try {
         if (!response.headersSent) {
           const handled = await handler(request, response);
-          if (handled !== false) return; // Handler processed the request
+          if (handled !== false) return true; // Handler processed the request
         }
       } catch (error) {
         console.error('Health route error:', error);
@@ -260,11 +261,12 @@ export function registerHealthRoutes(server, registry, providers, failoverChains
             console.error('Failed to write error response:', writeError);
           }
         }
-        return;
+        return true;
       }
     }
 
-    // If no handler matched, let the main server handle it
-    return false;
-  });
+    return false; // No handler matched
+  };
+
+  return handleHealthRoutes;
 }
