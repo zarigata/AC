@@ -12,6 +12,7 @@ import { registerChatRoutes } from "./routes/chat.js";
 import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerProviderRoutes } from "./routes/providers.js";
 import { registerHealthRoutes } from "./routes/health.js";
+console.log('Health routes imported successfully');
 import { registerToolRoutes } from "./routes/tools.js";
 import { registerJobRoutes } from "./routes/jobs.js";
 import { registerTokenRoutes } from "./routes/tokenRoutes.js";
@@ -80,21 +81,32 @@ async function main() {
 
     // Register modular route handlers onto our pseudo-server
     console.log("Registering route handlers...");
+    console.log('Registering agent routes...');
     registerAgentRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    console.log('Registering chat routes...');
     registerChatRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    console.log('Registering settings routes...');
     registerSettingsRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    console.log('Registering provider routes...');
     registerProviderRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    console.log('Registering health routes...');
     registerHealthRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    console.log('Registering tool routes...');
     registerToolRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    console.log('Registering job routes...');
     registerJobRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    console.log('Registering token routes...');
     registerTokenRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    console.log('Registering memory routes...');
     registerMemoryRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     // Register webhook routes and get the handler function
     const webhookHandler = registerWebhookRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     if (typeof webhookHandler === 'function') {
       routeHandlers.push(webhookHandler);
     }
+    console.log('Registering preset routes...');
     registerPresetRoutes(routeServer, registry);
+    console.log('Registering auth routes...');
     registerAuthRoutes(routeServer);
 
     console.log(`Registered ${routeHandlers.length} route handler(s)`);
@@ -162,6 +174,7 @@ async function main() {
     // Single request dispatcher that runs handlers sequentially
     server.on('request', async (req, res) => {
       try {
+        console.log('Request received:', req.method, req.url);
         // Apply CORS middleware first
         corsMiddleware(req, res, () => {});
         
@@ -203,10 +216,17 @@ async function main() {
         }
         
         // Run each route handler sequentially until one handles the request
+        console.log('Processing request:', req.method, req.url, 'with', routeHandlers.length, 'handlers');
+        let healthHandlerCalled = false;
+        
         for (const handler of routeHandlers) {
           if (res.headersSent) break;
           try {
+            console.log('Trying handler for:', req.method, req.url);
             await handler(req, res);
+            if (req.url?.includes('health')) {
+              healthHandlerCalled = true;
+            }
           } catch (err) {
             console.error('Route handler error:', err.message);
             if (!res.headersSent) {
@@ -216,6 +236,8 @@ async function main() {
             return;
           }
         }
+        
+        console.log('Health handler called:', healthHandlerCalled, 'for URL:', req.url);
         
         // If no handler responded, send 404
         if (!res.headersSent) {

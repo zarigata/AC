@@ -3,7 +3,7 @@
  */
 
 import { UserManager } from "../database/userManager.js";
-import { createAuthMiddleware } from "../middleware/authMiddleware.js";
+import createAuthMiddleware from "../middleware/authMiddleware.js";
 
 const userManager = new UserManager(process.env.ZSIISTANT_DB_PATH ?? new URL("../data/zsiistant.sqlite", import.meta.url).pathname);
 

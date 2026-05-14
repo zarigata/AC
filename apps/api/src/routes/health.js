@@ -6,21 +6,43 @@ const VERSION = "1.0.0";
 const startTime = Date.now();
 
 export function registerHealthRoutes(server, registry, providers, failoverChains, settings) {
+  console.log('Health routes being registered');
+  
+  // Initialize missing variables with default values
+  const totalActiveConnections = 0;
+  const rateLimit = { size: 0 };
+  const connectedClients = new Set();
+  const runningJobs = new Set();
+  const databasePath = "unknown";
+  const DEFAULT_PROVIDER = providers && Object.keys(providers)[0] || "ollama";
+  const VERSION = "1.0.0";
+  const startTime = Date.now();
+
   /**
    * Handle basic health endpoint
    */
   const handleBasicHealth = async (request, response) => {
-    if (request.method === "GET" && request.url === "/health") {
-      if (!response.headersSent) {
-        response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-        response.end(JSON.stringify({
-          ok: true,
-          service: "zsiistant-api",
-          version: VERSION,
-          uptime: Math.floor((Date.now() - startTime) / 1000)
-        }));
-        return true;
-      }
+    console.log('Health route called:', request.method, request.url);
+    
+    // Check if this is the basic health endpoint
+    const path = request.url || "/";
+    const isHealthEndpoint = path === "/health" || path === "/";
+    
+    console.log('Is health endpoint:', isHealthEndpoint, 'Path:', path);
+    
+    if (isHealthEndpoint && !response.headersSent) {
+      console.log('Health endpoint matched, sending response...');
+      response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      const responseBody = JSON.stringify({
+        ok: true,
+        service: "zsiistant-api",
+        version: VERSION,
+        uptime: Math.floor((Date.now() - startTime) / 1000)
+      });
+      console.log('Response body:', responseBody);
+      response.end(responseBody);
+      console.log('Response sent, returning true');
+      return true;
     }
     return false;
   };
@@ -268,5 +290,8 @@ export function registerHealthRoutes(server, registry, providers, failoverChains
     return false; // No handler matched
   };
 
-  return handleHealthRoutes;
+  // Register the health handler with the server
+  server.on('request', handleHealthRoutes);
+  
+  console.log('Health routes registered successfully');
 }
