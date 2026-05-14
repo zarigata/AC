@@ -13,6 +13,7 @@ import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerProviderRoutes } from "./routes/providers.js";
 import { registerHealthRoutes } from "./routes/health.js";
 console.log('Health routes imported successfully');
+import { registerTopologyRoutes } from "./routes/topology.js";
 import { registerToolRoutes } from "./routes/tools.js";
 import { registerJobRoutes } from "./routes/jobs.js";
 import { registerTokenRoutes } from "./routes/tokenRoutes.js";
@@ -28,6 +29,8 @@ import createAuthMiddleware from "./middleware/authMiddleware.js";
 import createCorsMiddleware from "./middleware/corsMiddleware.js";
 import { registerAllTools } from "./tools/tool-handlers.js";
 
+import { readFile, stat } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
 import { settings, serverState, initializeServer, startServer, getServerStatus } from "./config/serverConfig.js";
 import { setupGracefulShutdown } from "./config/serverConfig.js";
@@ -35,6 +38,50 @@ import { FAILOVER_CONFIG, isFailoverEnabled } from "./config/failoverConfig.js";
 
 // Set global server start time for uptime calculations
 global.serverStartTime = Date.now();
+
+/**
+ * Static file serving handler for the web UI
+ */
+const handleStaticFile = async (request, response) => {
+  const url = new URL(request.url ?? "", `http://${request.headers.host ?? "localhost"}`);
+  
+  // Only handle GET requests for static files
+  if (request.method !== "GET") {
+    return false;
+  }
+
+  // Map URL paths to file paths
+  let filePath;
+  if (url.pathname === '/' || url.pathname === '/index.html') {
+    filePath = join(process.cwd(), 'apps', 'web', 'index.html');
+  } else if (url.pathname.startsWith('/src/')) {
+    filePath = join(process.cwd(), 'apps', 'web', url.pathname);
+  } else {
+    return false; // Not a static file request we handle
+  }
+
+  try {
+    const fileStats = await stat(filePath);
+    if (fileStats.isFile()) {
+      const fileContent = await readFile(filePath);
+      
+      // Set appropriate content type based on file extension
+      const ext = filePath.split('.').pop().toLowerCase();
+      let contentType = 'text/html';
+      if (ext === 'css') contentType = 'text/css';
+      if (ext === 'js') contentType = 'application/javascript';
+      
+      response.writeHead(200, { 'Content-Type': contentType });
+      response.end(fileContent);
+      return true;
+    }
+  } catch (error) {
+    // File not found or other error - let other handlers try
+    return false;
+  }
+  
+  return false;
+};
 
 /**
  * Main server initialization
@@ -94,6 +141,8 @@ async function main() {
     registerProviderRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     console.log('Registering health routes...');
     registerHealthRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    console.log('Registering topology routes...');
+    registerTopologyRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     console.log('Registering tool routes...');
     registerToolRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     console.log('Registering job routes...');
@@ -218,6 +267,23 @@ async function main() {
         // Log request
         if (typeof requestLogger === 'function') {
           requestLogger(req, res, () => {});
+        }
+        
+        // Try static file serving first
+        if (!res.headersSent) {
+          try {
+            const staticHandled = await handleStaticFile(req, res);
+            if (staticHandled) {
+              console.log('Static file served:', req.method, req.url);
+              return; // Static file was served, we're done
+            }
+          } catch (err) {
+            console.error('Static file serving error:', err.message);
+            if (!res.headersSent) {
+              globalErrorHandler(err, req, res, () => {});
+            }
+            return;
+          }
         }
         
         // Run each route handler sequentially until one handles the request
