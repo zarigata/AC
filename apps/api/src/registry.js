@@ -232,6 +232,32 @@ export class AgentRegistry {
           CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(createdAt);
           CREATE INDEX IF NOT EXISTS idx_jobs_status_created_at ON jobs(status, createdAt);
         `);
+
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS presets (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            configTemplate TEXT NOT NULL, -- JSON config
+            icon TEXT DEFAULT NULL,
+            category TEXT DEFAULT 'general',
+            isSystem BOOLEAN DEFAULT 0,
+            isFeatured BOOLEAN DEFAULT 0,
+            orderIndex INTEGER DEFAULT 0,
+            tags TEXT DEFAULT '[]', -- JSON array
+            enabled BOOLEAN DEFAULT 1,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL,
+            originalPresetId TEXT,
+            isCustomization BOOLEAN DEFAULT 0
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_presets_enabled ON presets(enabled);
+          CREATE INDEX IF NOT EXISTS idx_presets_category ON presets(category);
+          CREATE INDEX IF NOT EXISTS idx_presets_system ON presets(isSystem);
+          CREATE INDEX IF NOT EXISTS idx_presets_featured ON presets(isFeatured);
+          CREATE INDEX IF NOT EXISTS idx_presets_order ON presets(orderIndex);
+        `);
         
         // Enable WAL mode for better performance
         this.db.exec('PRAGMA journal_mode = WAL');
@@ -271,10 +297,126 @@ export class AgentRegistry {
     });
 
     this.createLink({
-      sourceAgentId: coordinator.id,
-      targetAgentId: researcher.id,
+      sourceId: coordinator.id,
+      targetId: researcher.id,
       mode: "delegate"
     });
+
+    // Create default presets
+    const defaultPresets = [
+      {
+        id: 'home-assistant',
+        name: 'Home Assistant',
+        description: 'Smart home automation and control agent with device management and scene control',
+        category: 'automation',
+        icon: '🏠',
+        isSystem: true,
+        isFeatured: true,
+        orderIndex: 1,
+        configTemplate: {
+          agents: [
+            {
+              id: 'home-control',
+              name: 'Home Control',
+              description: 'Control your smart home devices and manage automation',
+              model: 'qwen3:1.7b',
+              systemPrompt: 'You are a smart home assistant. Help users control their devices, set scenes, and manage automation.',
+              temperature: 0.7,
+              tools: ['web_search']
+            }
+          ],
+          settings: {
+            defaultModel: 'qwen3:1.7b',
+            maxConversations: 3,
+            autoSave: true,
+            enableMemory: true,
+            maxMemoryTokens: 4000
+          }
+        },
+        tags: ['smart-home', 'automation', 'iot']
+      },
+      {
+        id: 'productivity-pro',
+        name: 'Productivity Pro',
+        description: 'Personal productivity assistant for task management, scheduling, and workflow optimization',
+        category: 'productivity',
+        icon: '⚡',
+        isSystem: true,
+        isFeatured: true,
+        orderIndex: 2,
+        configTemplate: {
+          agents: [
+            {
+              id: 'task-manager',
+              name: 'Task Manager',
+              description: 'Help organize tasks, set priorities, and track progress',
+              model: 'qwen3:1.7b',
+              systemPrompt: 'You are a productivity expert. Help users manage tasks, set goals, and optimize workflows.',
+              temperature: 0.5,
+              tools: ['file_operations']
+            }
+          ],
+          settings: {
+            defaultModel: 'qwen3:1.7b',
+            maxConversations: 5,
+            autoSave: true,
+            enableMemory: true,
+            maxMemoryTokens: 4000
+          }
+        },
+        tags: ['productivity', 'tasks', 'organization']
+      },
+      {
+        id: 'research-assistant',
+        name: 'Research Assistant',
+        description: 'Research and analysis assistant for gathering information and summarizing findings',
+        category: 'research',
+        icon: '🔍',
+        isSystem: true,
+        isFeatured: false,
+        orderIndex: 3,
+        configTemplate: {
+          agents: [
+            {
+              id: 'web-researcher',
+              name: 'Web Researcher',
+              description: 'Research topics on the web and provide comprehensive summaries',
+              model: 'qwen3:1.7b',
+              systemPrompt: 'You are a research assistant. Help users find and analyze information on the web.',
+              temperature: 0.6,
+              tools: ['web_search', 'calculate']
+            }
+          ],
+          settings: {
+            defaultModel: 'qwen3:1.7b',
+            maxConversations: 3,
+            autoSave: true,
+            enableMemory: true,
+            maxMemoryTokens: 6000
+          }
+        },
+        tags: ['research', 'analysis', 'web-search']
+      }
+    ];
+
+    // Create default presets
+    for (const preset of defaultPresets) {
+      this.createPreset({
+        id: preset.id,
+        name: preset.name,
+        description: preset.description,
+        category: preset.category,
+        configTemplate: preset.configTemplate,
+        icon: preset.icon,
+        isSystem: preset.isSystem,
+        isFeatured: preset.isFeatured,
+        orderIndex: preset.orderIndex,
+        tags: preset.tags,
+        enabled: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+    }
   }
 
   createAgent(input) {
