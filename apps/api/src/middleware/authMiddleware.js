@@ -57,7 +57,12 @@ const DEFAULT_CONFIG = {
     '/api/agents/',
     '/api/agents/.+',
     '/api/agents/.+/tools',
-    '/api/agents/.+/tools/.+'
+    '/api/agents/.+/tools/.+',
+    '/api/presets',
+    '/api/presets/',
+    '/api/presets/.+',
+    '/api/presets/.+/apply',
+    '/api/presets/.+/customize'
   ],
 
   // Skip authentication for these paths

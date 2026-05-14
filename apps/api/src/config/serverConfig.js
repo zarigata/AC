@@ -64,7 +64,7 @@ export const serverState = {
 export const initServerConfig = () => {
   const port = Number(process.env.PORT ?? 4000);
   const host = process.env.HOST ?? "0.0.0.0";
-  const databasePath = process.env.ZSIISTANT_DB_PATH ?? new URL("../data/zsiistant.sqlite", import.meta.url).pathname;
+  const databasePath = process.env.ZSIISTANT_DB_PATH ?? new URL("./data/zsiistant.sqlite", import.meta.url).pathname;
   const webRoot = fileURLToPath(new URL("../../web/", import.meta.url));
   
   return { port, host, databasePath, webRoot };

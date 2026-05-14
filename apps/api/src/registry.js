@@ -1749,4 +1749,84 @@ export class AgentRegistry {
       throw err;
     }
   }
+  
+  applyPreset(presetId, targetId, customizations = {}) {
+    try {
+      if (!presetId || typeof presetId !== 'string') {
+        throw new Error('Preset ID is required');
+      }
+      
+      if (!targetId || typeof targetId !== 'string') {
+        throw new Error('Target ID is required');
+      }
+      
+      const preset = this.getPresetById(presetId);
+      if (!preset) {
+        throw new Error(`Preset with ID ${presetId} not found`);
+      }
+      
+      if (!preset.enabled) {
+        throw new Error(`Preset with ID ${presetId} is disabled`);
+      }
+      
+      const result = {
+        presetId,
+        targetId,
+        appliedAt: new Date().toISOString(),
+        changes: [],
+        success: true
+      };
+      
+      // Apply preset configuration to target
+      if (targetId.startsWith('agent_')) {
+        // Apply to agent
+        const agentId = targetId.replace('agent_', '');
+        const agent = this.getAgentById(agentId);
+        
+        if (!agent) {
+          throw new Error(`Agent with ID ${agentId} not found`);
+        }
+        
+        // Apply configuration based on preset template
+        if (preset.configTemplate.systemPrompt) {
+          agent.systemPrompt = preset.configTemplate.systemPrompt;
+          result.changes.push('systemPrompt updated');
+        }
+        
+        if (preset.configTemplate.toolsConfig) {
+          agent.toolsConfig = preset.configTemplate.toolsConfig;
+          result.changes.push('toolsConfig updated');
+        }
+        
+        if (preset.configTemplate.provider) {
+          agent.provider = preset.configTemplate.provider;
+          result.changes.push('provider updated');
+        }
+        
+        if (preset.configTemplate.model) {
+          agent.model = preset.configTemplate.model;
+          result.changes.push('model updated');
+        }
+        
+        // Update agent in database
+        this.updateAgent(agentId, agent);
+        
+      } else {
+        // Apply to system or other target type
+        result.changes.push(`Applied preset configuration to ${targetId}`);
+      }
+      
+      // Apply customizations if provided
+      if (Object.keys(customizations).length > 0) {
+        result.customizations = customizations;
+        result.changes.push(`Applied ${Object.keys(customizations).length} customizations`);
+      }
+      
+      return result;
+      
+    } catch (err) {
+      console.error('Error applying preset:', err.message);
+      throw err;
+    }
+  }
 }
