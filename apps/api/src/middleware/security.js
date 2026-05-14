@@ -392,53 +392,66 @@ export const applyRateLimit = (request, response) => {
     const userAgent = request.headers['user-agent'] || '';
     const timestamp = Date.now();
     
-    // Validate client IP format
-    if (!clientIP || clientIP === 'unknown') {
+    // Validate client IP format with enhanced checks
+    if (!clientIP || clientIP === 'unknown' || typeof clientIP !== 'string') {
       sendError(response, 400, 'Invalid Client IP', 'Invalid client IP address');
+      return false;
+    }
+    
+    // Additional IP validation to prevent bypass attempts
+    if (clientIP.length > 45 || !isValidIP(clientIP)) {
+      sendError(response, 400, 'Invalid Client IP', 'Invalid client IP address format');
       return false;
     }
     
     // Check if IP is already blocked
     if (isBlockedIP(clientIP)) {
-      sendError(response, 429, 'IP Blocked', 'Your IP address has been temporarily blocked');
+      sendError(response, 429, 'IP Blocked', 'Your IP address has been temporarily blocked', {
+        retryAfter: Math.ceil(BLOCK_DURATION / 1000)
+      });
       return false;
     }
     
-    // Clean up old entries more efficiently
+    // Clean up old entries efficiently
     cleanupRateLimitEntries();
     
-    // Create secure rate limit key
+    // Create secure rate limit key with enhanced validation
     const rateLimitKey = createRateLimitKey(clientIP, timestamp);
     
-    // Check if IP is rate limited
+    // Check if IP is rate limited with improved logic
     if (rateLimit.has(rateLimitKey)) {
       const data = rateLimit.get(rateLimitKey);
-      if (timestamp - data.timestamp < RATE_LIMIT_WINDOW && data.count >= MAX_REQUESTS_PER_MINUTE) {
-        sendError(response, 429, 'Rate Limit Exceeded', `Max ${MAX_REQUESTS_PER_MINUTE} requests per minute per client allowed`, {
-          retryAfter: Math.ceil((RATE_LIMIT_WINDOW - (timestamp - data.timestamp)) / 1000),
-          timestamp: timestamp
-        });
-        return false;
+      
+      // Check if window has expired
+      if (timestamp - data.timestamp >= RATE_LIMIT_WINDOW) {
+        // Reset count for new window
+        data.count = 1;
+        data.timestamp = timestamp;
+        data.userAgent = userAgent.length > 500 ? userAgent.substring(0, 500) : userAgent;
+      } else {
+        // Increment count with bounds checking
+        if (data.count >= MAX_REQUESTS_PER_MINUTE) {
+          // Record IP violation for potential blocking
+          recordIPViolation(clientIP);
+          sendError(response, 429, 'Rate Limit Exceeded', `Max ${MAX_REQUESTS_PER_MINUTE} requests per minute per client allowed`, {
+            retryAfter: Math.ceil((RATE_LIMIT_WINDOW - (timestamp - data.timestamp)) / 1000),
+            timestamp: timestamp
+          });
+          return false;
+        }
+        
+        data.count = Math.min(data.count + 1, MAX_REQUESTS_PER_MINUTE);
+        data.timestamp = timestamp;
+        data.userAgent = userAgent.length > 500 ? userAgent.substring(0, 500) : userAgent;
+      }
+    } else {
+      // Create new entry with enhanced validation
+      if (userAgent.length > 500) {
+        userAgent = userAgent.substring(0, 500);
       }
       
-      // Increment count with bounds checking
-      data.count = Math.min(data.count + 1, MAX_REQUESTS_PER_MINUTE);
-      data.timestamp = timestamp;
-      data.userAgent = userAgent.substring(0, 500); // Truncate safely
-    } else {
-      // Create new entry with validation and bounds checking
-      const safeUserAgent = userAgent.length > 500 ? userAgent.substring(0, 500) : userAgent;
-      rateLimit.set(rateLimitKey, { count: 1, timestamp: timestamp, userAgent: safeUserAgent });
-    }
-    
-    return true;
-  } catch (err) {
-    console.error('Rate limit error:', err);
-    // Don't expose error details to client for security
-    sendError(response, 500, 'Internal Server Error', 'Rate limiting service temporarily unavailable');
-    return false;
-  }
-};
+      // Validate user agent format
+      if (userAgent && !userAgent.match(/^[a-zA-Z0-9\s\._\-\+\(\)\[\]\{\}:;\*\?\,\!\#@\$%\&=<>|~\\
 
 // Optimized rate limit cleanup with better performance
 export const startRateLimitCleanup = () => {

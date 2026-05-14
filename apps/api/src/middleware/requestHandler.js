@@ -45,14 +45,24 @@ export const readRequestBody = async (request) => {
     }
     
     try {
-      // Use safer JSON parsing with enhanced prototype protection
+      // Use safer JSON parsing with comprehensive prototype protection
       const parsed = JSON.parse(raw, (key, value) => {
-        // Filter out prototype pollution attempts
-        if (key === '__proto__' || key === 'constructor' || key === 'prototype' ||
-            key === '__defineGetter__' || key === '__defineSetter__' || 
-            key === '__lookupGetter__' || key === '__lookupSetter__') {
-          return undefined;
+        // Block prototype pollution attempts
+        const blockedKeys = [
+          '__proto__', 'constructor', 'prototype',
+          '__defineGetter__', '__defineSetter__',
+          '__lookupGetter__', '__lookupSetter__'
+        ];
+        
+        if (blockedKeys.includes(key)) {
+          throw new Error(`Security violation: blocked key ${key}`);
         }
+        
+        // Block null prototype attacks
+        if (value && typeof value === 'object' && value.__proto__ === null) {
+          throw new Error('Security violation: null prototype object detected');
+        }
+        
         return value;
       });
       
@@ -61,21 +71,51 @@ export const readRequestBody = async (request) => {
         throw new Error('Invalid JSON structure: expected object');
       }
       
-      // Enhanced security check for suspicious properties and prototype manipulation
-      const suspiciousProps = ['__proto__', 'constructor', 'prototype', '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__'];
-      for (const prop of suspiciousProps) {
+      // Enhanced security checks with comprehensive validation
+      const blockedProps = [
+        '__proto__', 'constructor', 'prototype',
+        '__defineGetter__', '__defineSetter__',
+        '__lookupGetter__', '__lookupSetter__'
+      ];
+      
+      // Check for dangerous properties
+      for (const prop of blockedProps) {
         if (Object.prototype.hasOwnProperty.call(parsed, prop)) {
-          throw new Error(`Invalid JSON structure: suspicious property ${prop}`);
+          throw new Error(`Security violation: blocked property ${prop}`);
         }
       }
       
-      // Check for prototype pollution attempts
+      // Comprehensive prototype pollution check
       try {
+        // Test for prototype manipulation
         const testObj = {};
-        Object.setPrototypeOf(testObj, parsed);
-        // If we get here without throwing, there was no prototype pollution
+        Object.assign(testObj, parsed);
+        
+        // Additional check for circular references and dangerous patterns
+        const seen = new WeakSet();
+        const deepCheck = (obj) => {
+          if (obj === null || typeof obj !== 'object') return;
+          
+          if (seen.has(obj)) {
+            throw new Error('Security violation: circular reference detected');
+          }
+          
+          seen.add(obj);
+          
+          for (const key in obj) {
+            if (blockedProps.includes(key)) {
+              throw new Error(`Security violation: blocked key ${key} in object`);
+            }
+            deepCheck(obj[key]);
+          }
+        };
+        
+        deepCheck(parsed);
       } catch (protoErr) {
-        throw new Error('Invalid JSON structure: prototype pollution attempt detected');
+        if (protoErr.message.includes('Security violation')) {
+          throw protoErr; // Re-throw our security errors
+        }
+        throw new Error('Invalid JSON structure: object validation failed');
       }
       
       return parsed;
