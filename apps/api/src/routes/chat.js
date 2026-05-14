@@ -811,7 +811,7 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
 
   // GET /api/chat/sessions - List user's sessions
   server.on('request', async (req, res) => {
-    if (req.method === "GET" && req.url?.startsWith("/api/chat/sessions")) {
+    if (req.method === "GET" && req.url === "/api/chat/sessions") {
       try {
         // Apply rate limiting
         if (!applyRateLimit(req, res)) {
@@ -838,7 +838,7 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
 
   // GET /api/chat/sessions/:sessionId - Get specific session
   server.on('request', async (req, res) => {
-    if (req.method === "GET" && req.url?.startsWith("/api/chat/sessions/")) {
+    if (req.method === "GET" && req.url.startsWith("/api/chat/sessions/") && req.url !== "/api/chat/sessions") {
       try {
         const sessionId = req.url.split('/').pop();
         
