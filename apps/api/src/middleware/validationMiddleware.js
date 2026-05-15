@@ -104,6 +104,16 @@ const updateSettingsSchema = z.object({
   defaultProvider: z.string().min(1).max(50).optional(),
 });
 
+// Link schemas
+const createLinkSchema = z.object({
+  sourceAgentId: secureString(2, 64, "sourceAgentId"),
+  targetAgentId: secureString(2, 64, "targetAgentId"),
+  mode: z.enum(["observe", "message", "delegate"]).optional().default("observe"),
+  direction: z.enum(["inbound", "outbound", "bidirectional"]).optional().default("outbound"),
+  enabled: z.boolean().optional().default(true),
+  metadata: z.record(z.any()).optional(),
+});
+
 // Provider schemas
 const createProviderSchema = z.object({
   name: z.string().min(1).max(100),
@@ -248,7 +258,7 @@ export const validateUpdateSettings = (request, response, next) => {
 };
 
 // Export schemas for direct use in route handlers
-export { createAgentSchema, updateAgentSchema };
+export { createAgentSchema, updateAgentSchema, createLinkSchema };
 
 export const validateCreateProvider = (request, response, next) => {
   return validateRequest('POST', '/api/providers', createProviderSchema)(request, response, next);
@@ -256,6 +266,10 @@ export const validateCreateProvider = (request, response, next) => {
 
 export const validateUpdateProvider = (request, response, next) => {
   return validateRequest('PUT', '/api/providers/:id', updateProviderSchema)(request, response, next);
+};
+
+export const validateCreateLink = (request, response, next) => {
+  return validateRequest('POST', '/api/links', createLinkSchema)(request, response, next);
 };
 
 /**

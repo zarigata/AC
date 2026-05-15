@@ -25,7 +25,7 @@ const DEFAULT_PROVIDER = process.env.DEFAULT_PROVIDER || "ollama";
 
 // Failover chain configuration
 const failoverChains = {};
-let DEFAULT_FAILOVER_CHAIN = process.env.DEFAULT_FAILOVER_CHAIN || "default";
+export let DEFAULT_FAILOVER_CHAIN = process.env.DEFAULT_FAILOVER_CHAIN || "default";
 
 /**
  * Initialize failover chains with enhanced health monitoring

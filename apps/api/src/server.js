@@ -12,6 +12,7 @@ import { registerChatRoutes } from "./routes/chat.js";
 import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerProviderRoutes } from "./routes/providers.js";
 import { registerHealthRoutes } from "./routes/health.js";
+import { registerLinksRoutes } from "./routes/links.js";
 console.log('Health routes imported successfully');
 import { registerTopologyRoutes } from "./routes/topology.js";
 import { registerToolRoutes } from "./routes/tools.js";
@@ -143,6 +144,8 @@ async function main() {
     registerHealthRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     console.log('Registering topology routes...');
     registerTopologyRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    console.log('Registering links routes...');
+    registerLinksRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     console.log('Registering tool routes...');
     registerToolRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     console.log('Registering job routes...');

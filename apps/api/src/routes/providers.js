@@ -2,6 +2,10 @@
  * Provider Routes - Handle all provider-related API endpoints
  */
 
+import { providerSummary, listProviderConnections, getProviderReadinessSummary } from '../shared/simpleShared.js';
+import { FailoverChainAdapter } from '../adapters/failover.js';
+import { isProviderInFailoverChain, DEFAULT_FAILOVER_CHAIN } from '../middleware/providerManager.js';
+
 export function registerProviderRoutes(server, registry, providers, failoverChains, settings) {
   /**
    * Handle provider summary and health

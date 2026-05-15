@@ -646,7 +646,7 @@ export class AgentRegistry {
       try {
         // Delete dependent records first (foreign key constraints will handle this)
         this.db.prepare("DELETE FROM agent_links WHERE sourceAgentId = ? OR targetAgentId = ?").run(id, id);
-        this.db.prepare("DELETE FROM sessions WHERE agent_id = ?").run(id);
+        this.db.prepare("DELETE FROM sessions WHERE agentId = ?").run(id);
         
         // Delete the agent
         const result = this.db.prepare("DELETE FROM agents WHERE id = ?").run(id);
@@ -1027,7 +1027,7 @@ export class AgentRegistry {
         throw new Error('Invalid session model');
       }
 
-      const insertStmt = this.db.prepare("INSERT INTO sessions (id, agent_id, title, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)");
+      const insertStmt = this.db.prepare("INSERT INTO sessions (id, agentId, title, model, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)");
       const result = insertStmt.run(session.id, session.agentId, session.title, session.model, session.createdAt, session.updatedAt);
       
       if (result.changes === 0) {
@@ -1126,12 +1126,12 @@ export class AgentRegistry {
       const offset = (page - 1) * limit;
       
       // Get total count for pagination metadata
-      const countResult = this.db.prepare("SELECT COUNT(*) as total FROM sessions WHERE agent_id = ?").get(agentId);
+      const countResult = this.db.prepare("SELECT COUNT(*) as total FROM sessions WHERE agentId = ?").get(agentId);
       const total = countResult.total;
       
       // Get paginated results
       const sessions = this.db
-        .prepare("SELECT * FROM sessions WHERE agent_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?")
+        .prepare("SELECT * FROM sessions WHERE agentId = ? ORDER BY createdAt DESC LIMIT ? OFFSET ?")
         .all(agentId, limit, offset);
       
       return {
@@ -1180,7 +1180,7 @@ export class AgentRegistry {
       }
       
       // Verify session belongs to agent
-      const session = this.db.prepare("SELECT * FROM sessions WHERE id = ? AND agent_id = ?").get(sessionId, agentId);
+      const session = this.db.prepare("SELECT * FROM sessions WHERE id = ? AND agentId = ?").get(sessionId, agentId);
       if (!session) {
         console.error('Session not found:', { agentId, sessionId });
         return null;
@@ -1303,12 +1303,12 @@ export class AgentRegistry {
       const offset = (page - 1) * limit;
       
       // Get total count for pagination metadata
-      const countResult = this.db.prepare("SELECT COUNT(*) as total FROM messages WHERE sessionId = ? AND sessionId IN (SELECT id FROM sessions WHERE agent_id = ?)").get(sessionId, agentId);
+      const countResult = this.db.prepare("SELECT COUNT(*) as total FROM messages WHERE sessionId = ? AND sessionId IN (SELECT id FROM sessions WHERE agentId = ?)").get(sessionId, agentId);
       const total = countResult.total;
       
       // Get paginated results
       const messages = this.db
-        .prepare("SELECT * FROM messages WHERE sessionId = ? AND sessionId IN (SELECT id FROM sessions WHERE agent_id = ?) ORDER BY created_at ASC LIMIT ? OFFSET ?")
+        .prepare("SELECT * FROM messages WHERE sessionId = ? AND sessionId IN (SELECT id FROM sessions WHERE agentId = ?) ORDER BY createdAt ASC LIMIT ? OFFSET ?")
         .all(sessionId, agentId, limit, offset);
       
       return {
@@ -1392,7 +1392,7 @@ export class AgentRegistry {
       // This is a placeholder - in a real implementation, you'd track actual task execution
       // For now, return a simulated count based on recent activity
       const recentSessions = this.db
-        .prepare("SELECT id FROM sessions WHERE agent_id = ? AND datetime(updated_at) > datetime('now', '-5 minutes')")
+        .prepare("SELECT id FROM sessions WHERE agentId = ? AND datetime(updatedAt) > datetime('now', '-5 minutes')")
         .all(agentId);
       
       let totalMessages = 0;

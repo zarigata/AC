@@ -211,6 +211,78 @@ export function registerToolRoutes(server, registry, providers, failoverChains, 
   };
 
   /**
+   * Handle global tools listing
+   */
+  const handleGlobalTools = async (request, response) => {
+    if (request.method === "GET" && request.url?.startsWith("/api/tools")) {
+      try {
+        // Get all available tools from the tool system
+        const { getRegisteredTools } = await import("../tools/tools.js");
+        const tools = getRegisteredTools();
+        
+        response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ tools, total: tools.length }));
+        return true;
+      } catch (error) {
+        console.error('Global tools error:', error);
+        response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ error: "Failed to load tools" }));
+        return true;
+      }
+    }
+    return false;
+  };
+
+  /**
+   * Handle web UI configuration
+   */
+  const handleWebUIConfig = async (request, response) => {
+    if (request.method === "GET" && request.url?.startsWith("/api/webui/config")) {
+      try {
+        const config = {
+          version: "0.2.0",
+          features: {
+            chat: true,
+            agents: true,
+            tools: true,
+            sessions: true,
+            presets: true,
+            links: true,
+            memory: true,
+            webhooks: true
+          },
+          settings: {
+            maxAgentsPerSession: 10,
+            maxConcurrentTasks: 5,
+            defaultMessageTimeout: 30000,
+            enableStreaming: true,
+            enableFileUpload: true,
+            enableMemoryManagement: true
+          },
+          providers: [
+            {
+              id: "ollama",
+              name: "Ollama",
+              description: "Local Ollama models",
+              models: ["qwen3:1.7b", "llama3:8b", "mistral:7b"]
+            }
+          ]
+        };
+        
+        response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify(config));
+        return true;
+      } catch (error) {
+        console.error('WebUI config error:', error);
+        response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ error: "Failed to load webui config" }));
+        return true;
+      }
+    }
+    return false;
+  };
+
+  /**
    * Register tool routes
    */
   server.on('request', async (request, response) => {
@@ -218,6 +290,8 @@ export function registerToolRoutes(server, registry, providers, failoverChains, 
 
     // Try each handler in order
     const handlers = [
+      handleWebUIConfig,
+      handleGlobalTools,
       handleAgentTools,
       handleAgentTool,
       handleToolExecution

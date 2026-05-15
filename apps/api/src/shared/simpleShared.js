@@ -122,15 +122,24 @@ export const parseCreateLinkInput = (input) => {
     throw new Error('Link input must be an object');
   }
   
+  // Support both field names for backward compatibility
+  const sourceId = input.sourceAgentId || input.sourceId;
+  const targetId = input.targetAgentId || input.targetId;
+  
   return {
-    sourceId: ensureString(input.sourceId, "sourceId", 2, 80),
-    targetId: ensureString(input.targetId, "targetId", 2, 80),
+    sourceId: ensureString(sourceId, "sourceAgentId/sourceId", 2, 80),
+    targetId: ensureString(targetId, "targetAgentId/targetId", 2, 80),
     mode: ensureEnum(input.mode, "mode", agentLinkModeValues),
     direction: ensureEnum(input.direction, "direction", ["inbound", "outbound", "bidirectional"])
   };
 };
 
 // Summary functions
+export const providerSummary = () => ({
+  providers: listProviderConnections(),
+  summary: getProviderReadinessSummary()
+});
+
 export const getProviderReadinessSummary = () => ({
   total: providerCatalog.length,
   ready: providerCatalog.filter(p => p.status === "live-target").length,

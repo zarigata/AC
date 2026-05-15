@@ -91,17 +91,17 @@ const DEFAULT_CONFIG = {
 const apiKeyStore = new Map();
 
 /**
- * Default API key for testing (only in development)
+ * Default API key for testing (in both dev and test environments)
  */
-const defaultApiKey = process.env.NODE_ENV === 'development' ? 'zsiistant-test-api-key-12345' : null;
+const defaultApiKey = process.env.NODE_ENV === 'production' ? null : 'zsiistant-test-api-key-12345';
 if (defaultApiKey) {
   apiKeyStore.set(defaultApiKey, {
-    name: 'Development Test API Key',
+    name: 'Test API Key',
     created: new Date(),
     active: true,
-    note: 'This key is only available in development mode'
+    note: 'This key is available for testing'
   });
-  console.log('⚠️  Development API key loaded - not for production use');
+  console.log('🔑 Test API key loaded for environment:', process.env.NODE_ENV || 'development');
 }
 
 /**
