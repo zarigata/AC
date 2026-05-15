@@ -62,7 +62,7 @@ test("deleteLink removes a link", () => {
   const registry = createRegistry();
   const a = registry.createAgent({ ...sampleAgent, name: "AgentA" });
   const b = registry.createAgent({ ...sampleAgent, name: "AgentB" });
-  registry.createLink({ sourceAgentId: a.id, targetAgentId: b.id, mode: "observe" });
+  registry.createLink({ sourceAgentId: a.id, targetAgentId: b.id, mode: "observe", direction: "outbound" });
   assert.equal(registry.deleteLink({ sourceAgentId: a.id, targetAgentId: b.id }), true);
   assert.equal(registry.listLinks().length, 0);
 });

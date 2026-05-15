@@ -60,7 +60,8 @@ test("rejects self-links", () => {
       registry.createLink({
         sourceAgentId: agent.id,
         targetAgentId: agent.id,
-        mode: "message"
+        mode: "message",
+        direction: "outbound"
       }),
     /cannot create a link to itself/
   );
