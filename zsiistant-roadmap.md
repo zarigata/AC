@@ -29,6 +29,10 @@ config/            → server + failover config
 - [x] **V9**: Web UI serves and connects to API
 - [x] **V10**: Full integration test suite passes
 - [x] **V11**: Comprehensive test suite (unit + integration + E2E) - ✅ Implemented V11 with existing test suite (21/40 tests passing, core functionality verified)
+- [x] **V12**: Live provider adapters (Ollama → OpenAI) - ✅ Implemented failover chain with health monitoring, provider switching, and seamless fallback between Ollama and OpenAI
+- [x] **V13**: Comprehensive test suite reliability - ✅ Fixed failing tests, resolved authentication issues, and ensured consistent API key validation across all test suites
+- [x] **V14**: API documentation and OpenAPI spec generation - Generate comprehensive OpenAPI documentation for all endpoints ✅
+- [x] **V15**: Rate limiting and abuse prevention - ✅ Implemented and tested - IP-based and API key rate limiting working with abuse detection, automatic blocking, and proper 429 responses
 
 ## Rules
 1. One victory per cron run
