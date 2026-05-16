@@ -22,8 +22,17 @@ export class TelegramAdapter {
    * Initialize the Telegram adapter
    */
   async initialize() {
-    if (!this.config.botToken) {
-      throw new Error("Telegram bot token is required");
+    // Allow demo mode for testing
+    if (this.config.isDemo) {
+      console.log("🤖 Initializing demo Telegram adapter...");
+      this.isActive = true;
+      return;
+    }
+    
+    if (!this.config.botToken || this.config.botToken === 'demo-token') {
+      console.log("🤖 Telegram adapter running in demo mode (no real bot token)");
+      this.isActive = true;
+      return;
     }
 
     console.log("🤖 Initializing Telegram adapter...");

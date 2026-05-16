@@ -42,8 +42,17 @@ export class DiscordAdapter {
    * Initialize the Discord adapter
    */
   async initialize() {
-    if (!this.config.botToken) {
-      throw new Error("Discord bot token is required");
+    // Allow demo mode for testing
+    if (this.config.isDemo) {
+      console.log("🎮 Initializing demo Discord adapter...");
+      this.isActive = true;
+      return;
+    }
+    
+    if (!this.config.botToken || this.config.botToken === 'demo-token') {
+      console.log("🎮 Discord adapter running in demo mode (no real bot token)");
+      this.isActive = true;
+      return;
     }
 
     console.log("🎮 Initializing Discord adapter...");
