@@ -27,6 +27,7 @@ import { registerWebSocketRoutes } from "./routes/websocket.js";
 import { registerMonitoringRoutes } from "./routes/monitoring.js";
 import { UserManager } from "./database/userManager.js";
 import { webhookManager } from "./adapters/webhookManager.js";
+import { initializeAlertingSystem } from "./middleware/alertingSystem.js";
 import { globalErrorHandler, notFoundHandler, requestLogger } from "./middleware/errorMiddleware.js";
 import createRateLimiter from "./middleware/rateLimiter.js";
 import createAuthMiddleware from "./middleware/authMiddleware.js";
@@ -181,6 +182,15 @@ async function main() {
       console.log("Tool system initialized successfully");
     } catch (toolErr) {
       console.error("Tool system initialization error (non-fatal):", toolErr.message);
+    }
+    
+    // Initialize alerting system
+    console.log("Initializing alerting system...");
+    try {
+      initializeAlertingSystem();
+      console.log("Alerting system initialized successfully");
+    } catch (alertErr) {
+      console.error("Alerting system initialization error (non-fatal):", alertErr.message);
     }
 
     // Initialize webhook manager
