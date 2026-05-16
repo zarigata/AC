@@ -117,7 +117,6 @@ export class WebhookManager {
     for (const [name, adapter] of this.adapters) {
       try {
         await adapter.initialize();
-        startPromises.push(adapter.initialize());
         console.log(`✅ ${name} adapter initialized successfully`);
       } catch (error) {
         console.error(`❌ Failed to initialize ${name} adapter:`, error);

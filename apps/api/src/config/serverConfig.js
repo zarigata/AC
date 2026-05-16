@@ -85,6 +85,18 @@ export const createServerInstance = (port, host) => {
 };
 
 /**
+ * Create server instance with existing WebSocket server
+ */
+export const createServerInstanceWithWebSocket = (server) => {
+  // WebSocket upgrade handler
+  server.on('upgrade', (request, socket, head) => {
+    handleWebSocketUpgrade(request, socket, head, serverState.websocketServer, serverState.registry);
+  });
+  
+  return server;
+};
+
+/**
  * Setup WebSocket server
  */
 export const setupWebSocketServer = (server) => {
@@ -290,7 +302,7 @@ export const initializeServer = async (registry) => {
   // Update settings with provider count
   settings.providers = Object.keys(providers).length;
   
-  // Create server instance
+  // Create server instance with WebSocket upgrade handler
   const server = createServerInstance(config.port, config.host);
   
   // Setup WebSocket server

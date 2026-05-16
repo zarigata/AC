@@ -23,6 +23,7 @@ import { registerWebhookRoutes } from "./routes/webhooks.js";
 import { registerPresetRoutes } from "./routes/presets.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerDocumentationRoutes } from "./routes/documentation.js";
+import { registerWebSocketRoutes } from "./routes/websocket.js";
 import { UserManager } from "./database/userManager.js";
 import { webhookManager } from "./adapters/webhookManager.js";
 import { globalErrorHandler, notFoundHandler, requestLogger } from "./middleware/errorMiddleware.js";
@@ -147,6 +148,8 @@ async function main() {
     registerTopologyRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     console.log('Registering links routes...');
     registerLinksRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    console.log('Registering WebSocket routes...');
+    registerWebSocketRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     console.log('Registering tool routes...');
     registerToolRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     console.log('Registering job routes...');
