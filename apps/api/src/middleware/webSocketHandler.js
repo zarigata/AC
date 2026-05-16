@@ -26,6 +26,12 @@ function constantTimeCompare(a, b) {
 const activeConnections = new Map();
 let totalActiveConnections = 0;
 
+// Export connection tracking for monitoring
+export { activeConnections, totalActiveConnections };
+
+// Export task tracking for monitoring
+export { activeTasks, totalActiveTasks };
+
 // WebSocket message rate limiting
 export const messageTimestamps = new Map();
 

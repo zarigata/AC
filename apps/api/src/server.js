@@ -24,6 +24,7 @@ import { registerPresetRoutes } from "./routes/presets.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerDocumentationRoutes } from "./routes/documentation.js";
 import { registerWebSocketRoutes } from "./routes/websocket.js";
+import { registerMonitoringRoutes } from "./routes/monitoring.js";
 import { UserManager } from "./database/userManager.js";
 import { webhookManager } from "./adapters/webhookManager.js";
 import { globalErrorHandler, notFoundHandler, requestLogger } from "./middleware/errorMiddleware.js";
@@ -167,6 +168,8 @@ async function main() {
     registerPresetRoutes(routeServer, registry);
     console.log('Registering documentation routes...');
     registerDocumentationRoutes(routeServer);
+    console.log('Registering monitoring routes...');
+    registerMonitoringRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
 
     console.log(`Registered ${routeHandlers.length + 1} route handler(s)`);
     

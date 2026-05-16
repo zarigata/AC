@@ -155,8 +155,24 @@ export const initializeRateLimiting = () => {
   const rateLimitCleanupInterval = startRateLimitCleanup();
   
   // Clean up on exit
-  process.on('SIGINT', () => cleanupRateLimitOnExit(rateLimitCleanupInterval));
-  process.on('SIGTERM', () => cleanupRateLimitOnExit(rateLimitCleanupInterval));
+  process.on('SIGINT', () => {
+    try {
+      if (serverState.rateLimitCleanupInterval) {
+        clearInterval(serverState.rateLimitCleanupInterval);
+      }
+    } catch (err) {
+      console.error('Error during rate limit cleanup:', err);
+    }
+  });
+  process.on('SIGTERM', () => {
+    try {
+      if (serverState.rateLimitCleanupInterval) {
+        clearInterval(serverState.rateLimitCleanupInterval);
+      }
+    } catch (err) {
+      console.error('Error during rate limit cleanup:', err);
+    }
+  });
 };
 
 /**
