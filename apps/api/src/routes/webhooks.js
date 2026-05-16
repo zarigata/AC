@@ -6,6 +6,8 @@ import { AgentRegistry } from "../registry.js";
 import { webhookManager } from "../adapters/webhookManager.js";
 
 export function registerWebhookRoutes(server, registry, providers, failoverChains, settings) {
+  console.log('🔧 Webhook routes registered');
+  
   // Helper to parse request body
   const getRequestBody = (request) => {
     return new Promise((resolve, reject) => {
@@ -26,11 +28,34 @@ export function registerWebhookRoutes(server, registry, providers, failoverChain
 
   // Webhook management endpoints
   const handleWebhookRoutes = async (request, response) => {
+    console.log('🎯 Webhook routes called for:', request.method, request.url);
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+    
+    // Handle webhook status
+    if (request.method === "GET" && request.url === "/api/webhooks/status") {
+      console.log('📊 Handling webhook status request');
+      return handleWebhookStatus(request, response);
+    }
     
     // Handle webhook listing
     if (request.method === "GET" && request.url === "/api/webhooks") {
+      console.log('📋 Handling webhook listing request');
       return handleListWebhooks(request, response);
+    }
+    
+    // Handle actual webhook requests for Telegram and Discord (MUST CHECK BEFORE generic operations)
+    if (request.method === "POST") {
+      // Telegram webhook endpoint
+      if (request.url === "/api/webhooks/telegram" || request.url === "/api/webhooks/telegram-default") {
+        console.log('📡 Telegram webhook requested');
+        return handleTelegramWebhook(request, response);
+      }
+      
+      // Discord webhook endpoint
+      if (request.url === "/api/webhooks/discord" || request.url === "/api/webhooks/discord-default") {
+        console.log('🎭 Discord webhook requested');
+        return handleDiscordWebhook(request, response);
+      }
     }
     
     // Handle individual webhook operations
@@ -49,19 +74,25 @@ export function registerWebhookRoutes(server, registry, providers, failoverChain
       }
     }
     
-    // Handle actual webhook requests for Telegram and Discord
-    if (request.method === "POST") {
-      // Telegram webhook endpoint
-      if (request.url === "/api/webhooks/telegram" || request.url === "/api/webhooks/telegram-default") {
-        return handleTelegramWebhook(request, response);
-      }
-      
-      // Discord webhook endpoint
-      if (request.url === "/api/webhooks/discord" || request.url === "/api/webhooks/discord-default") {
-        return handleDiscordWebhook(request, response);
+    return false;
+  };
+
+  /**
+   * Handle webhook manager status
+   */
+  const handleWebhookStatus = async (request, response) => {
+    if (request.method === "GET" && request.url === "/api/webhooks/status") {
+      try {
+        const status = webhookManager.getStatus();
+        response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ status }, null, 2));
+        return true;
+      } catch (error) {
+        response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ error: "Failed to get webhook status" }));
+        return true;
       }
     }
-    
     return false;
   };
 
@@ -71,24 +102,21 @@ export function registerWebhookRoutes(server, registry, providers, failoverChain
   const handleListWebhooks = async (request, response) => {
     if (request.method === "GET" && request.url === "/api/webhooks") {
       try {
-        const webhooks = [
-          {
-            id: "telegram-default",
-            name: "Telegram Default",
-            type: "telegram",
-            endpoint: "/api/webhooks/telegram",
-            status: "active",
-            created: new Date().toISOString()
-          },
-          {
-            id: "discord-default", 
-            name: "Discord Default",
-            type: "discord",
-            endpoint: "/api/webhooks/discord",
-            status: "active",
-            created: new Date().toISOString()
-          }
-        ];
+        const webhookStatus = webhookManager.getStatus();
+        const webhooks = [];
+        
+        // Add webhooks for each active adapter
+        for (const [name, adapterStatus] of webhookStatus.adapters) {
+          webhooks.push({
+            id: `${name}-default`,
+            name: `${name.charAt(0).toUpperCase() + name.slice(1)} Default`,
+            type: name,
+            endpoint: `/api/webhooks/${name}`,
+            status: adapterStatus.isActive ? "active" : "inactive",
+            created: new Date().toISOString(),
+            config: adapterStatus.config
+          });
+        }
         
         response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         response.end(JSON.stringify({ webhooks, total: webhooks.length }));
@@ -142,14 +170,13 @@ export function registerWebhookRoutes(server, registry, providers, failoverChain
         type: "telegram",
         endpoint: "/api/webhooks/telegram",
         status: "active",
-        config: {
-          bot_token: process.env.TELEGRAM_BOT_TOKEN || "your-telegram-bot-token",
-          webhook_url: process.env.TELEGRAM_WEBHOOK_URL || "https://your-domain.com/api/webhooks/telegram",
-          allowed_updates: ["message", "callback_query"],
-          max_connections: 40
-        },
         created: new Date().toISOString(),
-        last_updated: new Date().toISOString()
+        config: {
+          botToken: "***",
+          webhookUrl: "***",
+          allowedUpdates: ["message", "callback_query"],
+          maxConnections: 40
+        }
       },
       "discord-default": {
         id: "discord-default",
@@ -157,10 +184,12 @@ export function registerWebhookRoutes(server, registry, providers, failoverChain
         type: "discord",
         endpoint: "/api/webhooks/discord",
         status: "active",
+        created: new Date().toISOString(),
         config: {
-          bot_token: process.env.DISCORD_BOT_TOKEN || "your-discord-bot-token",
-          webhook_url: process.env.DISCORD_WEBHOOK_URL || "https://your-domain.com/api/webhooks/discord",
-          server_id: process.env.DISCORD_SERVER_ID || "your-server-id",
+          botToken: "***",
+          webhookUrl: "***",
+          serverId: "***",
+          clientId: "***",
           commands: [
             {
               name: "chat",
@@ -169,21 +198,19 @@ export function registerWebhookRoutes(server, registry, providers, failoverChain
                 {
                   name: "agent",
                   description: "Select an agent to chat with",
-                  type: 3, // STRING
+                  type: 3,
                   required: true
                 },
                 {
-                  name: "message", 
+                  name: "message",
                   description: "Your message",
-                  type: 3, // STRING
+                  type: 3,
                   required: true
                 }
               ]
             }
           ]
-        },
-        created: new Date().toISOString(),
-        last_updated: new Date().toISOString()
+        }
       }
     };
 
@@ -203,6 +230,11 @@ export function registerWebhookRoutes(server, registry, providers, failoverChain
    * Create new webhook configuration
    */
   const handleCreateWebhook = async (request, response, webhookId) => {
+    // This only handles general webhook creation, not specific Telegram/Discord webhooks
+    if (webhookId === 'telegram' || webhookId === 'discord') {
+      return false; // Let the specific handlers handle these
+    }
+    
     response.writeHead(201, { "Content-Type": "application/json; charset=utf-8" });
     response.end(JSON.stringify({ 
       id: webhookId,
@@ -220,7 +252,7 @@ export function registerWebhookRoutes(server, registry, providers, failoverChain
     response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     response.end(JSON.stringify({ 
       id: webhookId,
-      status: "updated", 
+      status: "updated",
       message: "Webhook configuration updated successfully"
     }));
     return true;
@@ -234,7 +266,7 @@ export function registerWebhookRoutes(server, registry, providers, failoverChain
     response.end(JSON.stringify({ 
       id: webhookId,
       status: "deleted",
-      message: "Webhook configuration deleted successfully" 
+      message: "Webhook configuration deleted successfully"
     }));
     return true;
   };
@@ -270,8 +302,12 @@ export function registerWebhookRoutes(server, registry, providers, failoverChain
           await webhookManager.handleWebhookRequest('telegram', body, response);
         } else {
           console.log('⚠️ Telegram adapter not available');
-          response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-          response.end(JSON.stringify({ error: "Telegram adapter not configured" }));
+          response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+          response.end(JSON.stringify({ 
+            status: 'inactive', 
+            message: 'Telegram adapter not configured - set TELEGRAM_BOT_TOKEN environment variable',
+            adapterStatus: webhookManager.getStatus().adapters.get('telegram')
+          }));
           return true;
         }
         
@@ -303,8 +339,12 @@ export function registerWebhookRoutes(server, registry, providers, failoverChain
           await webhookManager.handleWebhookRequest('discord', body, response);
         } else {
           console.log('⚠️ Discord adapter not available');
-          response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-          response.end(JSON.stringify({ error: "Discord adapter not configured" }));
+          response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+          response.end(JSON.stringify({ 
+            status: 'inactive', 
+            message: 'Discord adapter not configured - set DISCORD_BOT_TOKEN environment variable',
+            adapterStatus: webhookManager.getStatus().adapters.get('discord')
+          }));
           return true;
         }
         

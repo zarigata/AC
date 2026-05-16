@@ -16,12 +16,30 @@ export function registerProviderRoutes(server, registry, providers, failoverChai
         const summary = providerSummary();
         
         // Add failover chain information
-        summary.failoverChains = Object.keys(failoverChains).map(chainName => ({
-          name: chainName,
-          providerCount: failoverChains[chainName].failoverChain.length,
-          healthy: true, // TODO: Implement provider health endpoint
-          default: chainName === DEFAULT_FAILOVER_CHAIN
-        }));
+        summary.failoverChains = Object.keys(failoverChains).map(chainName => {
+          const chain = failoverChains[chainName].failoverChain;
+          const healthy = chain.length > 0 && chain.every(provider => {
+            try {
+              // Check if provider is available by testing a simple health check
+              const providerConfig = providers[provider.name];
+              return providerConfig && providerConfig.healthCheck && providerConfig.healthCheck();
+            } catch {
+              return false;
+            }
+          });
+          
+          return {
+            name: chainName,
+            providerCount: chain.length,
+            healthy,
+            default: chainName === DEFAULT_FAILOVER_CHAIN,
+            providers: chain.map(p => ({
+              name: p.name,
+              type: p.type,
+              healthy: healthy
+            }))
+          };
+        });
         
         summary.totalFailoverChains = Object.keys(failoverChains).length;
         summary.defaultFailoverChain = DEFAULT_FAILOVER_CHAIN;

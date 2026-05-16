@@ -8,12 +8,14 @@ services:
       - ./apps/api/src:/app/apps/api/src
       - ./packages/shared/src:/app/apps/packages/shared/src
       - ./data:/app/data
+      - ./node_modules:/app/node_modules
     environment:
       - PORT=4000
       - HOST=0.0.0.0
       - ZSIISTANT_DB_PATH=/app/data/zsiistant.sqlite
       - OLLAMA_BASE_URL=http://172.17.0.1:11435
       - OLLAMA_MODEL=qwen3:1.7b
+      - WEBSOCKET_API_KEY=test_websocket_key
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

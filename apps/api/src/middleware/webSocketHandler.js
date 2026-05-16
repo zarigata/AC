@@ -34,6 +34,10 @@ const MAX_CONCURRENT_CONNECTIONS = 100;
 const MAX_CONNECTIONS_PER_IP = 20;
 const CONNECTION_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 
+// Task tracking
+const activeTasks = new Map();
+let totalActiveTasks = 0;
+
 export const cleanupOldConnections = () => {
   const now = Date.now();
   const keysToDelete = [];
@@ -75,7 +79,7 @@ export const broadcastMessage = (message) => {
  */
 export const sendToClient = (connectionId, message) => {
   const client = activeConnections.get(connectionId);
-  if (client && client.ws.readyState === 1) {
+  if (client && client.ws && client.ws.readyState === 1) {
     try {
       client.ws.send(JSON.stringify(message));
     } catch (err) {
@@ -93,9 +97,56 @@ export const broadcastToSession = (sessionId, message, excludeClientId = null) =
     if (client.readyState === 1 && 
         client.sessionId === sessionId && 
         client.connectionId !== excludeClientId) {
-      client.send(messageStr);
+      try {
+        client.send(messageStr);
+      } catch (err) {
+        console.error('Error broadcasting message to session client:', err);
+      }
     }
   });
+};
+
+/**
+ * Task management functions
+ */
+
+export const createTask = (agentId, type, data = {}) => {
+  const taskId = `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const task = {
+    id: taskId,
+    agentId,
+    type,
+    data,
+    startTime: Date.now(),
+    status: 'running',
+    completed: false
+  };
+  
+  activeTasks.set(taskId, task);
+  totalActiveTasks++;
+  
+  return task;
+};
+
+export const completeTask = (taskId, result = null) => {
+  const task = activeTasks.get(taskId);
+  if (task) {
+    task.completed = true;
+    task.status = 'completed';
+    task.endTime = Date.now();
+    task.result = result;
+    
+    // Keep completed tasks for a while for history
+    setTimeout(() => {
+      activeTasks.delete(taskId);
+    }, 5 * 60 * 1000); // Keep for 5 minutes
+    
+    totalActiveTasks--;
+  }
+};
+
+export const getActiveTasks = () => {
+  return Array.from(activeTasks.values()).filter(task => !task.completed);
 };
 
 export const broadcastJobUpdate = (job) => {
@@ -116,19 +167,32 @@ export const broadcastAgentStatus = (registry) => {
     timestamp: Date.now(),
     data: {
       totalAgents: agents.length,
-      agents: agents.map(agent => ({
-        id: agent.id,
-        name: agent.name,
-        status: 'active',
-        model: agent.model,
-        isolationMode: agent.isolationMode,
-        concurrentTasks: 0, // TODO: Add actual task tracking implementation
-        lastActivity: Date.now()
-      })),
+      agents: agents.map(agent => {
+        const agentTasks = Array.from(activeTasks.values()).filter(
+          task => task.agentId === agent.id && !task.completed
+        );
+        
+        return {
+          id: agent.id,
+          name: agent.name,
+          status: 'active',
+          model: agent.model,
+          isolationMode: agent.isolationMode,
+          concurrentTasks: agentTasks.length,
+          lastActivity: Date.now(),
+          activeTasks: agentTasks.map(task => ({
+            id: task.id,
+            type: task.type,
+            startTime: task.startTime,
+            duration: Date.now() - task.startTime
+          }))
+        };
+      }),
       systemStats: {
         uptime: Math.floor((Date.now() - (global.serverStartTime || Date.now())) / 1000),
         totalSessions: 0,
-        totalMessages: 0
+        totalMessages: 0,
+        totalActiveTasks: totalActiveTasks
       }
     }
   };
@@ -362,13 +426,13 @@ const handleChatMessage = async (ws, data, clientInfo, registry) => {
       let session;
       if (sessionId) {
         const sessions = registry.listSessions(agentId);
-        session = sessions.find(s => s.id === sessionId);
+        session = sessions.sessions.find(s => s.id === sessionId);
         if (!session) {
           throw new Error(`Session ${sessionId} not found`);
         }
       } else {
         const sessions = registry.listSessions(agentId);
-        session = sessions.length > 0 ? sessions[0] : registry.createSession(agentId, { 
+        session = sessions.sessions.length > 0 ? sessions.sessions[0] : registry.createSession(agentId, { 
           title: message.slice(0, 50) + (message.length > 50 ? '...' : '') 
         });
       }
@@ -557,10 +621,19 @@ export const handleWebSocketUpgrade = (request, socket, head, wsServer, registry
         // Update client info with the upgraded connection
         clientInfo.ws = upgradedWs;
         
+        // Also update the connection in activeConnections
+        const connectionData = activeConnections.get(connectionId);
+        if (connectionData) {
+          connectionData.ws = upgradedWs;
+        }
+        
         // Set up message handlers on the upgraded connection
         upgradedWs.on('message', async (message) => {
           try {
             const processedData = processWebSocketMessage(upgradedWs, message, clientInfo);
+            
+            // Always get the latest client info from activeConnections
+            const currentClient = activeConnections.get(connectionId);
             
             // Handle different message types
             switch (processedData.type) {
@@ -570,9 +643,12 @@ export const handleWebSocketUpgrade = (request, socket, head, wsServer, registry
                 
               case 'subscribe':
                 // Handle subscription to session
-                if (processedData.data?.sessionId) {
+                if (processedData.data?.sessionId && currentClient) {
+                  currentClient.sessionId = processedData.data.sessionId;
+                  // Update both references
                   clientInfo.sessionId = processedData.data.sessionId;
-                  sendToClient(clientInfo.connectionId, {
+                  activeConnections.set(connectionId, currentClient);
+                  sendToClient(connectionId, {
                     type: 'subscribed',
                     sessionId: processedData.data.sessionId,
                     timestamp: Date.now()
@@ -582,22 +658,30 @@ export const handleWebSocketUpgrade = (request, socket, head, wsServer, registry
                 
               case 'unsubscribe':
                 // Handle unsubscription from session
-                clientInfo.sessionId = null;
-                sendToClient(clientInfo.connectionId, {
-                  type: 'unsubscribed',
-                  timestamp: Date.now()
-                });
+                if (currentClient) {
+                  currentClient.sessionId = null;
+                  clientInfo.sessionId = null;
+                  activeConnections.set(connectionId, currentClient);
+                  sendToClient(connectionId, {
+                    type: 'unsubscribed',
+                    timestamp: Date.now()
+                  });
+                }
                 break;
                 
               case 'chat':
               case 'direct_chat':
                 // Handle chat messages
-                await handleChatMessage(upgradedWs, processedData, clientInfo, registry);
+                if (currentClient) {
+                  await handleChatMessage(upgradedWs, processedData, currentClient, registry);
+                } else {
+                  console.error('Cannot handle chat: client not found in active connections');
+                }
                 break;
                 
               default:
                 // Unknown message type, send error
-                sendToClient(clientInfo.connectionId, {
+                sendToClient(connectionId, {
                   type: 'error',
                   message: 'Unknown message type',
                   code: 'UNKNOWN_TYPE',
@@ -609,7 +693,7 @@ export const handleWebSocketUpgrade = (request, socket, head, wsServer, registry
             console.error('WebSocket message processing error:', err.message);
             
             // Send error response instead of closing connection
-            sendToClient(clientInfo.connectionId, {
+            sendToClient(connectionId, {
               type: 'error',
               message: 'Message processing failed',
               code: 'PROCESSING_ERROR',
