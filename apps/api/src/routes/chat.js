@@ -712,8 +712,17 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
         });
       }
       
+      // Add user message to context window and history
+      const userMessageObj = {
+        id: `msg_${Date.now()}`,
+        role: "user",
+        content: userMessage,
+        timestamp: new Date().toISOString()
+      };
+      await memoryManager.addMessageToContext(agentId, session.id, userMessageObj);
+      
       // Use context window for provider call
-      const history = [...contextWindow];
+      const history = [...contextWindow, userMessageObj];
 
       // Call provider (default to ollama, agent can override)
       const chatProvider = createProvider(agent.provider?.toLowerCase()) || createProvider('ollama');

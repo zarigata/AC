@@ -2,7 +2,7 @@
  * Telegram Adapter - Telegram webhook integration with pluggable architecture
  */
 
-import { createServer } from "node:http";
+import { createServer } from "http";
 
 export class TelegramAdapter {
   constructor(config = {}) {
@@ -86,6 +86,38 @@ export class TelegramAdapter {
   }
 
   /**
+   * Call chat API with agent and message
+   */
+  async callChatApi(agentId, message) {
+    try {
+      const apiUrl = `http://localhost:4000/api/agents/${encodeURIComponent(agentId)}/chat`;
+      
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Zsiistant-Telegram-Adapter'
+        },
+        body: JSON.stringify({
+          message: message,
+          stream: false // Get immediate response for Telegram
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Chat API request failed: ${response.status} ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      return result;
+      
+    } catch (error) {
+      console.error('Error calling chat API:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Handle incoming messages
    */
   async handleMessage(message) {
@@ -114,13 +146,29 @@ export class TelegramAdapter {
 
     // Forward message to chat system
     try {
-      // This would integrate with the existing chat system
-      // For now, just log and acknowledge
       console.log(`🎯 Forwarding message to agent ${agentId}: ${messageContent}`);
       
-      // TODO: Integrate with chat system
-      // const response = await chatWithAgent(agentId, messageContent, chatId);
-      // await this.sendMessage(chatId, response);
+      // Call the chat API to get response from agent
+      const chatResponse = await this.callChatApi(agentId, messageContent);
+      
+      // Format the response for Telegram
+      let responseContent = `🤖 <b>${agentId}</b> says:\n\n${chatResponse.message}`;
+      
+      // Add additional metadata if available
+      if (chatResponse.tokensOut) {
+        responseContent += `\n\n💭 *Tokens: ${chatResponse.tokensIn || 0} in, ${chatResponse.tokensOut} out*`;
+      }
+      
+      if (chatResponse.duration) {
+        responseContent += `\n⏱️ *Response time: ${chatResponse.duration}ms*`;
+      }
+      
+      if (chatResponse.sessionId) {
+        responseContent += `\n🔗 *Session: ${chatResponse.sessionId}*`;
+      }
+      
+      // Send the response to Telegram
+      await this.sendMessage(chatId, responseContent);
       
     } catch (error) {
       console.error('Error handling message:', error);

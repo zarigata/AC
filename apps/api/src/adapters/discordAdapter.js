@@ -2,7 +2,7 @@
  * Discord Adapter - Discord webhook integration with pluggable architecture
  */
 
-import { createServer } from "node:http";
+import { createServer } from "http";
 
 export class DiscordAdapter {
   constructor(config = {}) {
@@ -206,26 +206,78 @@ export class DiscordAdapter {
   }
 
   /**
+   * Call chat API with agent and message
+   */
+  async callChatApi(agentId, message) {
+    try {
+      const apiUrl = `http://localhost:4000/api/agents/${encodeURIComponent(agentId)}/chat`;
+      
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Zsiistant-Discord-Adapter'
+        },
+        body: JSON.stringify({
+          message: message,
+          stream: false // Get immediate response for Discord
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Chat API request failed: ${response.status} ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      return result;
+      
+    } catch (error) {
+      console.error('Error calling chat API:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Handle chat command
    */
   async handleChatCommand(interaction, agentId, message) {
     try {
       console.log(`💬 Chat request - Agent: ${agentId}, Message: ${message}`);
       
-      // TODO: Integrate with chat system
-      // const response = await chatWithAgent(agentId, message, interaction.channel_id);
+      // Call the chat API to get response from agent
+      const chatResponse = await this.callChatApi(agentId, message);
       
-      // For now, send a placeholder response
+      // Format the response for Discord
+      let responseContent = `🤖 **${agentId}** says:\n\n${chatResponse.message}`;
+      
+      // Add additional metadata if available
+      if (chatResponse.tokensOut) {
+        responseContent += `\n\n💭 *Tokens: ${chatResponse.tokensIn || 0} in, ${chatResponse.tokensOut} out*`;
+      }
+      
+      if (chatResponse.duration) {
+        responseContent += `\n⏱️ *Response time: ${chatResponse.duration}ms*`;
+      }
+      
+      if (chatResponse.sessionId) {
+        responseContent += `\n🔗 *Session: ${chatResponse.sessionId}*`;
+      }
+      
+      // Send the response to Discord
       await this.sendInteractionResponse(interaction, {
         type: 4, // CHANNEL_MESSAGE_WITH_SOURCE
         data: {
-          content: `🤖 Chat with agent "${agentId}" received: "${message}"\n\n*Integration with chat system coming soon!*`
+          content: responseContent
         }
       });
       
     } catch (error) {
       console.error('Error handling chat command:', error);
-      await this.sendErrorResponse(interaction, "Sorry, I encountered an error processing your request.");
+      
+      // Send error message to Discord
+      await this.sendErrorResponse(interaction, 
+        `Sorry, I encountered an error processing your request.\n\nError: ${error.message}`
+      );
     }
   }
 

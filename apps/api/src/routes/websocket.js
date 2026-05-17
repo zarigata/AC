@@ -112,9 +112,12 @@ export function registerWebSocketRoutes(server, registry, providers, failoverCha
       }
       
       // Get WebSocket status
+      // Import the WebSocket handler to get actual connected client count
+      const { getConnectedClientsCount } = require('../middleware/webSocketHandler.js');
+      
       const status = {
         websocket: {
-          connected: 0, // TODO: Implement actual connected client tracking
+          connected: getConnectedClientsCount() || 0,
           maxConnections: MAX_CONCURRENT_CONNECTIONS,
           status: 'active'
         },
