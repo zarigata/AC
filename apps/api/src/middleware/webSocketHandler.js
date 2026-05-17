@@ -434,7 +434,12 @@ const handleChatMessage = async (ws, data, clientInfo, registry) => {
         const sessions = registry.listSessions(agentId);
         session = sessions.sessions.find(s => s.id === sessionId);
         if (!session) {
-          throw new Error(`Session ${sessionId} not found`);
+          // Create new session (will generate its own UUID)
+          session = registry.createSession(agentId, { 
+            title: message.slice(0, 50) + (message.length > 50 ? '...' : '') 
+          });
+          // Log that we're using a different session ID than requested
+          console.log(`Created new session ${session.id} instead of requested ${sessionId}`);
         }
       } else {
         const sessions = registry.listSessions(agentId);
