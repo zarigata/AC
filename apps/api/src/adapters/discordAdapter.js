@@ -426,6 +426,53 @@ export class DiscordAdapter {
   }
 
   /**
+   * Clean up registered commands
+   */
+  async cleanupCommands() {
+    if (!this.config.botToken || !this.config.serverId) {
+      console.log('⚠️  Skipping command cleanup - no bot token or server ID configured');
+      return;
+    }
+    
+    try {
+      console.log('🧹 Cleaning up Discord commands...');
+      
+      // Delete server-specific commands
+      const serverUrl = `https://discord.com/api/v10/applications/${this.config.botClientId || process.env.DISCORD_CLIENT_ID}/guilds/${this.config.serverId}/commands`;
+      
+      await fetch(serverUrl, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bot ${this.config.botToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify([]) // Empty array to remove all commands
+      });
+      
+      console.log('✅ Server commands cleaned up');
+      
+      // Delete global commands
+      const globalUrl = `https://discord.com/api/v10/applications/${this.config.botClientId || process.env.DISCORD_CLIENT_ID}/commands`;
+      
+      await fetch(globalUrl, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bot ${this.config.botToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify([]) // Empty array to remove all commands
+      });
+      
+      console.log('✅ Global commands cleaned up');
+      this.applicationCommands = [];
+      
+    } catch (error) {
+      console.error('❌ Error cleaning up Discord commands:', error.message);
+      // Don't throw - cleanup failures shouldn't prevent shutdown
+    }
+  }
+
+  /**
    * Shutdown the adapter
    */
   async shutdown() {
@@ -436,8 +483,8 @@ export class DiscordAdapter {
       this.webhookServer.close();
     }
     
-    // Clean up commands if needed
-    // TODO: Implement command cleanup
+    // Clean up commands
+    await this.cleanupCommands();
     
     console.log("✅ Discord adapter shut down");
   }

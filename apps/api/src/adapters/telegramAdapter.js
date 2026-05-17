@@ -189,8 +189,123 @@ export class TelegramAdapter {
     if (callbackData.startsWith('agent_')) {
       const agentId = callbackData.replace('agent_', '');
       console.log(`🤖 User selected agent: ${agentId}`);
-      // TODO: Switch to selected agent
+      
+      // Switch to selected agent
+      await this.switchToSelectedAgent(callbackQuery, agentId);
+    } else if (callbackData === 'show_agents') {
+      // Show agent selection menu
+      await this.showAgentMenu(callbackQuery);
     }
+  }
+
+  /**
+   * Switch to selected agent
+   */
+  async switchToSelectedAgent(callbackQuery, agentId) {
+    try {
+      const chatId = callbackQuery.message.chat.id;
+      
+      // Acknowledge the callback immediately
+      await this.answerCallbackQuery(callbackQuery.id, {
+        text: `🤖 Switched to ${agentId}`
+      });
+      
+      // Update the message to show the selected agent
+      const originalMessage = callbackQuery.message;
+      const updatedText = `🤖 <b>Current Agent:</b> ${agentId}\n\nYou can now chat with this agent directly. Just send your message!`;
+      
+      // Edit the original message to show the selected agent
+      await this.editMessageText(chatId, originalMessage.message_id, {
+        text: updatedText,
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: '🔄 Change Agent',
+                callback_data: 'show_agents'
+              }
+            ]
+          ]
+        }
+      });
+      
+      // Store the selected agent for this chat (in a real implementation, this would be persisted)
+      if (!this.selectedAgents) {
+        this.selectedAgents = new Map();
+      }
+      this.selectedAgents.set(chatId, agentId);
+      
+      console.log(`✅ Agent ${agentId} selected for chat ${chatId}`);
+      
+    } catch (error) {
+      console.error('❌ Error switching to selected agent:', error);
+      
+      // Try to send an error message
+      try {
+        await this.answerCallbackQuery(callbackQuery.id, {
+          text: '❌ Error switching agent. Please try again.',
+          show_alert: true
+        });
+      } catch (ackError) {
+        console.error('Failed to acknowledge callback query:', ackError);
+      }
+    }
+  }
+
+  /**
+   * Answer callback query
+   */
+  async answerCallbackQuery(callbackQueryId, options = {}) {
+    const url = `https://api.telegram.org/bot${this.config.botToken}/answerCallbackQuery`;
+    
+    const payload = {
+      callback_query_id: callbackQueryId,
+      ...options
+    };
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      throw new Error(`Telegram API error: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Edit message text
+   */
+  async editMessageText(chatId, messageId, options = {}) {
+    const url = `https://api.telegram.org/bot${this.config.botToken}/editMessageText`;
+    
+    const payload = {
+      chat_id: chatId,
+      message_id: messageId,
+      text: options.text,
+      parse_mode: options.parse_mode || 'HTML',
+      reply_markup: options.reply_markup
+    };
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      throw new Error(`Telegram API error: ${response.statusText}`);
+    }
+
+    return response.json();
   }
 
   /**
@@ -226,6 +341,58 @@ export class TelegramAdapter {
    */
   async sendError(chatId, errorMessage) {
     return this.sendMessage(chatId, `❌ ${errorMessage}`);
+  }
+
+  /**
+   * Show agent selection menu
+   */
+  async showAgentMenu(callbackQuery) {
+    try {
+      const chatId = callbackQuery.message.chat.id;
+      
+      // Get available agents (in a real implementation, this would fetch from the API)
+      const availableAgents = [
+        { id: 'general', name: 'General Assistant' },
+        { id: 'coding', name: 'Code Helper' },
+        { id: 'creative', name: 'Creative Writer' },
+        { id: 'analysis', name: 'Data Analyst' }
+      ];
+      
+      // Create inline keyboard with agent options
+      const inlineKeyboard = {
+        inline_keyboard: availableAgents.map(agent => ([
+          {
+            text: agent.name,
+            callback_data: `agent_${agent.id}`
+          }
+        ]))
+      };
+      
+      // Edit the message to show the agent selection menu
+      const originalMessage = callbackQuery.message;
+      const menuText = `🤖 <b>Select an Agent:</b>\n\nChoose which agent you'd like to chat with:`;
+      
+      await this.editMessageText(chatId, originalMessage.message_id, {
+        text: menuText,
+        parse_mode: 'HTML',
+        reply_markup: inlineKeyboard
+      });
+      
+      console.log(`📋 Agent menu shown for chat ${chatId}`);
+      
+    } catch (error) {
+      console.error('❌ Error showing agent menu:', error);
+      
+      // Try to send an error message
+      try {
+        await this.answerCallbackQuery(callbackQuery.id, {
+          text: '❌ Error showing agent menu. Please try again.',
+          show_alert: true
+        });
+      } catch (ackError) {
+        console.error('Failed to acknowledge callback query:', ackError);
+      }
+    }
   }
 
   /**

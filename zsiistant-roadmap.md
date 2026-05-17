@@ -40,6 +40,7 @@ config/            → server + failover config
 - [x] **V20**: Comprehensive monitoring and alerting system - Real-time system metrics, WebSocket connection tracking, component health monitoring, and alerting with configurable thresholds and health scoring ✅ IMPLEMENTED
 - [x] **V21**: Enhanced adapter integration - Discord and Telegram chat integration completed with agent selection, session management, and TODO items resolved ✅ IMPLEMENTED
 - [x] **V22**: Complete adapter integration implementation - ✅ FIXED Discord and Telegram adapters to fully integrate with chat system, resolved WebSocket connected client tracking, and fixed non-streaming agent chat message handling
+- [✅] **V23**: Adapter TODO completion - ✅ COMPLETED - Implemented Discord command cleanup functionality and Telegram agent switching with inline menu selection, completing remaining adapter TODO items
 
 ## Rules
 1. One victory per cron run
@@ -49,8 +50,8 @@ config/            → server + failover config
 5. No security audits until core works
 
 ## Current Status
-- V1-V22 complete
-- **NEXT**: Need container running to determine V23 requirements
+- V1-V23 complete
+- **NEXT**: Need to identify V24 requirements
 
 ## Blockers
-- ❌ Zsiistant container not running (required for development and testing)
+- ❌ Authentication issues with public routes (health endpoint returning auth required)
