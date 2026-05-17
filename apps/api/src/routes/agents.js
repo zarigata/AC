@@ -6,41 +6,9 @@ import { sanitizeError, applyRateLimit } from "../middleware/security.js";
 import { readRequestBody } from "../middleware/requestHandler.js";
 import { createAgentSchema, updateAgentSchema } from "../middleware/validationMiddleware.js";
 import { parseCreateAgentInput } from "../shared/simpleShared.js";
-import jwt from "jsonwebtoken";
 export function registerAgentRoutes(server, registry, providers, failoverChains, settings) {
   // Agent ID validation pattern
   const agentIdPattern = /^[a-zA-Z0-9-]+$/;
-  
-  // Authentication helper
-  const requireAuth = (request, response) => {
-    const authHeader = request.headers['authorization'];
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      response.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
-      response.end(JSON.stringify({ 
-        error: "Authentication required", 
-        code: "AUTH_REQUIRED",
-        message: "Valid Bearer token required in Authorization header"
-      }));
-      return false;
-    }
-    
-    const token = authHeader.substring(7);
-    try {
-      const JWT_SECRET = process.env.ZSIISTANT_JWT_SECRET || 'development-secret-key-change-in-production';
-      const decoded = jwt.verify(token, JWT_SECRET);
-      // Add user info to request for downstream use
-      request.user = decoded;
-      return true;
-    } catch (err) {
-      response.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
-      response.end(JSON.stringify({ 
-        error: "Invalid token", 
-        code: "INVALID_TOKEN",
-        message: "JWT token is invalid or expired"
-      }));
-      return false;
-    }
-  };
 
   /**
    * Handle single agent operations
@@ -56,10 +24,7 @@ export function registerAgentRoutes(server, registry, providers, failoverChains,
 
     if (!agentMatch) return false;
     
-    // URL matches agent pattern, now require authentication
-    if (!requireAuth(request, response)) {
-      return true; // Authentication failed, response already sent
-    }
+    // Authentication is handled by global middleware
 
     const agentId = agentMatch[1];
 
@@ -348,10 +313,7 @@ export function registerAgentRoutes(server, registry, providers, failoverChains,
     // Only match exact /api/agents endpoint, not /api/agents/{id} or /api/agents/{id}/chat
     if (request.url !== "/api/agents" && !request.url?.startsWith("/api/agents?")) return false;
     
-    // Require authentication for agent creation
-    if (!requireAuth(request, response)) {
-      return true; // Authentication failed, response already sent
-    }
+    // Authentication is handled by global middleware
 
     try {
       // Apply rate limiting for agent creation
@@ -557,10 +519,7 @@ export function registerAgentRoutes(server, registry, providers, failoverChains,
   const handleListAgents = async (request, response) => {
     if (request.method !== "GET" || !request.url?.startsWith("/api/agents")) return false;
     
-    // Require authentication for listing agents
-    if (!requireAuth(request, response)) {
-      return true; // Authentication failed, response already sent
-    }
+    // Authentication is handled by global middleware
 
     try {
       const agents = registry.listAgents();
@@ -603,10 +562,7 @@ export function registerAgentRoutes(server, registry, providers, failoverChains,
 
     if (!usageMatch) return false;
     
-    // Require authentication for agent usage stats
-    if (!requireAuth(request, response)) {
-      return true; // Authentication failed, response already sent
-    }
+    // Authentication is handled by global middleware
 
     const agentId = usageMatch[1];
     const agent = registry.getAgent(agentId);

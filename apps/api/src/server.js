@@ -210,8 +210,7 @@ async function main() {
     registerTopologyRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     console.log('Registering links routes...');
     registerLinksRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
-    console.log('Registering WebSocket routes...');
-    registerWebSocketRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    console.log('Skipping WebSocket HTTP routes - handled by upgrade handler only');
     console.log('Registering tool routes...');
     registerToolRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     console.log('Registering job routes...');
@@ -314,7 +313,7 @@ async function main() {
             ok: true,
             service: "zsiistant-api",
             version: "1.0.0",
-            uptime: Math.floor((Date.now() - startTime) / 1000)
+            uptime: Math.floor((Date.now() - global.serverStartTime) / 1000)
           }));
           return;
         }

@@ -17,9 +17,9 @@ async function fetchWithAuth(path, options = {}) {
     "User-Agent": "Zsiistant-Test/1.0"
   };
   
-  // Add JWT token for authenticated requests
-  if (JWT_TOKEN && !options.headers?.Authorization && !path.includes('/health')) {
-    defaultHeaders["Authorization"] = `Bearer ${JWT_TOKEN}`;
+  // Add API key for authenticated requests
+  if (TEST_API_KEY && !options.headers?.Authorization && !options.headers?.['X-API-Key'] && !path.includes('/health')) {
+    defaultHeaders["X-API-Key"] = TEST_API_KEY;
   }
   
   if (options.body && typeof options.body === "object") {

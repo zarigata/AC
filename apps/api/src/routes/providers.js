@@ -5,40 +5,8 @@
 import { providerSummary, listProviderConnections, getProviderReadinessSummary } from '../shared/simpleShared.js';
 import { FailoverChainAdapter } from '../adapters/failover.js';
 import { isProviderInFailoverChain, DEFAULT_FAILOVER_CHAIN } from '../middleware/providerManager.js';
-import jwt from "jsonwebtoken";
 
 export function registerProviderRoutes(server, registry, providers, failoverChains, settings) {
-  
-  // Authentication helper
-  const requireAuth = (request, response) => {
-    const authHeader = request.headers['authorization'];
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      response.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
-      response.end(JSON.stringify({ 
-        error: "Authentication required", 
-        code: "AUTH_REQUIRED",
-        message: "Valid Bearer token required in Authorization header"
-      }));
-      return false;
-    }
-    
-    const token = authHeader.substring(7);
-    try {
-      const JWT_SECRET = process.env.ZSIISTANT_JWT_SECRET || 'development-secret-key-change-in-production';
-      const decoded = jwt.verify(token, JWT_SECRET);
-      // Add user info to request for downstream use
-      request.user = decoded;
-      return true;
-    } catch (err) {
-      response.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
-      response.end(JSON.stringify({ 
-        error: "Invalid token", 
-        code: "INVALID_TOKEN",
-        message: "JWT token is invalid or expired"
-      }));
-      return false;
-    }
-  };
 
   /**
    * Handle provider summary and health
@@ -46,10 +14,7 @@ export function registerProviderRoutes(server, registry, providers, failoverChai
   const handleProviderSummary = async (request, response) => {
     if (request.method === "GET" && request.url?.startsWith("/api/providers")) {
       
-      // Require authentication for provider access
-      if (!requireAuth(request, response)) {
-        return true; // Authentication failed, response already sent
-      }
+      // Authentication is handled by global middleware
       try {
         const summary = providerSummary();
         

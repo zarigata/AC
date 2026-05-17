@@ -3,7 +3,6 @@
  */
 
 const VERSION = "1.0.0";
-const startTime = Date.now();
 
 export function registerHealthRoutes(server, registry, providers, failoverChains, settings) {
   console.log('Health routes being registered');
@@ -38,7 +37,7 @@ export function registerHealthRoutes(server, registry, providers, failoverChains
         ok: true,
         service: "zsiistant-api",
         version: VERSION,
-        uptime: Math.floor((Date.now() - startTime) / 1000)
+        uptime: Math.floor((Date.now() - global.serverStartTime) / 1000)
       });
       console.log('🏥 Response body:', responseBody);
       response.end(responseBody);
@@ -60,7 +59,7 @@ export function registerHealthRoutes(server, registry, providers, failoverChains
       try {
         // Get system metrics
         const systemInfo = {
-          uptime: Math.floor((Date.now() - startTime) / 1000),
+          uptime: Math.floor((Date.now() - global.serverStartTime) / 1000),
           memoryUsage: process.memoryUsage(),
           activeConnections: totalActiveConnections,
           rateLimitEntries: rateLimit.size,
@@ -235,8 +234,8 @@ export function registerHealthRoutes(server, registry, providers, failoverChains
           status: 'alive',
           timestamp: Date.now(),
           pid: process.pid,
-          uptime: Math.floor((Date.now() - startTime) / 1000),
-          memory: process.memoryUsage(),
+          uptime: Math.floor((Date.now() - global.serverStartTime) / 1000),
+          memory: process.memory(),
           version: VERSION
         };
 
