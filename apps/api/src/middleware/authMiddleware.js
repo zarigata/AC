@@ -13,22 +13,22 @@ import jwt from 'jsonwebtoken';
  */
 const DEFAULT_CONFIG = {
   // JWT settings - CRITICAL: Must use proper secret in production
-  jwtSecret: process.env.ZSIISTANT_JWT_SECRET || 
-    (process.env.NODE_ENV === 'production' ? 
+  jwtSecret: process.env.ZSIISTANT_JWT_SECRET ||
+    (process.env.NODE_ENV === 'production' ?
       (() => {
         throw new Error('JWT_SECRET is required in production environment');
-      })() : 
+      })() :
       'development-secret-key-change-in-production'),
   jwtExpiresIn: process.env.ZSIISTANT_JWT_EXPIRES_IN || '24h',
-  
+
   // API Key settings
   apiKeyHeader: 'X-API-Key',
   authorizationHeader: 'Authorization',
-  
+
   // Protected routes (all /api/ routes except /health)
   protectedRoutes: [
     '/api/agents',
-    '/api/agents/', 
+    '/api/agents/',
     '/api/chat',
     '/api/chat/',
     '/api/settings',
@@ -46,7 +46,7 @@ const DEFAULT_CONFIG = {
     '/api/presets',
     '/api/presets/'
   ],
-  
+
   // Public routes (no authentication required)
   publicRoutes: [
     '/health',
@@ -65,7 +65,7 @@ const DEFAULT_CONFIG = {
   skipPaths: [
     '/health',
     '/health/',
-    '/healthz', 
+    '/healthz',
     '/healthz/',
     '/docs',
     '/docs/',
@@ -111,11 +111,11 @@ function generateJWT(payload, secret, expiresIn) {
   if (!payload || typeof payload !== 'object') {
     throw new Error('Invalid JWT payload');
   }
-  
+
   if (!secret || typeof secret !== 'string' || secret.length < 32) {
     throw new Error('JWT secret must be at least 32 characters');
   }
-  
+
   // Add standard JWT claims
   const jwtPayload = {
     ...payload,
@@ -124,7 +124,7 @@ function generateJWT(payload, secret, expiresIn) {
     iss: 'zsiistant',
     sub: payload.userId || payload.sub || 'anonymous'
   };
-  
+
   try {
     return jwt.sign(jwtPayload, secret, { algorithm: 'HS256' });
   } catch (err) {
@@ -143,11 +143,11 @@ function verifyJWT(token, secret) {
   if (!token || typeof token !== 'string') {
     throw new Error('Invalid JWT token');
   }
-  
+
   if (!secret || typeof secret !== 'string' || secret.length < 32) {
     throw new Error('Invalid JWT secret');
   }
-  
+
   try {
     const decoded = jwt.verify(token, secret, { algorithms: ['HS256'] });
     return decoded;
@@ -173,22 +173,22 @@ function parseTimeToSeconds(timeStr) {
   if (typeof timeStr !== 'string') {
     return 86400; // Default 24 hours
   }
-  
+
   const match = timeStr.match(/^\s*(\d+)\s*(s|m|h|d)?\s*$/i);
   if (!match) {
     return 86400; // Default 24 hours
   }
-  
+
   const value = parseInt(match[1], 10);
   const unit = match[2] ? match[2].toLowerCase() : 'h';
-  
+
   const multipliers = {
     's': 1,
     'm': 60,
     'h': 3600,
     'd': 86400
   };
-  
+
   return value * (multipliers[unit] || 3600); // Default to hours
 }
 
@@ -199,12 +199,12 @@ function parseTimeToSeconds(timeStr) {
  */
 function extractTokenFromHeader(authHeader) {
   if (!authHeader) return null;
-  
+
   // Handle "Bearer <token>" format
   if (authHeader.startsWith('Bearer ')) {
     return authHeader.substring(7).trim();
   }
-  
+
   // Handle raw token
   return authHeader.trim();
 }
@@ -215,18 +215,32 @@ function extractTokenFromHeader(authHeader) {
  * @returns {boolean} True if path is protected
  */
 function isProtectedPath(path) {
+  console.log('🔍 isProtectedPath called with:', path);
+
   // Skip authentication for explicitly excluded paths
-  if (DEFAULT_CONFIG.skipPaths.some(skipPath => path.startsWith(skipPath))) {
+  const skipMatch = DEFAULT_CONFIG.skipPaths.find(skipPath => path.startsWith(skipPath));
+  if (skipMatch) {
+    console.log('✅ Found in skipPaths:', skipMatch);
     return false;
   }
-  
+
   // Check if path is in public routes
-  if (DEFAULT_CONFIG.publicRoutes.some(publicPath => path.startsWith(publicPath))) {
+  const publicMatch = DEFAULT_CONFIG.publicRoutes.find(publicPath => path.startsWith(publicPath));
+  if (publicMatch) {
     return false;
   }
-  
+
   // Check if path is in protected routes
-  return DEFAULT_CONFIG.protectedRoutes.some(protectedPath => path.startsWith(protectedPath));
+  const protectedMatch = DEFAULT_CONFIG.protectedRoutes.find(protectedPath => path.startsWith(protectedPath));
+  if (protectedMatch) {
+    console.log('❌ Found in protectedRoutes:', protectedMatch);
+  } else {
+    console.log('✗ Not found in protectedRoutes');
+  }
+
+  const isProtected = !!protectedMatch;
+  console.log('🎯 Final result:', isProtected ? 'PROTECTED' : 'NOT PROTECTED');
+  return isProtected;
 }
 
 /**
@@ -236,12 +250,12 @@ function isProtectedPath(path) {
  */
 function validateApiKey(apiKey) {
   if (!apiKey) return null;
-  
+
   const keyInfo = apiKeyStore.get(apiKey);
   if (!keyInfo || !keyInfo.active) {
     return null;
   }
-  
+
   return keyInfo;
 }
 
@@ -269,20 +283,36 @@ function createAuthError(message, type = 'unauthorized') {
  * @returns {Function} Express-style middleware function
  */
 function createAuthMiddleware(config = {}) {
+  console.log('🔧 AUTH MIDDLEWARE: Creating middleware with config:', config ? 'custom' : 'default');
   const finalConfig = { ...DEFAULT_CONFIG, ...config };
-
+  
   return async (req, res, next) => {
     try {
       const path = req.url || '';
       
+      // DEBUG: Log the path being checked
+      console.log('🔍 Auth Middleware - Checking path:', path);
+
       // Skip authentication for public/unprotected paths
       if (!isProtectedPath(path)) {
-        return next();
+        console.log('✅ Path is NOT protected, allowing access');
+        console.log('🚀 About to call next()...');
+        try {
+          console.log('🚀 Calling next() function...');
+          const result = next();
+          console.log('🚀 next() returned:', result);
+          return result;
+        } catch (err) {
+          console.error('❌ Error calling next():', err);
+          throw err;
+        }
       }
+
+      console.log('❌ Path is PROTECTED, requiring authentication');
 
       // Check for API key in headers (case insensitive)
       let apiKey = null;
-      
+
       // Try case-insensitive lookup for API key
       const keyHeaderLower = finalConfig.apiKeyHeader.toLowerCase();
       for (const key in req.headers) {
@@ -291,9 +321,9 @@ function createAuthMiddleware(config = {}) {
           break;
         }
       }
-      
+
       let token = null;
-      
+
       // Check for JWT token in Authorization header
       const authHeader = req.headers[finalConfig.authorizationHeader];
       if (authHeader) {
@@ -316,7 +346,7 @@ function createAuthMiddleware(config = {}) {
           };
         }
       }
-      
+
       // JWT authentication
       if (token && !authenticated) {
         try {
@@ -351,11 +381,11 @@ function createAuthMiddleware(config = {}) {
 
       // Add authentication info to request for downstream use
       req.auth = authInfo;
-      
+
       // Add authentication headers for response
       res.setHeader('X-Authenticated', 'true');
       res.setHeader('X-Auth-Type', authInfo.type);
-      
+
       if (authInfo.type === 'api_key') {
         res.setHeader('X-API-Key-Name', authInfo.keyName);
       } else if (authInfo.type === 'jwt') {
@@ -390,14 +420,14 @@ function createApiKey(name, options = {}) {
   const timestamp = Date.now().toString();
   const random = Math.random().toString(36).substring(2);
   const apiKey = `zsiistant_${name.replace(/\s+/g, '_')}_${timestamp}_${random}`;
-  
+
   apiKeyStore.set(apiKey, {
     name,
     created: new Date(),
     active: true,
     ...options
   });
-  
+
   return apiKey;
 }
 

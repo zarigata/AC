@@ -22,16 +22,17 @@ export function registerHealthRoutes(server, registry, providers, failoverChains
    * Handle basic health endpoint
    */
   const handleBasicHealth = async (request, response) => {
-    console.log('Health route called:', request.method, request.url);
+    console.log('🏥 Health route called:', request.method, request.url);
     
     // Check if this is the basic health endpoint
     const path = request.url || "/";
     const isHealthEndpoint = path === "/health" || path === "/";
     
-    console.log('Is health endpoint:', isHealthEndpoint, 'Path:', path);
+    console.log('🏥 Is health endpoint:', isHealthEndpoint, 'Path:', path);
+    console.log('🏥 Response headers already sent:', response.headersSent);
     
     if (isHealthEndpoint && !response.headersSent) {
-      console.log('Health endpoint matched, sending response...');
+      console.log('🏥 Health endpoint matched, sending response...');
       response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
       const responseBody = JSON.stringify({
         ok: true,
@@ -39,11 +40,12 @@ export function registerHealthRoutes(server, registry, providers, failoverChains
         version: VERSION,
         uptime: Math.floor((Date.now() - startTime) / 1000)
       });
-      console.log('Response body:', responseBody);
+      console.log('🏥 Response body:', responseBody);
       response.end(responseBody);
-      console.log('Response sent, returning true');
+      console.log('🏥 Response sent, returning true');
       return true;
     }
+    console.log('🏥 Health endpoint did not match or headers already sent, returning false');
     return false;
   };
 
@@ -259,6 +261,9 @@ export function registerHealthRoutes(server, registry, providers, failoverChains
    * Create health route handler
    */
   const handleHealthRoutes = async (request, response) => {
+    console.log('🏥 handleHealthRoutes called for:', request.method, request.url);
+    console.log('🏥 Response headers already sent:', response.headersSent);
+    
     // Try each handler in order
     const handlers = [
       handleBasicHealth,
@@ -267,32 +272,42 @@ export function registerHealthRoutes(server, registry, providers, failoverChains
       handleLiveness
     ];
 
-    for (const handler of handlers) {
+    for (const [index, handler] of handlers.entries()) {
       try {
+        console.log(`🏥 Trying handler ${index}:`, handler.name || 'anonymous');
         if (!response.headersSent) {
           const handled = await handler(request, response);
-          if (handled !== false) return true; // Handler processed the request
+          console.log(`🏥 Handler ${index} returned:`, handled);
+          if (handled !== false) {
+            console.log('🏥 Handler processed request, returning true');
+            return true; // Handler processed the request
+          }
+        } else {
+          console.log('🏥 Response headers already sent, skipping handler');
         }
       } catch (error) {
-        console.error('Health route error:', error);
+        console.error('🏥 Health route error:', error);
         // Only write error response if headers haven't been sent yet
         if (!response.headersSent) {
           try {
             response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
             response.end(JSON.stringify({ error: "Internal server error", message: error.message }));
+            console.log('🏥 Error response sent');
           } catch (writeError) {
-            console.error('Failed to write error response:', writeError);
+            console.error('🏥 Failed to write error response:', writeError);
           }
         }
+        console.log('🏥 Error handler completed, returning true');
         return true;
       }
     }
 
+    console.log('🏥 No handler matched, returning false');
     return false; // No handler matched
   };
 
-  // Register the health handler with the server
-  server.on('request', handleHealthRoutes);
-  
-  console.log('Health routes registered successfully');
+  // Return the health handler function to be added to route handlers
+  console.log('🏥 Health route handler created successfully');
+  console.log('🏥 handleHealthRoutes function type:', typeof handleHealthRoutes);
+  return handleHealthRoutes;
 }
