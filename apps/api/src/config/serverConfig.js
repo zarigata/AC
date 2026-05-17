@@ -73,13 +73,13 @@ export const initServerConfig = () => {
 /**
  * Create and configure HTTP server
  */
-export const createServerInstance = (port, host) => {
+export const createServerInstance = (port, host, upgradeHandler) => {
   const server = createServer();
   
-  // WebSocket upgrade handler
-  server.on('upgrade', (request, socket, head) => {
-    handleWebSocketUpgrade(request, socket, head, serverState.websocketServer, serverState.registry);
-  });
+  // WebSocket upgrade handler (will be set later)
+  if (upgradeHandler) {
+    server.on('upgrade', upgradeHandler);
+  }
   
   return server;
 };
@@ -318,11 +318,16 @@ export const initializeServer = async (registry) => {
   // Update settings with provider count
   settings.providers = Object.keys(providers).length;
   
-  // Create server instance with WebSocket upgrade handler
+  // Create server instance (without upgrade handler initially)
   const server = createServerInstance(config.port, config.host);
   
   // Setup WebSocket server
   setupWebSocketServer(server);
+  
+  // Setup WebSocket upgrade handler AFTER WebSocket server is created
+  server.on('upgrade', (request, socket, head) => {
+    handleWebSocketUpgrade(request, socket, head, serverState.websocketServer, serverState.registry);
+  });
   
   // Initialize rate limiting
   initializeRateLimiting();

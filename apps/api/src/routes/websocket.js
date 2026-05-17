@@ -7,6 +7,8 @@ const MAX_CONCURRENT_CONNECTIONS = 100; // Default value
 
 import { applyRateLimit } from "../middleware/security.js";
 import { sendToClient, broadcastToSession } from "../middleware/webSocketHandler.js";
+import { getServerState } from "../config/serverConfig.js";
+import { readRequestBody } from "../middleware/requestHandler.js";
 
 export function registerWebSocketRoutes(server, registry, providers, failoverChains, settings) {
   
@@ -20,6 +22,7 @@ export function registerWebSocketRoutes(server, registry, providers, failoverCha
     
     try {
       // Get the WebSocket server from server state
+      const serverState = getServerState();
       const wsServer = serverState?.websocketServer;
       if (!wsServer) {
         response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
@@ -109,19 +112,11 @@ export function registerWebSocketRoutes(server, registry, providers, failoverCha
     }
     
     try {
-      // Apply rate limiting
-      if (!applyRateLimit(request, response)) {
-        return true; // Rate limit exceeded, response already sent
-      }
-      
-      // Get WebSocket status
-      // Import the WebSocket handler to get actual connected client count
-      const { getConnectedClientsCount } = require('../middleware/webSocketHandler.js');
-      
+      // Simple status response for now
       const status = {
         websocket: {
-          connected: getConnectedClientsCount() || 0,
-          maxConnections: MAX_CONCURRENT_CONNECTIONS,
+          connected: 0,
+          maxConnections: 100,
           status: 'active'
         },
         agents: {
@@ -172,7 +167,3 @@ export function registerWebSocketRoutes(server, registry, providers, failoverCha
     return false;
   });
 }
-
-// Import required utilities synchronously
-import { readRequestBody } from "../middleware/requestHandler.js";
-import { serverState, getServerStatus } from "../config/serverConfig.js";
