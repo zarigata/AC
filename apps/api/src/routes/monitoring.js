@@ -148,8 +148,8 @@ export const handleSystemHealth = async (request, response, registry) => {
     const providerStatus = checkProviderConnectivity();
     
     // Overall system health
-    const isHealthy = status.uptime > 0 && 
-                     databaseStatus === 'healthy' && 
+    const isHealthy = status.uptime > 0 &&
+                     databaseStatus === 'healthy' &&
                      Object.keys(providerStatus).every(p => providerStatus[p].status === 'healthy');
     
     const healthResponse = {
