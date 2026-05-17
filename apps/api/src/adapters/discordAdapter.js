@@ -3,6 +3,11 @@
  */
 
 import { createServer } from "node:http";
+import { createProvider } from "./ollama.js";
+import { AgentRegistry } from "../registry.js";
+
+// Create a global registry instance (this should be passed in from server.js)
+const registry = new AgentRegistry();
 
 export class DiscordAdapter {
   constructor(config = {}) {
@@ -221,10 +226,95 @@ export class DiscordAdapter {
     try {
       console.log(`💬 Chat request - Agent: ${agentId}, Message: ${message}`);
       
-      // TODO: Integrate with chat system
-      // const response = await chatWithAgent(agentId, message, interaction.channel_id);
+      try {
+        // Get agent from registry
+        const agent = registry.getAgent(agentId);
+        if (!agent) {
+          throw new Error(`Agent ${agentId} not found`);
+        }
+        
+        // Get or create session for this agent
+        let sessions = registry.listSessions(agentId);
+        let session;
+        
+        if (sessions.sessions.length > 0) {
+          session = sessions.sessions[0];
+        } else {
+          session = registry.createSession(agentId, {
+            title: message.slice(0, 50) + (message.length > 50 ? '...' : '')
+          });
+        }
+        
+        // Save user message
+        registry.createMessage(agentId, session.id, {
+          role: 'user',
+          content: message.trim(),
+          tokensIn: 0
+        });
+        
+        // Get context window
+        const { MemoryManager } = await import('../memory/memoryManager.js');
+        const memoryManager = new MemoryManager(registry);
+        const contextWindow = await memoryManager.getCompleteContext(agentId, session.id);
+        
+        // Add system prompt if defined
+        if (agent.systemPrompt && agent.systemPrompt.trim()) {
+          contextWindow.unshift({
+            role: 'system',
+            content: agent.systemPrompt.trim()
+          });
+        }
+        
+        // Add user message to context
+        const userMessage = {
+          role: 'user',
+          content: message.trim(),
+          timestamp: new Date().toISOString()
+        };
+        contextWindow.push(userMessage);
+        
+        // Create provider and get response
+        const provider = createProvider(agent.provider?.toLowerCase()) || createProvider('ollama');
+        if (!provider) {
+          throw new Error(`Provider ${agent.provider} not available`);
+        }
+        
+        // Generate response
+        const result = await provider.chat(contextWindow, { 
+          model: agent.model, 
+          temperature: 0.7, 
+          maxTokens: 512 
+        });
+        
+        // Save assistant response
+        registry.createMessage(agentId, session.id, {
+          role: 'assistant',
+          content: result.content,
+          tokensIn: result.tokensIn,
+          tokensOut: result.tokensOut,
+          model: result.model
+        });
+        
+        // Add assistant response to context
+        const assistantMessage = {
+          role: 'assistant',
+          content: result.content,
+          timestamp: new Date().toISOString()
+        };
+        await memoryManager.addMessageToContext(agentId, session.id, assistantMessage);
+        
+        // Send the actual response
+        await this.sendInteractionResponse(interaction, {
+          type: 4, // CHANNEL_MESSAGE_WITH_SOURCE
+          data: {
+            content: `🤖 **${agent.name}**\n\n${result.content}\n\n*Tokens: ${result.tokensIn + result.tokensOut}*`
+          }
+      });
       
-      // For now, send a placeholder response
+    } catch (error) {
+      console.error('Error handling chat command:', error);
+      await this.sendErrorResponse(interaction, "Sorry, I encountered an error processing your request.");
+    }
       await this.sendInteractionResponse(interaction, {
         type: 4, // CHANNEL_MESSAGE_WITH_SOURCE
         data: {
