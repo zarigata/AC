@@ -19,7 +19,7 @@ export class WebhookManager {
    * Initialize adapters based on environment configuration
    */
   initializeAdapters() {
-    // Initialize Telegram adapter if configured OR create a demo adapter
+    // Initialize Telegram adapter if configured
     if (process.env.TELEGRAM_BOT_TOKEN) {
       const telegramConfig = {
         botToken: process.env.TELEGRAM_BOT_TOKEN,
@@ -30,19 +30,9 @@ export class WebhookManager {
       
       const telegramAdapter = new TelegramAdapter(telegramConfig);
       this.adapters.set('telegram', telegramAdapter);
-      console.log('📡 Telegram adapter configured with bot token');
-    } else {
-      // Create a demo/placeholder adapter for testing
-      const demoTelegramAdapter = new TelegramAdapter({
-        botToken: 'demo-token',
-        isDemo: true,
-        demoMessages: []
-      });
-      this.adapters.set('telegram-demo', demoTelegramAdapter);
-      console.log('📡 Demo Telegram adapter created for testing');
     }
 
-    // Initialize Discord adapter if configured OR create a demo adapter
+    // Initialize Discord adapter if configured
     if (process.env.DISCORD_BOT_TOKEN) {
       const discordConfig = {
         botToken: process.env.DISCORD_BOT_TOKEN,
@@ -54,16 +44,6 @@ export class WebhookManager {
       
       const discordAdapter = new DiscordAdapter(discordConfig);
       this.adapters.set('discord', discordAdapter);
-      console.log('🎮 Discord adapter configured with bot token');
-    } else {
-      // Create a demo/placeholder adapter for testing
-      const demoDiscordAdapter = new DiscordAdapter({
-        botToken: 'demo-token',
-        isDemo: true,
-        demoInteractions: []
-      });
-      this.adapters.set('discord-demo', demoDiscordAdapter);
-      console.log('🎮 Demo Discord adapter created for testing');
     }
   }
 

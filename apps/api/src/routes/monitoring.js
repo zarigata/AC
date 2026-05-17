@@ -12,12 +12,6 @@ import {
   totalActiveTasks 
 } from "../middleware/webSocketHandler.js";
 import { serverState, settings, getServerStatus } from "../config/serverConfig.js";
-import { 
-  getActiveAlerts, 
-  getAlertHistory, 
-  getAlertStats,
-  getHealthScore 
-} from "../middleware/alertingSystem.js";
 
 /**
  * System metrics collector
@@ -148,8 +142,8 @@ export const handleSystemHealth = async (request, response, registry) => {
     const providerStatus = checkProviderConnectivity();
     
     // Overall system health
-    const isHealthy = status.uptime > 0 &&
-                     databaseStatus === 'healthy' &&
+    const isHealthy = status.uptime > 0 && 
+                     databaseStatus === 'healthy' && 
                      Object.keys(providerStatus).every(p => providerStatus[p].status === 'healthy');
     
     const healthResponse = {
@@ -263,134 +257,6 @@ export const handleWebSocketConnections = async (request, response) => {
 };
 
 /**
- * Handle active alerts endpoint
- */
-export const handleActiveAlerts = async (request, response) => {
-  if (request.method !== 'GET' || request.url !== '/api/monitoring/alerts') {
-    return false;
-  }
-  
-  try {
-    // Apply rate limiting
-    if (!applyRateLimit(request, response)) {
-      return true; // Rate limit exceeded, response already sent
-    }
-    
-    const alerts = getActiveAlerts();
-    const healthScore = getHealthScore();
-    
-    const alertsResponse = {
-      active: alerts.length,
-      byLevel: {
-        critical: alerts.filter(a => a.level === 'critical').length,
-        warning: alerts.filter(a => a.level === 'warning').length,
-        info: alerts.filter(a => a.level === 'info').length
-      },
-      healthScore,
-      alerts: alerts.map(alert => ({
-        id: alert.id,
-        type: alert.type,
-        level: alert.level,
-        message: alert.message,
-        timestamp: alert.timestamp,
-        acknowledged: alert.acknowledged,
-        data: alert.data
-      })),
-      timestamp: Date.now()
-    };
-    
-    response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    response.end(JSON.stringify(alertsResponse, null, 2));
-    return true;
-    
-  } catch (error) {
-    console.error('Active alerts error:', error);
-    response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
-    response.end(JSON.stringify({ error: 'Failed to get active alerts' }));
-    return true;
-  }
-};
-
-/**
- * Handle alert history endpoint
- */
-export const handleAlertHistory = async (request, response) => {
-  const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
-  const limit = parseInt(url.searchParams.get('limit')) || 50;
-  
-  if (request.method !== 'GET' || !request.url.startsWith('/api/monitoring/alerts/history')) {
-    return false;
-  }
-  
-  try {
-    // Apply rate limiting
-    if (!applyRateLimit(request, response)) {
-      return true; // Rate limit exceeded, response already sent
-    }
-    
-    const history = getAlertHistory(limit);
-    
-    const historyResponse = {
-      total: history.length,
-      alerts: history.map(alert => ({
-        id: alert.id,
-        type: alert.type,
-        level: alert.level,
-        message: alert.message,
-        timestamp: alert.timestamp,
-        acknowledged: alert.acknowledged,
-        resolved: alert.resolved,
-        data: alert.data
-      })),
-      timestamp: Date.now()
-    };
-    
-    response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    response.end(JSON.stringify(historyResponse, null, 2));
-    return true;
-    
-  } catch (error) {
-    console.error('Alert history error:', error);
-    response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
-    response.end(JSON.stringify({ error: 'Failed to get alert history' }));
-    return true;
-  }
-};
-
-/**
- * Handle alert statistics endpoint
- */
-export const handleAlertStats = async (request, response) => {
-  if (request.method !== 'GET' || request.url !== '/api/monitoring/alerts/stats') {
-    return false;
-  }
-  
-  try {
-    // Apply rate limiting
-    if (!applyRateLimit(request, response)) {
-      return true; // Rate limit exceeded, response already sent
-    }
-    
-    const stats = getAlertStats();
-    
-    const statsResponse = {
-      ...stats,
-      timestamp: Date.now()
-    };
-    
-    response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    response.end(JSON.stringify(statsResponse, null, 2));
-    return true;
-    
-  } catch (error) {
-    console.error('Alert statistics error:', error);
-    response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
-    response.end(JSON.stringify({ error: 'Failed to get alert statistics' }));
-    return true;
-  }
-};
-
-/**
  * Get session connection information
  */
 const getSessionConnections = () => {
@@ -491,18 +357,6 @@ export function registerMonitoringRoutes(server, registry, providers, failoverCh
     }
     
     if (await handleWebSocketConnections(request, response)) {
-      return;
-    }
-    
-    if (await handleActiveAlerts(request, response)) {
-      return;
-    }
-    
-    if (await handleAlertHistory(request, response)) {
-      return;
-    }
-    
-    if (await handleAlertStats(request, response)) {
       return;
     }
     

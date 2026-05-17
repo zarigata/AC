@@ -3,7 +3,7 @@
  */
 
 import { applyRateLimit } from "../middleware/security.js";
-import { sendToClient, broadcastToSession, totalActiveConnections, activeConnections, MAX_CONCURRENT_CONNECTIONS } from "../middleware/webSocketHandler.js";
+import { sendToClient, broadcastToSession } from "../middleware/webSocketHandler.js";
 
 export function registerWebSocketRoutes(server, registry, providers, failoverChains, settings) {
   
@@ -111,20 +111,12 @@ export function registerWebSocketRoutes(server, registry, providers, failoverCha
         return true; // Rate limit exceeded, response already sent
       }
       
-      // Get WebSocket status with actual connected client tracking
+      // Get WebSocket status
       const status = {
         websocket: {
-          connected: totalActiveConnections,
+          connected: 0, // TODO: Implement actual connected client tracking
           maxConnections: MAX_CONCURRENT_CONNECTIONS,
-          status: totalActiveConnections > 0 ? 'active' : 'idle',
-          activeConnections: Array.from(activeConnections.values()).map(conn => ({
-            id: conn.connectionId,
-            connectedAt: conn.connectedAt,
-            userAgent: conn.userAgent || 'unknown',
-            origin: conn.origin || 'local',
-            agentId: conn.agentId || null,
-            sessionId: conn.sessionId || null
-          }))
+          status: 'active'
         },
         agents: {
           total: registry.listAgents().length,
@@ -178,3 +170,6 @@ export function registerWebSocketRoutes(server, registry, providers, failoverCha
 // Import required utilities synchronously
 import { readRequestBody } from "../middleware/requestHandler.js";
 import { serverState, getServerStatus } from "../config/serverConfig.js";
+
+// Extract required properties with fallbacks
+const MAX_CONCURRENT_CONNECTIONS = 100; // Default value

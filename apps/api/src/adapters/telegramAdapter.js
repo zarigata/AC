@@ -2,12 +2,7 @@
  * Telegram Adapter - Telegram webhook integration with pluggable architecture
  */
 
-import { createServer } from "node/http";
-import { createProvider } from "./ollama.js";
-import { AgentRegistry } from "../registry.js";
-
-// Create a global registry instance (this should be passed in from server.js)
-const registry = new AgentRegistry();
+import { createServer } from "node:http";
 
 export class TelegramAdapter {
   constructor(config = {}) {
@@ -27,17 +22,8 @@ export class TelegramAdapter {
    * Initialize the Telegram adapter
    */
   async initialize() {
-    // Allow demo mode for testing
-    if (this.config.isDemo) {
-      console.log("🤖 Initializing demo Telegram adapter...");
-      this.isActive = true;
-      return;
-    }
-    
-    if (!this.config.botToken || this.config.botToken === 'demo-token') {
-      console.log("🤖 Telegram adapter running in demo mode (no real bot token)");
-      this.isActive = true;
-      return;
+    if (!this.config.botToken) {
+      throw new Error("Telegram bot token is required");
     }
 
     console.log("🤖 Initializing Telegram adapter...");
@@ -128,86 +114,13 @@ export class TelegramAdapter {
 
     // Forward message to chat system
     try {
+      // This would integrate with the existing chat system
+      // For now, just log and acknowledge
       console.log(`🎯 Forwarding message to agent ${agentId}: ${messageContent}`);
       
-      // Get agent from registry
-      const agent = registry.getAgent(agentId);
-      if (!agent) {
-        throw new Error(`Agent ${agentId} not found`);
-      }
-        
-        // Get or create session for this agent
-        let sessions = registry.listSessions(agentId);
-        let session;
-        
-        if (sessions.sessions.length > 0) {
-          session = sessions.sessions[0];
-        } else {
-          session = registry.createSession(agentId, {
-            title: messageContent.slice(0, 50) + (messageContent.length > 50 ? '...' : '')
-          });
-        }
-        
-        // Save user message
-        registry.createMessage(agentId, session.id, {
-          role: 'user',
-          content: messageContent.trim(),
-          tokensIn: 0
-        });
-        
-        // Get context window
-        const { MemoryManager } = await import('../memory/memoryManager.js');
-        const memoryManager = new MemoryManager(registry);
-        const contextWindow = await memoryManager.getCompleteContext(agentId, session.id);
-        
-        // Add system prompt if defined
-        if (agent.systemPrompt && agent.systemPrompt.trim()) {
-          contextWindow.unshift({
-            role: 'system',
-            content: agent.systemPrompt.trim()
-          });
-        }
-        
-        // Add user message to context
-        const userMessage = {
-          role: 'user',
-          content: messageContent.trim(),
-          timestamp: new Date().toISOString()
-        };
-        contextWindow.push(userMessage);
-        
-        // Create provider and get response
-        const provider = createProvider(agent.provider?.toLowerCase()) || createProvider('ollama');
-        if (!provider) {
-          throw new Error(`Provider ${agent.provider} not available`);
-        }
-        
-        // Generate response
-        const result = await provider.chat(contextWindow, { 
-          model: agent.model, 
-          temperature: 0.7, 
-          maxTokens: 512 
-        });
-        
-        // Save assistant response
-        registry.createMessage(agentId, session.id, {
-          role: 'assistant',
-          content: result.content,
-          tokensIn: result.tokensIn,
-          tokensOut: result.tokensOut,
-          model: result.model
-        });
-        
-        // Add assistant response to context
-        const assistantMessage = {
-          role: 'assistant',
-          content: result.content,
-          timestamp: new Date().toISOString()
-        };
-        await memoryManager.addMessageToContext(agentId, session.id, assistantMessage);
-        
-        // Send the actual response
-        await this.sendMessage(chatId, `🤖 **${agent.name}**\n\n${result.content}\n\n*Tokens: ${result.tokensIn + result.tokensOut}*`);
+      // TODO: Integrate with chat system
+      // const response = await chatWithAgent(agentId, messageContent, chatId);
+      // await this.sendMessage(chatId, response);
       
     } catch (error) {
       console.error('Error handling message:', error);

@@ -318,12 +318,11 @@ export const initializeServer = async (registry) => {
   // Update settings with provider count
   settings.providers = Object.keys(providers).length;
   
-  // Setup WebSocket server first
-  const tempServer = createServer();
-  setupWebSocketServer(tempServer);
-  
   // Create server instance with WebSocket upgrade handler
   const server = createServerInstance(config.port, config.host);
+  
+  // Setup WebSocket server
+  setupWebSocketServer(server);
   
   // Initialize rate limiting
   initializeRateLimiting();

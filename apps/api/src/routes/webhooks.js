@@ -107,16 +107,12 @@ export function registerWebhookRoutes(server, registry, providers, failoverChain
         
         // Add webhooks for each active adapter
         for (const [name, adapterStatus] of webhookStatus.adapters) {
-          const isDemo = name.includes('-demo');
-          const displayName = isDemo ? name.replace('-demo', ' Demo') : name.charAt(0).toUpperCase() + name.slice(1);
-          
           webhooks.push({
             id: `${name}-default`,
-            name: `${displayName} Default`,
+            name: `${name.charAt(0).toUpperCase() + name.slice(1)} Default`,
             type: name,
-            endpoint: `/api/webhooks/${name.replace('-demo', '')}`,
+            endpoint: `/api/webhooks/${name}`,
             status: adapterStatus.isActive ? "active" : "inactive",
-            isDemo: isDemo,
             created: new Date().toISOString(),
             config: adapterStatus.config
           });
@@ -174,14 +170,12 @@ export function registerWebhookRoutes(server, registry, providers, failoverChain
         type: "telegram",
         endpoint: "/api/webhooks/telegram",
         status: "active",
-        isDemo: !process.env.TELEGRAM_BOT_TOKEN,
         created: new Date().toISOString(),
         config: {
-          botToken: process.env.TELEGRAM_BOT_TOKEN ? "***" : "demo-token",
-          webhookUrl: process.env.TELEGRAM_WEBHOOK_URL || "demo",
+          botToken: "***",
+          webhookUrl: "***",
           allowedUpdates: ["message", "callback_query"],
-          maxConnections: 40,
-          mode: process.env.TELEGRAM_BOT_TOKEN ? "production" : "demo"
+          maxConnections: 40
         }
       },
       "discord-default": {
@@ -190,13 +184,12 @@ export function registerWebhookRoutes(server, registry, providers, failoverChain
         type: "discord",
         endpoint: "/api/webhooks/discord",
         status: "active",
-        isDemo: !process.env.DISCORD_BOT_TOKEN,
         created: new Date().toISOString(),
         config: {
-          botToken: process.env.DISCORD_BOT_TOKEN ? "***" : "demo-token",
-          webhookUrl: process.env.DISCORD_WEBHOOK_URL || "demo",
-          serverId: process.env.DISCORD_SERVER_ID || "demo",
-          clientId: process.env.DISCORD_CLIENT_ID || "demo",
+          botToken: "***",
+          webhookUrl: "***",
+          serverId: "***",
+          clientId: "***",
           commands: [
             {
               name: "chat",
@@ -216,8 +209,7 @@ export function registerWebhookRoutes(server, registry, providers, failoverChain
                 }
               ]
             }
-          ],
-          mode: process.env.DISCORD_BOT_TOKEN ? "production" : "demo"
+          ]
         }
       }
     };
@@ -305,27 +297,22 @@ export function registerWebhookRoutes(server, registry, providers, failoverChain
         const body = await getRequestBody(request);
         console.log('📡 Received Telegram webhook:', JSON.stringify(body, null, 2));
         
-        // Try both real and demo adapters
-        let adapter = webhookManager.getAdapter('telegram');
-        if (!adapter) {
-          adapter = webhookManager.getAdapter('telegram-demo');
-        }
-        
-        if (adapter) {
+        // Forward the update to the webhook manager
+        if (webhookManager.getAdapter('telegram')) {
           await webhookManager.handleWebhookRequest('telegram', body, response);
         } else {
           console.log('⚠️ Telegram adapter not available');
           response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
           response.end(JSON.stringify({ 
-            status: 'demo-mode', 
-            message: 'Telegram adapter running in demo mode - configure TELEGRAM_BOT_TOKEN for real functionality',
+            status: 'inactive', 
+            message: 'Telegram adapter not configured - set TELEGRAM_BOT_TOKEN environment variable',
             adapterStatus: webhookManager.getStatus().adapters.get('telegram')
           }));
           return true;
         }
         
         response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-        response.end(JSON.stringify({ ok: true, status: 'processed' }));
+        response.end(JSON.stringify({ ok: true }));
         return true;
         
       } catch (error) {
@@ -347,27 +334,22 @@ export function registerWebhookRoutes(server, registry, providers, failoverChain
         const body = await getRequestBody(request);
         console.log('🎭 Received Discord webhook:', JSON.stringify(body, null, 2));
         
-        // Try both real and demo adapters
-        let adapter = webhookManager.getAdapter('discord');
-        if (!adapter) {
-          adapter = webhookManager.getAdapter('discord-demo');
-        }
-        
-        if (adapter) {
+        // Forward the interaction to the webhook manager
+        if (webhookManager.getAdapter('discord')) {
           await webhookManager.handleWebhookRequest('discord', body, response);
         } else {
           console.log('⚠️ Discord adapter not available');
           response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
           response.end(JSON.stringify({ 
-            status: 'demo-mode', 
-            message: 'Discord adapter running in demo mode - configure DISCORD_BOT_TOKEN for real functionality',
+            status: 'inactive', 
+            message: 'Discord adapter not configured - set DISCORD_BOT_TOKEN environment variable',
             adapterStatus: webhookManager.getStatus().adapters.get('discord')
           }));
           return true;
         }
         
         response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-        response.end(JSON.stringify({ type: 1, status: 'processed' })); // ACK response for Discord
+        response.end(JSON.stringify({ type: 1 })); // ACK response for Discord
         return true;
         
       } catch (error) {
