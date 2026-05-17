@@ -8,7 +8,7 @@ import WebSocket from "ws";
 const BASE_URL = "http://localhost:4000";
 const WS_URL = "ws://localhost:4000";
 const TEST_API_KEY = "zsiistant-test-api-key-12345";
-const JWT_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJhMjlkZWY1ZS03MTA0LTQ5ZDAtODZiMC1lMjZkMWE0NmE2MGEiLCJ1c2VybmFtZSI6ImludGVncmF0aW9udGVzdCIsInJvbGUiOiJ1c2VyIiwidHlwZSI6ImFjY2VzcyIsImlhdCI6MTc3ODc5NjE4NywiZXhwIjoxNzc4Nzk5Nzg3fQ.7auMs_IWQy-X8hZu3UpDWoL7HfTZbD0vZzfk9Xe6Mw8";
+const JWT_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhMjlkZWY1ZS03MTA0LTQ5ZGEtODZiMC1lMjZkMWE0NmE2MGEiLCJ1c2VybmFtZSI6ImludGVncmF0aW9udGVzdCIsInJvbGUiOiJ1c2VyIiwidHlwZSI6ImFjY2VzcyIsImlhdCI6MTc3OTAxNzY5NywiZXhwIjoxNzc5MDIxMjk3fQ.cFb7Yxj8L8bxQSQKKFQEgrU3ViIA0BASvFVaKrIYRtA";
 
 // Simple HTTP client for testing
 async function fetchWithAuth(path, options = {}) {

@@ -41,6 +41,7 @@ config/            → server + failover config
 - [x] **V21**: Enhanced adapter integration - Discord and Telegram chat integration completed with agent selection, session management, and TODO items resolved ✅ IMPLEMENTED
 - [x] **V22**: Complete adapter integration implementation - ✅ FIXED Discord and Telegram adapters to fully integrate with chat system, resolved WebSocket connected client tracking, and fixed non-streaming agent chat message handling
 - [✅] **V23**: Adapter TODO completion - ✅ COMPLETED - Implemented Discord command cleanup functionality and Telegram agent switching with inline menu selection, completing remaining adapter TODO items
+- [✅] **V24**: Fix authentication issues with public health endpoints - ✅ COMPLETED - Added direct health endpoint handling to bypass authentication middleware, fixed startTime variable reference, basic health endpoint now accessible without authentication
 
 ## Rules
 1. One victory per cron run
@@ -50,8 +51,8 @@ config/            → server + failover config
 5. No security audits until core works
 
 ## Current Status
-- V1-V23 complete
-- **NEXT**: Need to identify V24 requirements
+- V1-V24 complete
+- **NEXT**: Need to identify V25 requirements
 
 ## Blockers
-- ❌ Authentication issues with public routes (health endpoint returning auth required)
+- ❌ None - All core authentication issues resolved

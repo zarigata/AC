@@ -2,6 +2,9 @@
  * WebSocket Chat Routes - Handle WebSocket-specific chat endpoints and real-time messaging
  */
 
+// Configuration constants
+const MAX_CONCURRENT_CONNECTIONS = 100; // Default value
+
 import { applyRateLimit } from "../middleware/security.js";
 import { sendToClient, broadcastToSession } from "../middleware/webSocketHandler.js";
 
@@ -173,6 +176,3 @@ export function registerWebSocketRoutes(server, registry, providers, failoverCha
 // Import required utilities synchronously
 import { readRequestBody } from "../middleware/requestHandler.js";
 import { serverState, getServerStatus } from "../config/serverConfig.js";
-
-// Extract required properties with fallbacks
-const MAX_CONCURRENT_CONNECTIONS = 100; // Default value

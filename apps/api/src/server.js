@@ -15,7 +15,6 @@ import { registerProviderRoutes } from "./routes/providers.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerLinksRoutes } from "./routes/links.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
-console.log('Health routes imported successfully');
 import { registerTopologyRoutes } from "./routes/topology.js";
 import { registerToolRoutes } from "./routes/tools.js";
 import { registerJobRoutes } from "./routes/jobs.js";
@@ -380,13 +379,38 @@ async function main() {
         // Run each route handler sequentially until one handles the request
         console.log('Processing request:', req.method, req.url, 'with', routeHandlers.length, 'handlers');
         let healthHandlerCalled = false;
+        
+        // Debug: Log route handlers
+        console.log('Available route handlers:', routeHandlers.map((h, i) => `Handler ${i}: ${h.name || 'anonymous'}`).join(', '));
 
         for (const [index, handler] of routeHandlers.entries()) {
-          if (res.headersSent) break;
+          if (res.headersSent) {
+            console.log(`🛑 Response already sent after handler ${index-1}, stopping execution`);
+            break;
+          }
           try {
+            console.log(`🔍 Executing route handler ${index}: ${handler.name || 'anonymous'} for ${req.method} ${req.url}`);
+            
+            // Save response state before calling handler
+            const wasHeadersSent = res.headersSent;
+            
             await handler(req, res);
-            if (req.url?.includes('health')) {
-              healthHandlerCalled = true;
+            
+            // Check if handler sent headers
+            const nowHeadersSent = res.headersSent;
+            
+            if (!wasHeadersSent && nowHeadersSent) {
+              console.log(`📝 Handler ${index} sent headers`);
+              if (req.url?.includes('health')) {
+                healthHandlerCalled = true;
+              }
+            }
+            
+            console.log(`✅ Handler ${index} completed, headers sent: ${nowHeadersSent}`);
+            
+            // If this handler sent headers, check if it's the right response
+            if (nowHeadersSent && req.url?.includes('health')) {
+              console.log(`🏥 Health endpoint response detected`);
             }
           } catch (err) {
             console.error('Route handler error:', err.message);

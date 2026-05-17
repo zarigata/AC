@@ -249,8 +249,8 @@ export class HealthMonitor {
       }
     };
     
-    // Start first check immediately
-    check();
+    // Start first check after the provided interval
+    setTimeout(check, interval);
   }
   
   /**

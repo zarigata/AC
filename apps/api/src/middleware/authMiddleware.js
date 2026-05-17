@@ -65,6 +65,8 @@ const DEFAULT_CONFIG = {
   skipPaths: [
     '/health',
     '/health/',
+    '/health/extended',
+    '/health/extended/',
     '/healthz',
     '/healthz/',
     '/docs',
@@ -215,12 +217,9 @@ function extractTokenFromHeader(authHeader) {
  * @returns {boolean} True if path is protected
  */
 function isProtectedPath(path) {
-  console.log('🔍 isProtectedPath called with:', path);
-
   // Skip authentication for explicitly excluded paths
   const skipMatch = DEFAULT_CONFIG.skipPaths.find(skipPath => path.startsWith(skipPath));
   if (skipMatch) {
-    console.log('✅ Found in skipPaths:', skipMatch);
     return false;
   }
 
@@ -232,15 +231,8 @@ function isProtectedPath(path) {
 
   // Check if path is in protected routes
   const protectedMatch = DEFAULT_CONFIG.protectedRoutes.find(protectedPath => path.startsWith(protectedPath));
-  if (protectedMatch) {
-    console.log('❌ Found in protectedRoutes:', protectedMatch);
-  } else {
-    console.log('✗ Not found in protectedRoutes');
-  }
 
-  const isProtected = !!protectedMatch;
-  console.log('🎯 Final result:', isProtected ? 'PROTECTED' : 'NOT PROTECTED');
-  return isProtected;
+  return !!protectedMatch;
 }
 
 /**
@@ -288,10 +280,10 @@ function createAuthMiddleware(config = {}) {
   
   return async (req, res, next) => {
     try {
-      const path = req.url || '';
+      const path = (req.url || '').split('?')[0]; // Remove query parameters
       
       // DEBUG: Log the path being checked
-      console.log('🔍 Auth Middleware - Checking path:', path);
+      console.log('🔍 Auth Middleware - Checking normalized path:', path);
 
       // Skip authentication for public/unprotected paths
       if (!isProtectedPath(path)) {
@@ -299,9 +291,15 @@ function createAuthMiddleware(config = {}) {
         console.log('🚀 About to call next()...');
         try {
           console.log('🚀 Calling next() function...');
-          const result = next();
-          console.log('🚀 next() returned:', result);
-          return result;
+          // Make sure we don't accidentally send a response
+          if (!res.headersSent) {
+            const result = next();
+            console.log('🚀 next() returned:', result);
+            return result;
+          } else {
+            console.log('⚠️ Headers already sent, not calling next()');
+            return;
+          }
         } catch (err) {
           console.error('❌ Error calling next():', err);
           throw err;

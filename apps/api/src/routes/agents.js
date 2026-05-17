@@ -46,11 +46,6 @@ export function registerAgentRoutes(server, registry, providers, failoverChains,
    * Handle single agent operations
    */
   const handleSingleAgent = async (request, response) => {
-    // Require authentication for agent operations
-    if (!requireAuth(request, response)) {
-      return true; // Authentication failed, response already sent
-    }
-    
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
     const agentMatch = url.pathname.match(/^\/api\/agents\/([\w-]+)$/);
     
@@ -60,6 +55,11 @@ export function registerAgentRoutes(server, registry, providers, failoverChains,
     }
 
     if (!agentMatch) return false;
+    
+    // URL matches agent pattern, now require authentication
+    if (!requireAuth(request, response)) {
+      return true; // Authentication failed, response already sent
+    }
 
     const agentId = agentMatch[1];
 
