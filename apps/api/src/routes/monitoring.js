@@ -12,6 +12,8 @@ import {
   totalActiveTasks 
 } from "../middleware/webSocketHandler.js";
 import { serverState, settings, getServerStatus } from "../config/serverConfig.js";
+import { createHealthMonitor, getGlobalHealthMonitor } from "../monitoring/healthMonitor.js";
+import { createTaskManager, getGlobalTaskManager } from "../monitoring/taskManager.js";
 
 /**
  * System metrics collector
@@ -107,121 +109,7 @@ const getTasksByType = () => {
   return tasksByType;
 };
 
-/**
- * Handle system health check endpoint
- */
-export const handleSystemHealth = async (request, response, registry) => {
-  if (request.method !== 'GET' || request.url !== '/api/monitoring/health') {
-    return false;
-  }
-  
-  try {
-    // Apply rate limiting
-    if (!applyRateLimit(request, response)) {
-      return true; // Rate limit exceeded, response already sent
-    }
-    
-    // Get basic server status
-    const status = getServerStatus();
-    
-    // Check database connectivity
-    let databaseStatus = 'unknown';
-    let databaseLatency = 0;
-    try {
-      const startTime = Date.now();
-      // Simple database query to test connectivity
-      const testResult = registry.db.prepare("SELECT 1 as test").get();
-      databaseLatency = Date.now() - startTime;
-      databaseStatus = testResult.test === 1 ? 'healthy' : 'error';
-    } catch (dbError) {
-      databaseStatus = 'error';
-      databaseLatency = 0;
-    }
-    
-    // Check provider connectivity
-    const providerStatus = checkProviderConnectivity();
-    
-    // Overall system health
-    const isHealthy = status.uptime > 0 && 
-                     databaseStatus === 'healthy' && 
-                     Object.keys(providerStatus).every(p => providerStatus[p].status === 'healthy');
-    
-    const healthResponse = {
-      status: isHealthy ? 'healthy' : 'degraded',
-      timestamp: Date.now(),
-      components: {
-        server: {
-          status: status.uptime > 0 ? 'healthy' : 'down',
-          uptime: status.uptime,
-          latency: 0 // HTTP request latency
-        },
-        database: {
-          status: databaseStatus,
-          latency: databaseLatency
-        },
-        providers: providerStatus
-      },
-      metrics: collectSystemMetrics(),
-      alerts: getSystemAlerts()
-    };
-    
-    response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    response.end(JSON.stringify(healthResponse, null, 2));
-    return true;
-    
-  } catch (error) {
-    console.error('System health check error:', error);
-    
-    const errorResponse = {
-      status: 'error',
-      timestamp: Date.now(),
-      error: error.message,
-      components: {
-        server: {
-          status: 'error',
-          uptime: Math.floor((Date.now() - serverState.startTime) / 1000)
-        },
-        database: {
-          status: 'unknown',
-          latency: 0
-        },
-        providers: {}
-      }
-    };
-    
-    response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
-    response.end(JSON.stringify(errorResponse, null, 2));
-    return true;
-  }
-};
 
-/**
- * Handle system metrics endpoint
- */
-export const handleSystemMetrics = async (request, response, registry) => {
-  if (request.method !== 'GET' || request.url !== '/api/monitoring/metrics') {
-    return false;
-  }
-  
-  try {
-    // Apply rate limiting
-    if (!applyRateLimit(request, response)) {
-      return true; // Rate limit exceeded, response already sent
-    }
-    
-    const metrics = collectSystemMetrics();
-    
-    response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    response.end(JSON.stringify(metrics, null, 2));
-    return true;
-    
-  } catch (error) {
-    console.error('Metrics collection error:', error);
-    response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
-    response.end(JSON.stringify({ error: 'Failed to collect metrics' }));
-    return true;
-  }
-};
 
 /**
  * Handle WebSocket connections endpoint
@@ -279,20 +167,34 @@ const getSessionConnections = () => {
 };
 
 /**
- * Check provider connectivity
+ * Check provider connectivity using health monitor
  */
 const checkProviderConnectivity = () => {
   const providerStatus = {};
   
-  // This would normally check actual provider connectivity
-  // For now, return a mock status
+  try {
+    const healthMonitor = getGlobalHealthMonitor();
+    if (healthMonitor) {
+      const health = healthMonitor.getProviderHealth();
+      return health;
+    }
+  } catch (error) {
+    console.error('Error getting provider health:', error);
+  }
+  
+  // Fallback to mock status if health monitor not available
   const mockProviders = ['ollama', 'openai'];
   
   for (const provider of mockProviders) {
     providerStatus[provider] = {
       status: 'healthy',
       latency: Math.floor(Math.random() * 100) + 50, // Mock latency
-      lastCheck: Date.now()
+      lastCheck: Date.now(),
+      stats: {
+        consecutiveFailures: 0,
+        consecutiveSuccesses: 0,
+        uptime: 100
+      }
     };
   }
   
@@ -343,9 +245,255 @@ const getSystemAlerts = () => {
 };
 
 /**
+ * Handle enhanced system health endpoint
+ */
+export const handleSystemHealth = async (request, response, registry) => {
+  if (request.method !== 'GET' || request.url !== '/api/monitoring/health') {
+    return false;
+  }
+  
+  try {
+    // Apply rate limiting
+    if (!applyRateLimit(request, response)) {
+      return true; // Rate limit exceeded, response already sent
+    }
+    
+    // Get basic server status
+    const status = getServerStatus();
+    
+    // Check database connectivity
+    let databaseStatus = 'unknown';
+    let databaseLatency = 0;
+    try {
+      const startTime = Date.now();
+      // Simple database query to test connectivity
+      const testResult = registry.db.prepare("SELECT 1 as test").get();
+      databaseLatency = Date.now() - startTime;
+      databaseStatus = testResult.test === 1 ? 'healthy' : 'error';
+    } catch (dbError) {
+      databaseStatus = 'error';
+      databaseLatency = 0;
+    }
+    
+    // Check enhanced provider connectivity
+    const providerStatus = checkProviderConnectivity();
+    
+    // Get enhanced task information
+    let taskStatus = { active: 0, total: 0, byType: {} };
+    try {
+      const taskManager = getGlobalTaskManager();
+      if (taskManager) {
+        const stats = taskManager.getTaskStats();
+        taskStatus = {
+          active: stats.active,
+          total: stats.total,
+          completed: stats.completed,
+          failed: stats.failed,
+          byType: stats.byType
+        };
+      }
+    } catch (taskError) {
+      console.error('Error getting task status:', taskError);
+    }
+    
+    // Overall system health
+    const isHealthy = status.uptime > 0 && 
+                     databaseStatus === 'healthy' && 
+                     Object.keys(providerStatus).every(p => providerStatus[p].status === 'healthy');
+    
+    const healthResponse = {
+      status: isHealthy ? 'healthy' : 'degraded',
+      timestamp: Date.now(),
+      components: {
+        server: {
+          status: status.uptime > 0 ? 'healthy' : 'down',
+          uptime: status.uptime,
+          latency: 0 // HTTP request latency
+        },
+        database: {
+          status: databaseStatus,
+          latency: databaseLatency
+        },
+        providers: providerStatus,
+        tasks: taskStatus
+      },
+      metrics: collectSystemMetrics(),
+      alerts: getSystemAlerts(),
+      recommendations: getProviderRecommendations()
+    };
+    
+    response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify(healthResponse, null, 2));
+    return true;
+    
+  } catch (error) {
+    console.error('System health check error:', error);
+    
+    const errorResponse = {
+      status: 'error',
+      timestamp: Date.now(),
+      error: error.message,
+      components: {
+        server: {
+          status: 'error',
+          uptime: Math.floor((Date.now() - serverState.startTime) / 1000)
+        },
+        database: {
+          status: 'unknown',
+          latency: 0
+        },
+        providers: {},
+        tasks: {
+          active: 0,
+          total: 0
+        }
+      }
+    };
+    
+    response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify(errorResponse, null, 2));
+    return true;
+  }
+};
+
+/**
+ * Get provider recommendations
+ */
+const getProviderRecommendations = () => {
+  try {
+    const healthMonitor = getGlobalHealthMonitor();
+    if (healthMonitor) {
+      return healthMonitor.getProviderRecommendations();
+    }
+  } catch (error) {
+    console.error('Error getting provider recommendations:', error);
+  }
+  
+  return [];
+};
+
+/**
+ * Handle enhanced system metrics endpoint
+ */
+export const handleSystemMetrics = async (request, response, registry) => {
+  if (request.method !== 'GET' || request.url !== '/api/monitoring/metrics') {
+    return false;
+  }
+  
+  try {
+    // Apply rate limiting
+    if (!applyRateLimit(request, response)) {
+      return true; // Rate limit exceeded, response already sent
+    }
+    
+    const metrics = collectSystemMetrics();
+    
+    // Add enhanced task metrics
+    try {
+      const taskManager = getGlobalTaskManager();
+      if (taskManager) {
+        const taskStats = taskManager.getTaskStats();
+        metrics.tasks = taskStats;
+        metrics.taskPerformance = {
+          completionRate: taskStats.total > 0 ? (taskStats.completed / taskStats.total) * 100 : 0,
+          failureRate: taskStats.total > 0 ? (taskStats.failed / taskStats.total) * 100 : 0,
+          averageDuration: taskStats.averageDuration,
+          maxConcurrentTasks: taskManager['performanceMetrics']?.maxConcurrentTasks || 0
+        };
+      }
+    } catch (taskError) {
+      console.error('Error getting task metrics:', taskError);
+    }
+    
+    // Add provider health metrics
+    try {
+      const healthMonitor = getGlobalHealthMonitor();
+      if (healthMonitor) {
+        const providerHealth = healthMonitor.getProviderHealth();
+        metrics.providerHealth = providerHealth;
+        metrics.systemHealth = healthMonitor.getSystemHealth();
+      }
+    } catch (healthError) {
+      console.error('Error getting health metrics:', healthError);
+    }
+    
+    response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify(metrics, null, 2));
+    return true;
+    
+  } catch (error) {
+    console.error('Metrics collection error:', error);
+    response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify({ error: 'Failed to collect metrics' }));
+    return true;
+  }
+};
+
+/**
+ * Handle task monitoring endpoint
+ */
+export const handleTaskMonitoring = async (request, response) => {
+  if (request.method !== 'GET' || request.url !== '/api/monitoring/tasks') {
+    return false;
+  }
+  
+  try {
+    // Apply rate limiting
+    if (!applyRateLimit(request, response)) {
+      return true; // Rate limit exceeded, response already sent
+    }
+    
+    const taskManager = getGlobalTaskManager();
+    if (!taskManager) {
+      response.writeHead(503, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ error: 'Task manager not available' }));
+      return true;
+    }
+    
+    const tasks = taskManager.getTasks();
+    const stats = taskManager.getTaskStats();
+    
+    // Filter active tasks for detailed view
+    const activeTasks = tasks.filter(task => 
+      task.status === 'running' || task.status === 'pending'
+    );
+    
+    const taskResponse = {
+      timestamp: Date.now(),
+      tasks: activeTasks.slice(0, 50), // Limit to most recent 50 active tasks
+      stats,
+      history: taskManager.taskHistory.slice(-20) // Last 20 events
+    };
+    
+    response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify(taskResponse, null, 2));
+    return true;
+    
+  } catch (error) {
+    console.error('Task monitoring error:', error);
+    response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify({ error: 'Failed to get task information' }));
+    return true;
+  }
+};
+
+/**
  * Register monitoring routes
  */
 export function registerMonitoringRoutes(server, registry, providers, failoverChains, settings) {
+  // Initialize health monitor if not already initialized
+  if (!getGlobalHealthMonitor()) {
+    const healthMonitor = createHealthMonitor(registry);
+    healthMonitor.start();
+    console.log('🏥 Health monitor initialized and started');
+  }
+  
+  // Initialize task manager if not already initialized
+  if (!getGlobalTaskManager()) {
+    const taskManager = createTaskManager(registry);
+    console.log('📋 Task manager initialized');
+  }
+  
   // System health endpoint
   server.on('request', async (request, response) => {
     if (await handleSystemHealth(request, response, registry)) {
@@ -353,6 +501,10 @@ export function registerMonitoringRoutes(server, registry, providers, failoverCh
     }
     
     if (await handleSystemMetrics(request, response, registry)) {
+      return;
+    }
+    
+    if (await handleTaskMonitoring(request, response)) {
       return;
     }
     

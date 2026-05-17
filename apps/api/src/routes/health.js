@@ -51,7 +51,8 @@ export function registerHealthRoutes(server, registry, providers, failoverChains
    * Handle advanced health check with system info
    */
   const handleAdvancedHealth = async (request, response) => {
-    if (request.method === "GET" && request.url?.startsWith("/api/health")) {
+    if (request.method === "GET" && (request.url?.startsWith("/api/health") || request.url?.startsWith("/health/extended"))) {
+      // Health endpoints are public, don't require authentication
       try {
         // Get system metrics
         const systemInfo = {

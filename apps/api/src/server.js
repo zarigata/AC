@@ -25,6 +25,7 @@ import { registerAuthRoutes } from "./routes/auth.js";
 import { registerDocumentationRoutes } from "./routes/documentation.js";
 import { registerWebSocketRoutes } from "./routes/websocket.js";
 import { registerMonitoringRoutes } from "./routes/monitoring.js";
+import { registerTaskRoutes } from "./routes/tasks.js";
 import { UserManager } from "./database/userManager.js";
 import { webhookManager } from "./adapters/webhookManager.js";
 import { globalErrorHandler, notFoundHandler, requestLogger } from "./middleware/errorMiddleware.js";
@@ -39,6 +40,8 @@ import { dirname, join } from 'node:path';
 import { settings, serverState, initializeServer, startServer, getServerStatus } from "./config/serverConfig.js";
 import { setupGracefulShutdown } from "./config/serverConfig.js";
 import { FAILOVER_CONFIG, isFailoverEnabled } from "./config/failoverConfig.js";
+import { createHealthMonitor } from "./monitoring/healthMonitor.js";
+import { createTaskManager } from "./monitoring/taskManager.js";
 
 // Set global server start time for uptime calculations
 global.serverStartTime = Date.now();
@@ -107,6 +110,55 @@ async function main() {
     
     // Set global registry reference for session manager token tracking
     global.registry = registry;
+    
+    // Initialize enhanced monitoring systems
+    console.log("Initializing monitoring systems...");
+    try {
+      // Initialize health monitor for real-time provider health checking
+      const healthMonitor = createHealthMonitor(registry);
+      healthMonitor.start();
+      global.healthMonitor = healthMonitor;
+      console.log("🏥 Health monitor initialized and started");
+      
+      // Initialize task manager for enhanced task tracking and lifecycle management
+      const taskManager = createTaskManager(registry);
+      global.taskManager = taskManager;
+      console.log("📋 Task manager initialized");
+      
+      // Set up task integration with WebSocket for real-time updates
+      if (taskManager) {
+        taskManager.onTaskChange((taskEvent) => {
+          try {
+            const { task, event } = taskEvent;
+            const broadcastMessage = {
+              type: 'task_update',
+              timestamp: Date.now(),
+              event,
+              task: {
+                id: task.id,
+                type: task.type,
+                status: task.status,
+                progress: task.progress,
+                priority: task.priority,
+                createdAt: task.createdAt,
+                startedAt: task.startedAt,
+                completedAt: task.completedAt
+              }
+            };
+            
+            // Broadcast to all connected clients
+            const { broadcastMessage: broadcast } = require('./middleware/webSocketHandler.js');
+            broadcast(broadcastMessage);
+          } catch (error) {
+            console.error('Error broadcasting task update:', error);
+          }
+        });
+      }
+      
+    } catch (monitorError) {
+      console.error('Error initializing monitoring systems:', monitorError.message);
+      // Continue without monitoring, but log the error
+    }
 
     // Initialize server with all components
     const { server, config, providers } = await initializeServer(registry);
@@ -170,6 +222,8 @@ async function main() {
     registerDocumentationRoutes(routeServer);
     console.log('Registering monitoring routes...');
     registerMonitoringRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    console.log('Registering task routes...');
+    registerTaskRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
 
     console.log(`Registered ${routeHandlers.length + 1} route handler(s)`);
     
@@ -342,6 +396,25 @@ async function main() {
     await startServer(server, config);
 
     console.log("Zsiistant server started successfully");
+
+    // Log initial monitoring status
+    try {
+      if (global.healthMonitor) {
+        const systemHealth = global.healthMonitor.getSystemHealth();
+        console.log('🏥 Initial system health:', systemHealth.status);
+        
+        if (systemHealth.status !== 'healthy') {
+          console.warn('⚠️ System health issues detected:', systemHealth);
+        }
+      }
+      
+      if (global.taskManager) {
+        const taskStats = global.taskManager.getTaskStats();
+        console.log(`📋 Task manager initialized: ${taskStats.total} tasks tracked (${taskStats.active} active)`);
+      }
+    } catch (statusError) {
+      console.error('Error checking initial monitoring status:', statusError.message);
+    }
 
     return { server, registry, providers };
 
