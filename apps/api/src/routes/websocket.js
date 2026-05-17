@@ -133,7 +133,7 @@ export function registerWebSocketRoutes(server, registry, providers, failoverCha
     } catch (error) {
       console.error('WebSocket status error:', error);
       response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
-      response.end(JSON.stringify({ error: "Internal server error" }));
+      response.end(JSON.stringify({ error: 'Internal server error in status endpoint' }));
       return true;
     }
   };
