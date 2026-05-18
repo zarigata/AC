@@ -28,7 +28,7 @@ async function fetchWithAuth(path, options = {}) {
   }
   
   const finalOptions = {
-    method: "GET",
+    method: options.method || "GET",
     headers: { ...defaultHeaders, ...(options.headers || {}) },
     ...options
   };
@@ -42,15 +42,23 @@ async function fetchWithAuth(path, options = {}) {
           status: res.statusCode,
           headers: res.headers,
           text: () => Promise.resolve(data),
-          json: () => Promise.resolve(JSON.parse(data))
+          json: () => {
+            try {
+              return Promise.resolve(JSON.parse(data));
+            } catch {
+              return Promise.resolve(data);
+            }
+          }
         });
       });
     });
     
     req.on("error", reject);
     
+    // Write the body if it exists and is not a string (already stringified)
     if (options.body) {
-      req.write(options.body);
+      const bodyToSend = typeof options.body === 'string' ? options.body : options.body;
+      req.write(bodyToSend);
     }
     
     req.end();
@@ -222,7 +230,8 @@ test.describe("Full Integration Test Suite", () => {
       const chatData = {
         sessionId: testSessionId,
         message: "Hello, this is a test message",
-        stream: true
+        stream: true,
+        provider: "ollama"
       };
 
       const response = await fetchWithAuth(`/api/chat`, {
@@ -243,28 +252,28 @@ test.describe("Full Integration Test Suite", () => {
 
       assert.equal(response.status, 200);
       const data = await response.json();
-      assert.ok(Array.isArray(data));
-      assert.ok(data.length > 0);
+      assert.ok(data.success);
+      assert.ok(Array.isArray(data.sessions));
+      assert.ok(data.sessions.length > 0);
       
       // Find our test session
-      const testSession = data.find(session => session.id === testSessionId);
+      const testSession = data.sessions.find(session => session.id === testSessionId);
       assert.ok(testSession);
     });
   });
 
   test.describe("Providers & Settings", () => {
     test("GET /api/providers should list available providers", async () => {
-      const response = await fetch(`${BASE_URL}/api/providers`, {
-        headers: { "Authorization": `Bearer ${TEST_API_KEY}` }
-      });
+      const response = await fetchWithAuth(`/api/providers`);
 
       assert.equal(response.status, 200);
       const data = await response.json();
-      assert.ok(Array.isArray(data));
-      assert.ok(data.length > 0);
+      assert.ok(data.providers);
+      assert.ok(Array.isArray(data.providers));
+      assert.ok(data.providers.length > 0);
       
       // Should include ollama
-      const ollamaProvider = data.find(p => p.id === "ollama");
+      const ollamaProvider = data.providers.find(p => p.id === "ollama");
       assert.ok(ollamaProvider);
     });
 
@@ -273,15 +282,14 @@ test.describe("Full Integration Test Suite", () => {
 
       assert.equal(response.status, 200);
       const data = await response.json();
-      assert.ok(data.server);
-      assert.ok(data.registry);
+      assert.ok(data.version);
+      assert.ok(data.maxAgents);
+      assert.ok(data.supportedIsolationModes);
     });
 
     test("PATCH /api/settings should update settings", async () => {
       const updateData = {
-        registry: {
-          maxAgents: 50
-        }
+        maxAgents: 50
       };
 
       const response = await fetchWithAuth(`/api/settings`, {
@@ -291,7 +299,8 @@ test.describe("Full Integration Test Suite", () => {
 
       assert.equal(response.status, 200);
       const data = await response.json();
-      assert.equal(data.registry.maxAgents, 50);
+      assert.equal(data.settings.maxAgents, 50);
+      assert.ok(data.updated.includes("maxAgents"));
     });
   });
 
@@ -301,15 +310,17 @@ test.describe("Full Integration Test Suite", () => {
 
       assert.equal(response.status, 200);
       const data = await response.json();
-      assert.ok(Array.isArray(data));
-      assert.ok(data.length > 0);
+      assert.ok(Array.isArray(data.tools));
+      assert.ok(data.tools.length > 0);
+      assert.ok(data.total);
     });
 
     test("POST /api/jobs should create a job", async () => {
       const jobData = {
-        type: "test-job",
-        config: {
-          testParam: "test-value"
+        name: "test-job",
+        type: "test",
+        data: {
+          action: "demo"
         }
       };
 
@@ -321,6 +332,7 @@ test.describe("Full Integration Test Suite", () => {
       assert.equal(response.status, 201);
       const data = await response.json();
       assert.ok(data.id);
+      assert.equal(data.name, jobData.name);
       assert.equal(data.type, jobData.type);
     });
   });
@@ -339,7 +351,7 @@ test.describe("Full Integration Test Suite", () => {
       assert.equal(response.status, 200);
       const data = await response.json();
       assert.ok(data.version);
-      assert.ok(config.features);
+      assert.ok(data.features);
     });
   });
 

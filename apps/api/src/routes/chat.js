@@ -845,6 +845,35 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
     }
   });
 
+  // GET /api/sessions - List user's sessions (without /chat prefix)
+  server.on('request', async (req, res) => {
+    console.log('DEBUG: Checking GET /api/sessions handler, method:', req.method, 'url:', req.url);
+    if (req.method === "GET" && req.url === "/api/sessions") {
+      console.log('DEBUG: GET /api/sessions handler matched!');
+      try {
+        // Apply rate limiting
+        if (!applyRateLimit(req, res)) {
+          return true;
+        }
+
+        // Generate a user ID from the client IP for demonstration
+        // In production, this would come from authentication
+        const userId = req.headers['x-user-id'] || `user_${req.socket.remoteAddress}`;
+        
+        const sessions = await sessionManager.getUserSessions(userId, 20);
+        
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ success: true, sessions }));
+        return true;
+      } catch (error) {
+        console.error('Error getting sessions:', error);
+        res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "Failed to get sessions" }));
+        return true;
+      }
+    }
+  });
+
   // GET /api/chat/sessions/:sessionId - Get specific session
   server.on('request', async (req, res) => {
     if (req.method === "GET" && req.url.startsWith("/api/chat/sessions/") && req.url !== "/api/chat/sessions") {
@@ -892,7 +921,37 @@ export function registerChatRoutes(server, registry, providers, failoverChains, 
         const userId = req.headers['x-user-id'] || `user_${req.socket.remoteAddress}`;
         
         const session = await sessionManager.createSession(userId, {
-          title: body.title || 'New Chat',
+          title: body.name || body.title || 'New Chat',
+          agentId: body.agentId || null,
+          metadata: body.metadata || {}
+        });
+        
+        res.writeHead(201, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ success: true, session }));
+        return true;
+      } catch (error) {
+        console.error('Error creating session:', error);
+        res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "Failed to create session" }));
+        return true;
+      }
+    }
+  });
+
+  // POST /api/sessions - Create new session (without /chat prefix)
+  server.on('request', async (req, res) => {
+    if (req.method === "POST" && req.url === "/api/sessions") {
+      try {
+        // Apply rate limiting
+        if (!applyRateLimit(req, res)) {
+          return true;
+        }
+
+        const body = await readRequestBody(req);
+        const userId = req.headers['x-user-id'] || `user_${req.socket.remoteAddress}`;
+        
+        const session = await sessionManager.createSession(userId, {
+          title: body.name || body.title || 'New Chat',
           agentId: body.agentId || null,
           metadata: body.metadata || {}
         });
