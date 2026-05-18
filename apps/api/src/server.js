@@ -16,7 +16,7 @@ import { applyPreset } from "./presets.js";
 
 const port = Number(process.env.PORT ?? 4000);
 const host = process.env.HOST ?? "0.0.0.0";
-const databasePath = process.env.CLAWFORGE_DB_PATH ?? new URL("../data/clawforge.sqlite", import.meta.url).pathname;
+const databasePath = process.env.ZAZI_DB_PATH ?? process.env.CLAWFORGE_DB_PATH ?? new URL("../data/zazi.sqlite", import.meta.url).pathname;
 const webRoot = fileURLToPath(new URL("../../web/", import.meta.url));
 
 const registry = new AgentRegistry({ databasePath });
@@ -68,11 +68,17 @@ const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 
     if (request.method === "GET" && url.pathname === "/health") {
-      return sendJson(response, 200, { ok: true, service: "clawforge-api" });
+      return sendJson(response, 200, { ok: true, service: "zazi-api" });
     }
 
     if (request.method === "GET" && url.pathname === "/api/agents") {
       return sendJson(response, 200, { agents: registry.listAgents() });
+    }
+
+    if (request.method === "DELETE" && /^\/api\/agents\/[^/]+$/.test(url.pathname)) {
+      const agentId = url.pathname.split("/")[3];
+      const result = registry.deleteAgent(agentId);
+      return sendJson(response, 200, { deleted: result.id });
     }
 
     if (request.method === "GET" && url.pathname === "/api/topology") {
@@ -92,7 +98,7 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/presets") {
       const { builtInPresets } = await import("./presets.js");
-      return sendJson(response, 200, { presets: Object.keys(builtInPresets) });
+      return sendJson(response, 200, { presets: builtInPresets });
     }
 
     if (request.method === "POST" && url.pathname === "/api/agents") {
@@ -156,5 +162,5 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`ClawForge listening on http://${host}:${port}`);
+  console.log(`Zazi listening on http://${host}:${port}`);
 });

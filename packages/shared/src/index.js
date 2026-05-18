@@ -64,35 +64,35 @@ const firstWaveConnectionSpecs = {
   ollama: {
     transport: "local-http",
     requiredEnv: ["OLLAMA_BASE_URL"],
-    baseUrlEnv: "CLAWFORGE_OLLAMA_BASE_URL",
+    baseUrlEnv: "ZAZI_OLLAMA_BASE_URL",
     defaultBaseUrl: "http://127.0.0.1:11434",
     healthStrategy: "http-get:/api/tags"
   },
   "ollama-cloud": {
     transport: "cloud-http",
     requiredEnv: ["OLLAMA_CLOUD_API_KEY"],
-    baseUrlEnv: "CLAWFORGE_OLLAMA_CLOUD_BASE_URL",
+    baseUrlEnv: "ZAZI_OLLAMA_CLOUD_BASE_URL",
     defaultBaseUrl: "https://ollama.com",
     healthStrategy: "auth-http-get:/api/tags"
   },
   "z-ai": {
     transport: "cloud-http",
     requiredEnv: ["ZAI_API_KEY"],
-    baseUrlEnv: "CLAWFORGE_Z_AI_BASE_URL",
+    baseUrlEnv: "ZAZI_Z_AI_BASE_URL",
     defaultBaseUrl: "https://api.z.ai",
     healthStrategy: "auth-http-get:/v1/models"
   },
   anthropic: {
     transport: "cloud-http",
     requiredEnv: ["ANTHROPIC_API_KEY"],
-    baseUrlEnv: "CLAWFORGE_ANTHROPIC_BASE_URL",
+    baseUrlEnv: "ZAZI_ANTHROPIC_BASE_URL",
     defaultBaseUrl: "https://api.anthropic.com",
     healthStrategy: "auth-http-get:/v1/models"
   },
   openai: {
     transport: "cloud-http",
     requiredEnv: ["OPENAI_API_KEY"],
-    baseUrlEnv: "CLAWFORGE_OPENAI_BASE_URL",
+    baseUrlEnv: "ZAZI_OPENAI_BASE_URL",
     defaultBaseUrl: "https://api.openai.com/v1",
     healthStrategy: "auth-http-get:/models"
   }

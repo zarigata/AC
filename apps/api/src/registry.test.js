@@ -104,7 +104,7 @@ test("builds first-wave provider readiness in the required order", () => {
 
 test("marks first-wave provider connection requirements clearly", () => {
   const [ollama, ollamaCloud, zAi, anthropic, openai] = listProviderConnections({
-    CLAWFORGE_OPENAI_BASE_URL: "https://gateway.example/v1"
+    ZAZI_OPENAI_BASE_URL: "https://gateway.example/v1"
   });
 
   assert.equal(ollama.transport, "local-http");

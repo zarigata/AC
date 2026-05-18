@@ -1,9 +1,12 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="retro">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ClawForge // Webcore Control Room</title>
+    <title>Zazi // Multi-Agent Control Room</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
@@ -11,8 +14,9 @@
     <div class="scanlines"></div>
     <div class="shell">
       <header class="os-bar">
-        <div>ClawForge Webcore Control Room</div>
+        <div>Zazi Multi-Agent Control Room</div>
         <div class="os-actions">
+          <button class="theme-toggle" id="theme-toggle" type="button" title="Toggle theme">🕹️ Retro</button>
           <span>_</span>
           <span>[]</span>
           <span>X</span>
@@ -21,15 +25,15 @@
 
       <section class="hero-window window">
         <div class="window-bar">
-          <span>clawforge_boot.exe</span>
+          <span>zazi_boot.exe</span>
           <span>dialup://connected</span>
         </div>
         <div class="hero-body">
           <div>
-            <div class="eyebrow">Webcore Operator Surface</div>
+            <div class="eyebrow">Operator Surface</div>
             <h1>Small-factor multi-agent control with old-web energy.</h1>
             <p class="lede">
-              Built to stay compact and fast like PicoClaw, while scaling to 100 agents, 50 providers,
+              Built to stay compact and fast, while scaling to 100 agents, 50 providers,
               shared skills, and stricter token discipline.
             </p>
             <div class="status-strip">
@@ -85,17 +89,18 @@
 
           <section class="window">
             <div class="window-bar">
-              <span>project_rules.txt</span>
+              <span>communication_log.txt</span>
               <span>F3</span>
             </div>
             <div class="window-body">
-              <h2>Build rules</h2>
-              <ul class="plain-list">
-                <li>Match PicoClaw core surface</li>
-                <li>Protect footprint and startup speed</li>
-                <li>Prefer lean prompts and smaller models</li>
-                <li>Learn from real OpenClaw use cases</li>
-              </ul>
+              <div class="section-label">Messages</div>
+              <h2>Communication Log</h2>
+              <p class="muted" id="comm-agent-label">Loading messages…</p>
+              <div class="comm-terminal" id="comm-log">
+                <div class="skeleton" style="height: 48px;"></div>
+                <div class="skeleton" style="height: 48px;"></div>
+                <div class="skeleton" style="height: 48px;"></div>
+              </div>
             </div>
           </section>
         </aside>
@@ -103,16 +108,16 @@
         <section class="center-column">
           <section class="window">
             <div class="window-bar">
-              <span>agent_graph.html</span>
+              <span>agent_tree.visual</span>
               <span>LIVE</span>
             </div>
             <div class="window-body">
               <div>
                 <div class="section-label">Agents</div>
-                <h2>Current machine graph</h2>
+                <h2>Hierarchy tree</h2>
               </div>
               <p id="error" class="error" hidden></p>
-              <div class="agent-grid" id="agent-grid"></div>
+              <div class="tree-root" id="agent-tree"></div>
             </div>
           </section>
 
@@ -144,6 +149,18 @@
 
               <form class="form-grid" id="agent-form">
                 <label>
+                  Preset
+                  <select name="preset" id="agent-preset">
+                    <option value="custom" selected>Custom</option>
+                    <option value="orchestrator">Orchestrator</option>
+                    <option value="researcher">Researcher</option>
+                    <option value="coder">Coder</option>
+                    <option value="writer">Writer</option>
+                    <option value="designer">Designer</option>
+                  </select>
+                </label>
+
+                <label>
                   Name
                   <input name="name" required minlength="2" maxlength="80" />
                 </label>
@@ -161,6 +178,20 @@
                 <label>
                   Model
                   <input name="model" id="agent-model" value="qwen3" required />
+                </label>
+
+                <label>
+                  Level
+                  <select name="level" id="agent-level">
+                    <option value="orchestrator">orchestrator</option>
+                    <option value="agent" selected>agent</option>
+                    <option value="sub-agent">sub-agent</option>
+                  </select>
+                </label>
+
+                <label>
+                  Max sub-agents
+                  <input name="maxSubAgents" type="number" min="0" max="32" value="5" id="agent-max-sub" />
                 </label>
 
                 <p class="field-note" id="provider-hint">Recommended model will appear when you pick a provider.</p>
@@ -246,6 +277,18 @@
         </aside>
       </main>
     </div>
+
+    <!-- Full conversation modal overlay (hidden by default) -->
+    <div class="comm-full-overlay modal-overlay" id="comm-overlay" hidden>
+      <div class="comm-full-content modal-content">
+        <div class="window-bar">
+          <span id="comm-overlay-title">conversation.log</span>
+          <button class="modal-close" id="comm-overlay-close" type="button">×</button>
+        </div>
+        <div class="window-body" id="comm-overlay-body"></div>
+      </div>
+    </div>
+
     <script type="module" src="/src/app.js"></script>
   </body>
 </html>

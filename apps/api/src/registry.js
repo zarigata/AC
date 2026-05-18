@@ -188,6 +188,15 @@ export class AgentRegistry {
     return agent;
   }
 
+  deleteAgent(id) {
+    const agent = this.db.prepare("SELECT id FROM agents WHERE id = ?").get(id);
+    if (!agent) {
+      throw new Error("Agent not found.");
+    }
+    this.db.prepare("DELETE FROM agents WHERE id = ?").run(id);
+    return { id };
+  }
+
   listLinks() {
     return this.db
       .prepare("SELECT * FROM agent_links ORDER BY createdAt ASC")

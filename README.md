@@ -1,123 +1,145 @@
-# ClawForge
+# Zazi ⚔️ Your private AI army, one machine.
 
-ClawForge is a local-first multi-agent platform being built to beat the current open agent assistants on three fronts at once:
-
-- more capable multi-agent orchestration on a single machine
-- broader model and tool compatibility
-- a cleaner, faster, smaller-feeling product surface
-
-The project goal is not just to be feature-rich. It is to match everything PicoClaw can do in a similarly small, fast, portable package while expanding far beyond it in provider support, agent count, skill sharing, compatibility layers, and operational control.
-
-## Product mission
-
-ClawForge is designed as an OpenClaw and PicoClaw competitor with these non-negotiables:
-
-1. Run up to 100 agents per machine.
-2. Keep each agent isolated by default, with explicit opt-in communication rules.
-3. Stay fast, lean, and conservative with resources.
-4. Support many LLM backends, with Ollama, Ollama Cloud, and Z.AI prioritized first.
-5. Import or adapt OpenClaw-style skills where feasible.
-6. Grow into an internal skill store where people can publish, install, share, rate, and version skills.
-7. Preserve a simpler operator experience than OpenClaw while retaining the polish users like in PicoClaw.
-
-## PicoClaw parity requirements
-
-The plan now explicitly assumes that ClawForge must eventually do everything PicoClaw does, while preserving the same spirit of small-factor performance:
-
-- self-contained, low-overhead operation
-- fast startup and low idle footprint
-- multi-channel connectivity
-- strong settings and model management
-- clean Web UI
-- portable deployment story
-
-PicoClaw currently presents itself around very small hardware, low memory use, very fast boot, and a compact runtime footprint. ClawForge should not drift into a heavy architecture that abandons those advantages.
-
-## Token discipline
-
-ClawForge should be deliberately conservative with token generation and model usage. That means:
-
-- prefer smaller models for routing, classification, filtering, and health checks
-- reserve expensive models for high-value reasoning only
-- support fallback chains and hard caps
-- minimize prompt bloat
-- make model/tool routing visible and controllable
-- keep autonomous runs efficient and bounded
-
-The right product here is not “more tokens everywhere.” It is “better outcomes per token.”
-
-## Toolkit and research posture
-
-ClawForge should learn from real OpenClaw usage, not just abstract feature lists.
-
-- Use the `awesome-openclaw-usecases` collection as a recurring source of practical workflows and inspiration.
-- Prefer features that unlock verified daily-life or operator value over novelty.
-- Treat community skills, plugins, and shared automation as useful but potentially unsafe by default.
-
-## What exists right now
-
-- dependency-light Node codebase
-- SQLite-backed local agent registry
-- browser control UI served directly by the API
-- agent creation and agent-to-agent link rules
-- seeded machine topology
-- provider catalog with 50 target backends
-- first provider roadmap with ordered implementation priorities
-- tests covering agent capacity, self-link rejection, and provider catalog coverage
-
-## Current provider priority
-
-These providers come first before the rest of the 50-provider matrix:
-
-1. Ollama
-2. Ollama Cloud
-3. Z.AI
-4. Anthropic
-5. OpenAI
-
-After those five, the remaining catalog can be implemented in waves.
-
-## Current architecture snapshot
-
-- `apps/api`: local control API, agent registry, provider metadata endpoints
-- `apps/web`: control UI and themed operator surface
-- `packages/shared`: shared validation, provider catalog, and contract helpers
-- `docs/architecture.md`: architecture direction
-- `docs/provider-plan.md`: provider rollout and coding plan
-
-## Quick start
-
-```bash
-npm run dev
+```text
+   ███████╗ █████╗ ███████╗██╗    
+   ╚══███╔╝██╔══██╗╚══███╔╝██║    
+     ███╔╝ ███████║  ███╔╝ ██║    
+    ███╔╝  ██╔══██║ ███╔╝  ██║    
+   ███████╗██║  ██║███████╗███████╗
+   ╚══════╝╚═╝  ╚═╝╚══════╝╚══════╝
+   Your private AI army, one machine.
 ```
 
-The API and UI are served from `http://localhost:4000`.
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-22+-blue.svg)](https://nodejs.org)
+[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](Dockerfile)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](#)
 
-## Current API endpoints
+> **"What if you could run 100 AI agents on a Raspberry Pi and they all talked to each other?"**
 
-- `GET /health`
-- `GET /api/topology`
-- `GET /api/agents`
-- `POST /api/agents`
-- `POST /api/links`
-- `GET /api/providers`
+---
 
-## Roadmap themes
+## 🚀 One-line install
 
-1. Provider abstraction and live adapters
-2. Multi-agent orchestration and permissions
-3. Internal skill store foundations
-4. OpenClaw skill compatibility
-5. Run history, observability, and safety controls
-6. Tight footprint and speed work so the system stays PicoClaw-competitive in feel
+```bash
+curl -sSL https://getzazi.dev | bash
+```
 
-## Design direction
+> No Docker? No worries. We'll clone, install, and even write a systemd service for you.
 
-The current UI direction uses a Webcore-inspired presentation layer:
+## 🤔 What is Zazi?
 
-- old-web and XP-era interface language
-- surreal early-internet atmosphere
-- browser-window framing, scanlines, gradients, badges, and pop-up energy
-- a nostalgic presentation wrapped around a serious control surface
+Zazi is a **local-first multi-agent platform** — like running your own private AI company on a single machine.
 
-That aesthetic is decorative only at the edges. The core requirement remains an operator-friendly product that is fast to scan and safe to use.
+We organize agents into a **3-level hierarchy**:
+
+- 🧠 **Orchestrators** — the CEOs. They delegate tasks, watch progress, and coordinate.
+- ⚙️ **Agents** — the specialists. Coders, writers, researchers, each with a purpose.
+- 🔧 **Sub-agents** — the workers. Scrapers, parsers, fetchers. The muscle.
+
+Orchestrators talk to Agents. Agents talk to Sub-agents. Want cross-team communication? Create a **link**. Want isolation? Set an agent to `isolated`. It's your army — you set the rules.
+
+## ⚔️ Why Zazi?
+
+| Feature | Zazi | OpenClaw | PicoClaw |
+|---------|------|----------|----------|
+| Agents per machine | **100** | ~12 | ~5 |
+| Local-first | ✅ | ⚠️ | ✅ |
+| Zero dependencies | ✅ | ❌ | ❌ |
+| 50 LLM backends | ✅ | ~20 | ~3 |
+| Agent hierarchy | ✅ | ❌ | ❌ |
+| Peer messaging | ✅ | ❌ | ❌ |
+| Skill store (planned) | ✅ | ✅ | ❌ |
+| Retro UI | ✅ | ❌ | ❌ |
+| Token conservative | ✅ | ~ | ~ |
+
+## ⚡ Quick start
+
+```bash
+git clone https://github.com/zarigata/AC.git zazi
+cd zazi
+npm start
+```
+
+Open `http://localhost:4000` — your control room is live.
+
+### Docker route
+
+```bash
+docker-compose up -d
+```
+
+Done. Port 4000. Volume `zazi-data:/data`. Zero config.
+
+## 🎨 Agent flavors
+
+Every agent gets a personality. Built-in presets include:
+
+| Preset | Role | Vibe |
+|--------|------|------|
+| 🤖 Orchestrator | Delegates tasks, monitors runs | "I'll handle the strategy." |
+| 🔭 Researcher | Collects docs, compares backends | "Let me pull the data." |
+| 💻 Coder | Writes code, reviews PRs | "Ship it." |
+| ✍️ Writer | Drafts, edits, summarizes | "Words are my weapon." |
+| 🎨 Designer | UX, wireframes, pixel perfection | "Make it pop." |
+
+> Screenshot placeholders for the control room UI coming soon!
+
+## 🏗️ Architecture
+
+```text
+┌─────────────────────────────────────────────┐
+│         Zazi Multi-Agent Platform           │
+│  ┌─────────────┐  ┌──────────────────────┐  │
+│  │  apps/web   │  │      apps/api        │  │
+│  │  Retro UI   │──│  HTTP + Registry     │  │
+│  │  Control    │  │  SQLite (built-in)   │  │
+│  └─────────────┘  └──────────────────────┘  │
+│         │                   │               │
+│         └─────────┬─────────┘               │
+│                   │                         │
+│  ┌────────────────┴────────────────────┐   │
+│  │     packages/shared                  │   │
+│  │  Validation · Provider Catalog       │   │
+│  │  50 Backends · Contracts             │   │
+│  └──────────────────────────────────────┘   │
+└─────────────────────────────────────────────┘
+```
+
+## 🗺️ Roadmap
+
+- [x] 100-agent SQLite registry
+- [x] 3-level hierarchy (orchestrator → agent → sub-agent)
+- [x] Agent links (observe / message / delegate)
+- [x] Peer messaging with isolation modes
+- [x] 50-provider catalog
+- [x] Retro Webcore UI with theme toggle
+- [x] Docker + docker-compose + install script
+- [ ] Live provider adapters (Ollama, Anthropic, OpenAI, Z.AI)
+- [ ] Agent execution engine
+- [ ] Internal skill store (publish · install · rate · version)
+- [ ] OpenClaw skill compatibility layer
+- [ ] Run history, observability, safety controls
+- [ ] Multi-machine federation
+
+## 🎮 Contributing
+
+Zazi is an **open garage project**. We welcome PRs, ideas, and terrible puns.
+
+1. Fork it
+2. `git checkout dev`
+3. Make it awesome
+4. `npm test`
+5. Open a PR
+
+> Code style: keep it lean, keep it fun, keep it working. No external runtime dependencies.
+
+---
+
+## 📜 License
+
+MIT. Do what you want. Run it on a toaster. Build your AI empire. Just don't blame us when your orchestrator starts acting like a CEO.
+
+```
+Built with 💜 and a lot of caffeine.
+```
