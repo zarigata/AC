@@ -1,4 +1,5 @@
 export const agentStatusValues = ["idle", "running", "paused", "error"];
+export const agentLevelValues = ["orchestrator", "agent", "sub-agent"];
 export const isolationModeValues = ["isolated", "selective", "mesh"];
 export const agentLinkModeValues = ["observe", "message", "delegate"];
 export const providerStatusValues = ["live-target", "planned", "experimental"];
@@ -156,6 +157,13 @@ const ensureUuid = (value, field) => {
   return value;
 };
 
+const ensureUuidOrNull = (value, field) => {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  return ensureUuid(value, field);
+};
+
 const normalizeOptionalUrl = (value, fallback) => {
   if (typeof value === "string" && value.trim().length > 0) {
     return value.trim().replace(/\/+$/, "");
@@ -188,12 +196,18 @@ export const parseAgent = (input) => ({
   isolationMode: ensureEnum(input.isolationMode, "isolationMode", isolationModeValues),
   maxConcurrentTasks: ensureInteger(input.maxConcurrentTasks, "maxConcurrentTasks", 1, 32),
   peerAccess: ensureBoolean(input.peerAccess, "peerAccess"),
+  level: ensureEnum(input.level, "level", agentLevelValues),
+  parentId: ensureUuidOrNull(input.parentId, "parentId"),
+  maxSubAgents: ensureInteger(input.maxSubAgents, "maxSubAgents", 0, 100),
+  flavor: typeof input.flavor === "string" ? ensureString(input.flavor, "flavor", 1, 40) : null,
   createdAt: ensureString(input.createdAt, "createdAt", 10, 40),
   updatedAt: ensureString(input.updatedAt, "updatedAt", 10, 40)
 });
 
 export const parseCreateAgentInput = (input) => {
   const provider = getProviderById(ensureString(input.provider, "provider", 2, 80));
+  const level = input.level ? ensureEnum(input.level, "level", agentLevelValues) : "agent";
+  const maxSubAgentsDefault = level === "orchestrator" ? 10 : level === "agent" ? 5 : 0;
 
   return {
     name: ensureString(input.name, "name", 2, 80),
@@ -202,7 +216,11 @@ export const parseCreateAgentInput = (input) => {
     model: ensureString(input.model, "model", 2, 120),
     isolationMode: ensureEnum(input.isolationMode, "isolationMode", isolationModeValues),
     maxConcurrentTasks: ensureInteger(input.maxConcurrentTasks, "maxConcurrentTasks", 1, 32),
-    peerAccess: ensureBoolean(input.peerAccess, "peerAccess")
+    peerAccess: ensureBoolean(input.peerAccess, "peerAccess"),
+    level,
+    parentId: ensureUuidOrNull(input.parentId, "parentId"),
+    maxSubAgents: typeof input.maxSubAgents === "number" ? ensureInteger(input.maxSubAgents, "maxSubAgents", 0, 100) : maxSubAgentsDefault,
+    flavor: typeof input.flavor === "string" ? ensureString(input.flavor, "flavor", 1, 40) : null
   };
 };
 

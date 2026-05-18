@@ -12,6 +12,7 @@ import {
 } from "../../../packages/shared/src/index.js";
 
 import { AgentRegistry } from "./registry.js";
+import { applyPreset } from "./presets.js";
 
 const port = Number(process.env.PORT ?? 4000);
 const host = process.env.HOST ?? "0.0.0.0";
@@ -89,8 +90,16 @@ const server = createServer(async (request, response) => {
       });
     }
 
+    if (request.method === "GET" && url.pathname === "/api/presets") {
+      const { builtInPresets } = await import("./presets.js");
+      return sendJson(response, 200, { presets: Object.keys(builtInPresets) });
+    }
+
     if (request.method === "POST" && url.pathname === "/api/agents") {
-      const payload = parseCreateAgentInput(await readRequestBody(request));
+      const body = await readRequestBody(request);
+      const payload = parseCreateAgentInput(
+        body.preset ? applyPreset(body, body.preset) : body
+      );
       const agent = registry.createAgent(payload);
       return sendJson(response, 201, { agent });
     }
@@ -99,6 +108,32 @@ const server = createServer(async (request, response) => {
       const payload = parseCreateLinkInput(await readRequestBody(request));
       const link = registry.createLink(payload);
       return sendJson(response, 201, { link });
+    }
+
+    if (request.method === "GET" && /^\/api\/agents\/[^/]+\/messages$/.test(url.pathname)) {
+      const agentId = url.pathname.split("/")[3];
+      const messages = registry.getMessagesForAgent(agentId);
+      return sendJson(response, 200, { messages });
+    }
+
+    if (request.method === "POST" && /^\/api\/agents\/[^/]+\/messages$/.test(url.pathname)) {
+      const agentId = url.pathname.split("/")[3];
+      const body = await readRequestBody(request);
+      const message = registry.sendMessage({
+        fromAgentId: body.fromAgentId ?? agentId,
+        toAgentId: body.toAgentId,
+        content: body.content,
+        type: body.type ?? "text"
+      });
+      return sendJson(response, 201, { message });
+    }
+
+    if (request.method === "GET" && /^\/api\/agents\/[^/]+\/conversation\/[^/]+$/.test(url.pathname)) {
+      const parts = url.pathname.split("/");
+      const agentId = parts[3];
+      const otherId = parts[5];
+      const messages = registry.getConversation(agentId, otherId);
+      return sendJson(response, 200, { messages });
     }
 
     if (request.method === "GET") {
