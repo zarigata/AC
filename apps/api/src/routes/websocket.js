@@ -7,7 +7,7 @@ const MAX_CONCURRENT_CONNECTIONS = 100; // Default value
 
 import { applyRateLimit } from "../middleware/security.js";
 import { sendToClient, broadcastToSession } from "../middleware/webSocketHandler.js";
-import { getServerState } from "../config/serverConfig.js";
+import { serverState } from "../config/serverConfig.js";
 import { readRequestBody } from "../middleware/requestHandler.js";
 
 export function registerWebSocketRoutes(server, registry, providers, failoverChains, settings) {
@@ -16,13 +16,12 @@ export function registerWebSocketRoutes(server, registry, providers, failoverCha
    * Handle WebSocket chat endpoint upgrade and connection
    */
   const handleWebSocketChat = async (request, response) => {
-    if (request.method !== 'GET' || !request.url?.includes('/ws/chat')) {
-      return false; // Not a WebSocket chat request
+    if (request.method !== 'GET' || !request.url?.includes('/ws')) {
+      return false; // Not a WebSocket request
     }
     
     try {
       // Get the WebSocket server from server state
-      const serverState = getServerState();
       const wsServer = serverState?.websocketServer;
       if (!wsServer) {
         response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
@@ -107,11 +106,14 @@ export function registerWebSocketRoutes(server, registry, providers, failoverCha
    * Handle WebSocket connection status endpoint
    */
   const handleWebSocketStatus = async (request, response) => {
+    console.log('🔍 handleWebSocketStatus called with:', { method: request.method, url: request.url });
     if (request.method !== 'GET' || request.url !== '/api/ws/status') {
+      console.log('🔍 handleWebSocketStatus: URL mismatch, returning false');
       return false;
     }
     
     try {
+      console.log('🔍 handleWebSocketStatus: About to send response');
       // Simple status response for now
       const status = {
         websocket: {
@@ -126,24 +128,28 @@ export function registerWebSocketRoutes(server, registry, providers, failoverCha
         uptime: Math.floor((Date.now() - (global.serverStartTime || Date.now())) / 1000)
       };
       
+      console.log('🔍 handleWebSocketStatus: About to writeHead and end response');
       response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
       response.end(JSON.stringify(status));
+      console.log('🔍 handleWebSocketStatus: Response sent, returning true');
       return true;
       
     } catch (error) {
       console.error('WebSocket status error:', error);
+      console.log('🔍 handleWebSocketStatus: Error caught, trying to send error response');
       response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
       response.end(JSON.stringify({ error: 'Internal server error in status endpoint' }));
+      console.log('🔍 handleWebSocketStatus: Error response sent, returning true');
       return true;
     }
   };
 
   /**
-   * Register WebSocket routes
+   * Main WebSocket route handler
    */
-  server.on('request', async (request, response) => {
-    const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
-
+  const handleWebSocketRoutes = async (request, response) => {
+    console.log('🔍 WebSocket routes handler called for:', request.method, request.url);
+    
     // Try each handler in order
     const handlers = [
       handleAgentSubscription,
@@ -153,17 +159,34 @@ export function registerWebSocketRoutes(server, registry, providers, failoverCha
 
     for (const handler of handlers) {
       try {
+        console.log('🔍 Trying WebSocket handler:', handler.name || 'anonymous');
         const handled = await handler(request, response);
-        if (handled !== false) return; // Handler processed the request
+        console.log('🔍 WebSocket handler returned:', handled);
+        if (handled !== false) {
+          console.log('🔍 WebSocket handler processed request, returning true');
+          return true; // Handler processed the request
+        }
       } catch (error) {
-        console.error('WebSocket route error:', error);
-        response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
-        response.end(JSON.stringify({ error: "Internal server error" }));
-        return;
+        console.error('🔍 WebSocket route error:', error);
+        // Only write error response if headers haven't been sent yet
+        if (!response.headersSent) {
+          try {
+            response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+            response.end(JSON.stringify({ error: "Internal server error", message: error.message }));
+            console.log('🔍 WebSocket error response sent');
+          } catch (writeError) {
+            console.error('🔍 Failed to write WebSocket error response:', writeError);
+          }
+        }
+        console.log('🔍 WebSocket error handler completed, returning true');
+        return true;
       }
     }
 
-    // If no handler matched, let the main server handle it
-    return false;
-  });
+    console.log('🔍 No WebSocket handler matched, returning false');
+    return false; // No handler matched
+  };
+  
+  // Return the main WebSocket handler
+  return handleWebSocketRoutes;
 }

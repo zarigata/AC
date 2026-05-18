@@ -138,10 +138,10 @@ test.describe("Full Integration Test Suite", () => {
 
       assert.equal(response.status, 201);
       const data = await response.json();
-      testAgentId = data.id;
-      assert.ok(data.id);
-      assert.equal(data.name, agentData.name);
-      assert.equal(data.provider, agentData.provider);
+      testAgentId = data.agent.id;
+      assert.ok(data.agent.id);
+      assert.equal(data.agent.name, agentData.name);
+      assert.equal(data.agent.provider, agentData.provider);
     });
 
     test("GET /api/agents should list agents", async () => {
@@ -149,11 +149,11 @@ test.describe("Full Integration Test Suite", () => {
 
       assert.equal(response.status, 200);
       const data = await response.json();
-      assert.ok(Array.isArray(data));
-      assert.ok(data.length > 0);
+      assert.ok(Array.isArray(data.agents));
+      assert.ok(data.agents.length > 0);
       
       // Find our test agent
-      const testAgent = data.find(agent => agent.id === testAgentId);
+      const testAgent = data.agents.find(agent => agent.id === testAgentId);
       assert.ok(testAgent);
       assert.equal(testAgent.name, "Test Integration Agent");
     });
@@ -163,8 +163,8 @@ test.describe("Full Integration Test Suite", () => {
 
       assert.equal(response.status, 200);
       const data = await response.json();
-      assert.equal(data.id, testAgentId);
-      assert.equal(data.name, "Test Integration Agent");
+      assert.equal(data.agent.id, testAgentId);
+      assert.equal(data.agent.name, "Test Integration Agent");
     });
 
     test("PATCH /api/agents/:id should update agent", async () => {
@@ -180,8 +180,8 @@ test.describe("Full Integration Test Suite", () => {
 
       assert.equal(response.status, 200);
       const data = await response.json();
-      assert.equal(data.name, "Updated Test Agent");
-      assert.equal(data.maxConcurrentTasks, 5);
+      assert.equal(data.agent.name, "Updated Test Agent");
+      assert.equal(data.agent.maxConcurrentTasks, 5);
     });
 
     test("DELETE /api/agents/:id should remove agent", async () => {
@@ -193,7 +193,7 @@ test.describe("Full Integration Test Suite", () => {
       
       // Verify agent is deleted
       const getResponse = await fetch(`${BASE_URL}/api/agents/${testAgentId}`, {
-        headers: { "Authorization": `Bearer ${TEST_API_KEY}` }
+        headers: { "X-API-Key": TEST_API_KEY }
       });
       assert.equal(getResponse.status, 404);
     });
@@ -206,20 +206,16 @@ test.describe("Full Integration Test Suite", () => {
         agentId: (await getFirstAgentId()).id
       };
 
-      const response = await fetch(`${BASE_URL}/api/sessions`, {
+      const response = await fetchWithAuth(`/api/chat/sessions`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${TEST_API_KEY}`
-        },
-        body: JSON.stringify(sessionData)
+        body: sessionData
       });
 
       assert.equal(response.status, 201);
       const data = await response.json();
-      testSessionId = data.id;
-      assert.ok(data.id);
-      assert.equal(data.name, sessionData.name);
+      testSessionId = data.session.id;
+      assert.ok(data.session.id);
+      assert.equal(data.session.title, sessionData.name);
     });
 
     test("POST /api/chat should stream chat response", async () => {
@@ -384,5 +380,5 @@ test.describe("Full Integration Test Suite", () => {
 async function getFirstAgentId() {
   const response = await fetchWithAuth(`/api/agents`);
   const data = await response.json();
-  return data[0];
+  return data.agents[0];
 }

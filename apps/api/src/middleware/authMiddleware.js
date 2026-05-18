@@ -471,3 +471,6 @@ export const authHelpers = {
 
 // Export default for common usage
 export default createAuthMiddleware;
+
+// Export named export for route compatibility
+export { createAuthMiddleware };

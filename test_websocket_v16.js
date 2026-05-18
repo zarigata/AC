@@ -8,7 +8,8 @@
 import WebSocket from 'isomorphic-ws';
 
 const SERVER_URL = 'ws://localhost:4000/ws';
-const API_KEY = process.env.WEBSOCKET_API_KEY || 'test-key-for-development';
+const WEBSOCKET_API_KEY = process.env.WEBSOCKET_API_KEY || 'test-key-for-development';
+const REST_API_KEY = 'zsiistant-test-api-key-12345';
 
 console.log('🧪 Starting WebSocket V16 Test Suite...');
 
@@ -40,7 +41,7 @@ async function runTest(testName, testFn) {
 // Helper function to create a WebSocket connection with authentication
 async function createAuthenticatedConnection() {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`${SERVER_URL}?auth=${encodeURIComponent(API_KEY)}`);
+    const ws = new WebSocket(`${SERVER_URL}?auth=${encodeURIComponent(WEBSOCKET_API_KEY)}`);
     
     const timeout = setTimeout(() => {
       ws.terminate();
@@ -161,12 +162,13 @@ async function testChatMessageFlow() {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-API-Key': API_KEY
+      'X-API-Key': REST_API_KEY
     },
     body: JSON.stringify({
       name: 'Test Agent for WebSocket',
       model: 'qwen3:1.7b',
-      systemPrompt: 'You are a helpful test assistant.'
+      purpose: 'testing agent for websocket chat functionality',
+      provider: 'ollama'
     })
   });
   
@@ -182,7 +184,7 @@ async function testChatMessageFlow() {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-API-Key': API_KEY
+      'X-API-Key': REST_API_KEY
     },
     body: JSON.stringify({
       title: 'WebSocket Test Session'
@@ -292,7 +294,7 @@ async function testErrorHandling() {
 async function testWebSocketStatusEndpoint() {
   const response = await fetch('http://localhost:4000/api/ws/status', {
     headers: {
-      'X-API-Key': API_KEY
+      'X-API-Key': REST_API_KEY
     }
   });
   

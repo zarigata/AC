@@ -225,3 +225,7 @@ export function registerAuthRoutes(server, userManager) {
 }
 
 // Helper functions
+
+
+
+

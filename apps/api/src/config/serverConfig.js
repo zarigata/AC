@@ -55,7 +55,8 @@ export const serverState = {
   totalActiveConnections: 0,
   websocketServer: null,
   server: null,
-  failoverChains: {} // Initialize empty failover chains
+  failoverChains: {}, // Initialize empty failover chains
+  registry: null // Initialize registry reference
 };
 
 /**

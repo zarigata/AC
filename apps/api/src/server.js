@@ -110,6 +110,10 @@ async function main() {
 
     // Set global registry reference for session manager token tracking
     global.registry = registry;
+    
+    // Set server state registry reference for WebSocket handlers
+    serverState.registry = registry;
+    console.log('✅ Registry reference set in server state');
 
     // Initialize enhanced monitoring systems
     console.log("Initializing monitoring systems...");
@@ -210,7 +214,26 @@ async function main() {
     registerTopologyRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     console.log('Registering links routes...');
     registerLinksRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
-    console.log('Skipping WebSocket HTTP routes - handled by upgrade handler only');
+    console.log('🚨 DEBUG: Line before WebSocket registration');
+    console.log('Registering WebSocket routes...');
+    let webSocketRouteHandler;
+    try {
+      webSocketRouteHandler = registerWebSocketRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    } catch (error) {
+      console.error('Error calling registerWebSocketRoutes:', error);
+      console.error('Stack trace:', error.stack);
+    }
+    console.log('WebSocket route handler returned:', typeof webSocketRouteHandler, webSocketRouteHandler ? 'function' : 'null');
+    if (typeof webSocketRouteHandler === 'function') {
+      routeHandlers.push(webSocketRouteHandler);
+      console.log('WebSocket route handler added to routeHandlers array');
+      console.log('Total route handlers after WebSocket:', routeHandlers.length);
+    } else {
+      console.log('WebSocket route handler not added to routeHandlers array');
+      console.log('WebSocket route handler type:', typeof webSocketRouteHandler);
+      console.log('WebSocket route handler value:', webSocketRouteHandler);
+    }
+    console.log('WebSocket routes registered');
     console.log('Registering tool routes...');
     registerToolRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     console.log('Registering job routes...');
@@ -219,6 +242,7 @@ async function main() {
     registerTokenRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     console.log('Registering memory routes...');
     registerMemoryRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    console.log('🚀 ABOUT TO REGISTER WEBSOCKET ROUTES');
     // Register webhook routes and get the handler function
     const webhookHandler = registerWebhookRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     if (typeof webhookHandler === 'function') {
@@ -233,7 +257,7 @@ async function main() {
     console.log('Registering task routes...');
     registerTaskRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
 
-    console.log(`Registered ${routeHandlers.length + 1} route handler(s)`);
+    console.log(`Registered ${routeHandlers.length} route handler(s)`);
 
     // Initialize tool system
     console.log("Initializing tool system...");

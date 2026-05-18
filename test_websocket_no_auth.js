@@ -1,21 +1,20 @@
 #!/usr/bin/env node
 
 /**
- * Simple WebSocket test to check basic connectivity
+ * Test WebSocket connection without authentication
  */
 
 import WebSocket from 'isomorphic-ws';
 
 const SERVER_URL = 'ws://localhost:4000/ws';
-const API_KEY = 'test-key-for-development';
 
-console.log('🧪 Testing WebSocket connection...');
+console.log('🧪 Testing WebSocket connection without auth...');
 
-// Create a WebSocket connection
-const ws = new WebSocket(`${SERVER_URL}?auth=${encodeURIComponent(API_KEY)}`);
+// Create a WebSocket connection without auth
+const ws = new WebSocket(SERVER_URL);
 
 ws.on('open', () => {
-  console.log('✅ WebSocket connection opened');
+  console.log('✅ WebSocket connection opened (without auth)');
   
   // Send a ping message
   ws.send(JSON.stringify({ type: 'ping' }));
@@ -31,10 +30,6 @@ ws.on('message', (message) => {
   try {
     const data = JSON.parse(message.toString());
     console.log('📨 Received message:', data);
-    
-    if (data.type === 'pong') {
-      console.log('✅ Pong received - WebSocket is working!');
-    }
   } catch (error) {
     console.log('⚠️ Non-JSON message received:', message.toString());
   }

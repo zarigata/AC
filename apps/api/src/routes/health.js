@@ -80,7 +80,7 @@ export function registerHealthRoutes(server, registry, providers, failoverChains
               model: 'qwen3:1.7b',
               isolationMode: 'isolated',
               maxConcurrentTasks: 1,
-              peerAccess: {}
+              peerAccess: false
             });
             if (test) {
               registry.deleteAgent('test-health-check');
@@ -115,8 +115,25 @@ export function registerHealthRoutes(server, registry, providers, failoverChains
         const overallHealthy = databaseStatus === 'healthy' && 
                               Object.values(providerHealth).some(p => p.ok === true);
 
+        // Get registry info
+        let registryInfo = {
+          totalAgents: 0,
+          healthyAgents: 0,
+          unhealthyAgents: 0
+        };
+        
+        try {
+          const agents = registry.listAgents();
+          registryInfo.totalAgents = agents.length;
+          registryInfo.healthyAgents = agents.filter(a => a.status === 'idle' || a.status === 'running').length;
+          registryInfo.unhealthyAgents = agents.filter(a => a.status === 'error' || a.status === 'failed').length;
+        } catch (err) {
+          console.error('Registry health check failed:', err.message);
+        }
+        
         const healthResponse = {
           ok: overallHealthy,
+          status: overallHealthy ? 'healthy' : 'unhealthy',
           service: "zsiistant-api",
           version: VERSION,
           uptime: systemInfo.uptime,
@@ -127,6 +144,7 @@ export function registerHealthRoutes(server, registry, providers, failoverChains
             path: databasePath
           },
           providers: providerHealth,
+          registry: registryInfo,
           summary: {
             totalProviders: Object.keys(providers).length,
             healthyProviders: Object.values(providerHealth).filter(p => p.ok).length,
