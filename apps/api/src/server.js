@@ -27,6 +27,7 @@ import { registerDocumentationRoutes } from "./routes/documentation.js";
 import { registerMonitoringRoutes } from "./routes/monitoring.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerWebSocketRoutes } from "./routes/websocket.js";
+import { registerSkillRoutes } from "./routes/skills.js";
 import { UserManager } from "./database/userManager.js";
 import { webhookManager } from "./adapters/webhookManager.js";
 import { globalErrorHandler, notFoundHandler, requestLogger } from "./middleware/errorMiddleware.js";
@@ -259,6 +260,8 @@ async function main() {
     registerMonitoringRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
     console.log('Registering task routes...');
     registerTaskRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
+    console.log('Registering skill routes...');
+    registerSkillRoutes(routeServer, registry, providers, serverState.failoverChains || {}, settings);
 
     console.log(`Registered ${routeHandlers.length} route handler(s)`);
 
