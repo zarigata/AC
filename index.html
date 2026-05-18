@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zazi — Your private AI army, one machine.</title>
+  <meta name="description" content="Zazi is a local-first multi-agent platform. Run up to 100 agents on one machine with retro energy." />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+</head>
+<body data-theme="retro">
+  <div class="scanlines"></div>
+  <div class="glare"></div>
+
+  <nav class="top-bar">
+    <div class="brand">
+      <span class="logo">ZA</span>
+      <span class="brand-text">Zazi</span>
+    </div>
+    <div class="nav-links">
+      <a href="#install">Install</a>
+      <a href="https://github.com/zarigata/AC" target="_blank">GitHub</a>
+      <a href="#docs">Docs</a>
+    </div>
+    <button class="theme-toggle" id="theme-toggle" type="button" title="Toggle theme">🕹️ Retro</button>
+  </nav>
+
+  <header class="hero">
+    <div class="hero-content">
+      <pre class="ascii-logo" aria-label="Zazi ASCII logo">
+   _______  ___  _______  __
+  / __/ _ \/ _ \/ __/ _ \/ /
+ / _// , _/ __/\ \/ // / /__
+/___/_/|_/_/ /___/____/____/
+      </pre>
+      <h1 class="hero-title"><span class="typewriter" data-text="Your private AI army, one machine."></span><span class="cursor">_</span></h1>
+      <p class="hero-lede">
+        Zazi is a <strong>local-first multi-agent platform</strong> that runs up to
+        <strong>100 agents</strong> on a single machine. No cloud rent. No lock-in.
+        Just you, a retro control room, and an army of AI agents.
+      </p>
+      <div class="hero-cta">
+        <code class="install-snippet">curl -sSL https://getzazi.dev | bash</code>
+        <a href="#install" class="btn btn-primary">Get Zazi →</a>
+        <a href="https://github.com/zarigata/AC" class="btn btn-ghost">View on GitHub</a>
+      </div>
+    </div>
+    <div class="hero-glow"></div>
+  </header>
+
+  <main>
+    <section class="features">
+      <div class="container">
+        <h2 class="section-title">Built different</h2>
+        <div class="cards">
+          <article class="card">
+            <div class="card-icon">🕹️</div>
+            <h3>100 Agents</h3>
+            <p>Run a full platoon on one box. Orchestrator → Agent → Sub-agent hierarchy built in.</p>
+          </article>
+          <article class="card">
+            <div class="card-icon">🔗</div>
+            <h3>Link &amp; Message</h3>
+            <p>Connect agents with deliberate links. Isolated, selective, or mesh modes. You set the rules.</p>
+          </article>
+          <article class="card">
+            <div class="card-icon">🎨</div>
+            <h3>Retro UI</h3>
+            <p>Webcore energy meets modern control panel. Scanlines, window chrome, and a theme toggle.</p>
+          </article>
+          <article class="card">
+            <div class="card-icon">⚡</div>
+            <h3>50 Providers</h3>
+            <p>Ollama, Anthropic, OpenAI, Z.AI and 46 more in the catalog. Bring your own keys.</p>
+          </article>
+          <article class="card">
+            <div class="card-icon">🧱</div>
+            <h3>Zero Deps</h3>
+            <p>Node 22 + built-in SQLite. No npm bloat. No Docker required (but we ship it anyway).</p>
+          </article>
+          <article class="card">
+            <div class="card-icon">🛡️</div>
+            <h3>Token Discipline</h3>
+            <p>Prefer small models for routing. Reserve expensive models for high-value reasoning.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="screenshots">
+      <div class="container">
+        <h2 class="section-title">Control room</h2>
+        <p class="section-subtitle">A nostalgic presentation wrapped around a serious control surface.</p>
+        <div class="screenshot-grid">
+          <div class="screenshot">
+            <div class="placeholder">
+              <span>Hierarchy Tree</span>
+              <small>Visual agent chain with levels and links</small>
+            </div>
+          </div>
+          <div class="screenshot">
+            <div class="placeholder">
+              <span>Agent Creator</span>
+              <small>Pick a flavor, provider, and isolation mode</small>
+            </div>
+          </div>
+          <div class="screenshot">
+            <div class="placeholder">
+              <span>Communication Log</span>
+              <small>Peer-to-peer messaging between linked agents</small>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="install" id="install">
+      <div class="container">
+        <h2 class="section-title">Install in seconds</h2>
+        <div class="install-methods">
+          <div class="method">
+            <h3>🚀 One-liner</h3>
+            <pre><code>curl -sSL https://getzazi.dev | bash</code></pre>
+            <p>Detects Docker, falls back to bare-metal, writes a systemd service. You’re done.</p>
+          </div>
+          <div class="method">
+            <h3>🐳 Docker Compose</h3>
+            <pre><code>git clone https://github.com/zarigata/AC.git zazi
+cd zazi
+docker-compose up -d</code></pre>
+            <p>Port 4000. Named volume <code>zazi-data:/data</code>. Restart unless-stopped.</p>
+          </div>
+          <div class="method">
+            <h3>📦 Bare Metal</h3>
+            <pre><code>git clone https://github.com/zarigata/AC.git zazi
+cd zazi
+npm install
+npm start</code></pre>
+            <p>Node 22+ required. No other dependencies. Open <code>http://localhost:4000</code>.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="cta">
+      <div class="container">
+        <h2>Your army awaits.</h2>
+        <p>Fork it. Break it. Build something weird. We can't wait to see what you deploy.</p>
+        <a href="https://github.com/zarigata/AC" class="btn btn-primary">Star on GitHub ⭐</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-brand">
+        <span class="logo">ZA</span>
+        <span>Zazi</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/zarigata/AC">GitHub</a>
+        <a href="https://github.com/zarigata/AC/issues">Issues</a>
+        <a href="#install">Install</a>
+      </div>
+      <p class="footer-copy">MIT License · Built with 💜 and a lot of caffeine.</p>
+    </div>
+  </footer>
+
+  <script>
+    // Theme toggle
+    (function(){
+      const btn = document.getElementById('theme-toggle');
+      const root = document.documentElement;
+      const current = localStorage.getItem('zazi-theme') || 'retro';
+      document.body.setAttribute('data-theme', current);
+      btn.textContent = current === 'retro' ? '🕹️ Retro' : '🖥️ Modern';
+      btn.addEventListener('click', () => {
+        const next = document.body.getAttribute('data-theme') === 'retro' ? 'modern' : 'retro';
+        document.body.setAttribute('data-theme', next);
+        localStorage.setItem('zazi-theme', next);
+        btn.textContent = next === 'retro' ? '🕹️ Retro' : '🖥️ Modern';
+      });
+    })();
+
+    // Typewriter effect
+    (function(){
+      const el = document.querySelector('.typewriter');
+      if(!el) return;
+      const text = el.getAttribute('data-text') || '';
+      let i = 0;
+      el.textContent = '';
+      function tick(){
+        if(i < text.length){
+          el.textContent += text.charAt(i);
+          i++;
+          setTimeout(tick, 40 + Math.random()*40);
+        }
+      }
+      setTimeout(tick, 600);
+    })();
+  </script>
+</body>
+</html>
