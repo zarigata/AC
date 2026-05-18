@@ -321,50 +321,40 @@ export function registerAgentRoutes(server, registry, providers, failoverChains,
         return true; // Rate limit exceeded, response already sent
       }
       
-      const body = await readRequestBody(request);
+      let body;
+      try {
+        body = await readRequestBody(request);
+        console.log('DEBUG: readRequestBody completed successfully, body type:', typeof body, 'body value:', body);
+      } catch (readError) {
+        console.log('DEBUG: readRequestBody failed:', readError.message);
+        return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
+               response.end(JSON.stringify({ error: "Invalid JSON format" }));
+      }
       console.log('DEBUG: Received request body:', body);
       
-      // Handle both string and object responses from readRequestBody
-      let parsedBody;
+      // readRequestBody already parsed JSON and validated it
       if (body === null) {
         console.log('DEBUG: Empty request body');
         return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
                response.end(JSON.stringify({ error: "Empty request body" }));
       }
-      if (typeof body === 'string') {
-        try {
-          // Enhanced security: Use safer JSON parsing with prototype protection
-          parsedBody = JSON.parse(body, (key, value) => {
-            // Filter out prototype pollution attempts
-            if (key === '__proto__' || key === 'constructor' || key === 'prototype' ||
-                key === '__defineGetter__' || key === '__defineSetter__' || 
-                key === '__lookupGetter__' || key === '__lookupSetter__') {
-              return undefined;
-            }
-            return value;
-          });
-          console.log('DEBUG: Parsed string body:', parsedBody);
-        } catch (jsonErr) {
-          console.log('DEBUG: JSON parse error:', jsonErr.message);
-          return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
-                 response.end(JSON.stringify({ error: "Invalid JSON format" }));
-        }
-      } else if (body !== null && typeof body === 'object') {
-        // Enhanced security: Check for prototype pollution in object
-        const suspiciousProps = ['__proto__', 'constructor', 'prototype', '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__'];
-        for (const prop of suspiciousProps) {
-          if (Object.prototype.hasOwnProperty.call(body, prop)) {
-            return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
-                   response.end(JSON.stringify({ error: "Invalid request body: contains suspicious properties" }));
-          }
-        }
-        parsedBody = body;
-        console.log('DEBUG: Received object body:', parsedBody);
-      } else {
+      
+      if (typeof body !== 'object' || body === null) {
         console.log('DEBUG: Invalid request body format');
         return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
-               response.end(JSON.stringify({ error: "Invalid request body" }));
+               response.end(JSON.stringify({ error: "Invalid request body format" }));
       }
+      
+      // Enhanced security: Check for prototype pollution in object
+      const suspiciousProps = ['__proto__', 'constructor', 'prototype', '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__'];
+      for (const prop of suspiciousProps) {
+        if (Object.prototype.hasOwnProperty.call(body, prop)) {
+          return response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" }), 
+                 response.end(JSON.stringify({ error: "Invalid request body: contains suspicious properties" }));
+        }
+      }
+      
+      let parsedBody = body;
       
       if (!parsedBody || typeof parsedBody !== 'object') {
         console.log('DEBUG: Parsed body is not an object');

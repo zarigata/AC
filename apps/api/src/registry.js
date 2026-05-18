@@ -935,13 +935,13 @@ export class AgentRegistry {
       const parsed = parseCreateLinkInput(input);
 
       // Prevent self-links
-      if (parsed.sourceAgentId === parsed.targetAgentId) {
+      if (parsed.sourceId === parsed.targetId) {
         throw new Error("An agent cannot create a link to itself.");
       }
 
       // Check if both agents exist
       const agentIds = new Set(this.listAgents().map((agent) => agent.id));
-      if (!agentIds.has(parsed.sourceAgentId) || !agentIds.has(parsed.targetAgentId)) {
+      if (!agentIds.has(parsed.sourceId) || !agentIds.has(parsed.targetId)) {
         throw new Error("Both agents must exist before creating a link.");
       }
 
@@ -954,7 +954,7 @@ export class AgentRegistry {
         `
       );
 
-      const result = insertStmt.run(parsed.sourceAgentId, parsed.targetAgentId, parsed.mode, createdAt);
+      const result = insertStmt.run(parsed.sourceId, parsed.targetId, parsed.mode, createdAt);
 
       if (result.changes === 0) {
         throw new Error('Failed to create link');
