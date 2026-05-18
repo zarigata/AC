@@ -314,11 +314,11 @@ export class HealthMonitor {
         throw new Error('Ollama provider not available');
       }
       
-      // Test basic connectivity with a simple model list
-      const models = await ollama.listModels();
+      // Test basic connectivity with health check
+      const health = await ollama.health();
       
-      if (!models || models.length === 0) {
-        throw new Error('No models available');
+      if (!health || !health.ok || (health.models && health.models.length === 0)) {
+        throw new Error('Provider health check failed');
       }
       
       return true;
@@ -341,11 +341,11 @@ export class HealthMonitor {
         throw new Error('OpenAI provider not available');
       }
       
-      // Test basic connectivity with a simple model list
-      const models = await openai.listModels();
+      // Test basic connectivity with health check
+      const health = await openai.health();
       
-      // OpenAI might not return models in some configurations, so just test connection
-      return models !== undefined;
+      // OpenAI health check should return success status
+      return health && health.ok;
       
     } catch (error) {
       console.error('OpenAI health check failed:', error.message);
